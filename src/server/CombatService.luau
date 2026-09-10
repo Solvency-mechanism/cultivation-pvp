@@ -40,6 +40,7 @@ local constructs: { Construct } = {}
 local dying: { [number]: boolean } = {}
 local lastRequestAt: { [number]: number } = {}
 
+local techniqueFiredRemote: RemoteEvent? = nil
 local constructCounter = 0
 local constructFolder: Folder? = nil
 
@@ -110,6 +111,32 @@ local function regionOf(player: Player): string
 	end
 	local node = NodeService.nodeAt(root.Position)
 	return if node then node.region else "open"
+end
+
+--[[ Tell every client that a technique resolved, so they can draw it.
+
+	Presentation only. Nothing here decides an outcome -- the damage is already
+	applied by the time this fires -- so a client that ignores or fakes it changes
+	nothing but its own screen. ]]
+local function broadcastVfx(
+	caster: Player,
+	techId: string,
+	origin: Vector3,
+	target: Vector3?,
+	hit: boolean
+)
+	if not techniqueFiredRemote then
+		return
+	end
+	local tech = Config.Techniques[techId]
+	techniqueFiredRemote:FireAllClients({
+		techId = techId,
+		kind = tech.kind,
+		casterId = caster.UserId,
+		origin = origin,
+		target = target,
+		hit = hit,
+	})
 end
 
 local function publish(player: Player)
@@ -291,13 +318,17 @@ local function resolveStriker(caster: Player, actor: Combat.Actor, techId: strin
 	params.FilterDescendantsInstances = { character }
 
 	local direction = root.CFrame.LookVector * Config.Combat.ranges.striker
-	local hit = Workspace:Raycast(root.Position, direction, params)
-	if not hit then
-		return
-	end
+	local origin = root.Position
+	local hit = Workspace:Raycast(origin, direction, params)
+	local landing = if hit then hit.Position else origin + direction
 
-	local target = playerFromInstance(hit.Instance)
-	if not target or target == caster then
+	local target = if hit then playerFromInstance(hit.Instance) else nil
+	local struck = target ~= nil and target ~= caster
+	-- Broadcast before resolving, so a miss still draws. A shot that shows
+	-- nothing when it misses reads as a broken button.
+	broadcastVfx(caster, techId, origin, landing, struck)
+
+	if not struck or not target then
 		return
 	end
 
@@ -319,6 +350,8 @@ local function resolveRuler(caster: Player, actor: Combat.Actor, techId: string,
 	-- Region is read once for the whole cast, so a Ruler technique scales by
 	-- where the caster stands rather than where each victim happens to be.
 	local raw = Combat.outgoingDamage(Config, actor, techId, powerOf(caster), regionOf(caster), now)
+
+	broadcastVfx(caster, techId, root.Position, nil, false)
 
 	local seen: { [number]: boolean } = {}
 	local parts = Workspace:GetPartBoundsInRadius(root.Position, Config.Combat.ranges.ruler, params)
@@ -348,15 +381,20 @@ local function resolveEffect(caster: Player, actor: Combat.Actor, techId: string
 		resolveRuler(caster, actor, techId, now)
 	elseif tech.kind == "enforcer" then
 		-- Self-only. Combat.use already applied the buff.
+		local root = rootOf(caster)
+		if root then
+			broadcastVfx(caster, techId, root.Position, nil, true)
+		end
 		publish(caster)
 	elseif tech.kind == "forger" then
+		local root = rootOf(caster)
+		if root then
+			broadcastVfx(caster, techId, root.Position, nil, true)
+		end
 		if SELF_BUFF_FORGERS[techId] then
 			publish(caster)
-		else
-			local root = rootOf(caster)
-			if root then
-				spawnConstruct(caster, actor, techId, root.Position, now)
-			end
+		elseif root then
+			spawnConstruct(caster, actor, techId, root.Position, now)
 		end
 	end
 end
@@ -495,6 +533,10 @@ function CombatService.start()
 	Players.RespawnTime = Config.Combat.respawnSeconds
 
 	local remotes = ReplicatedStorage:WaitForChild("Remotes")
+	local fired = remotes:WaitForChild("TechniqueFired")
+	assert(fired:IsA("RemoteEvent"), "TechniqueFired must be a RemoteEvent")
+	techniqueFiredRemote = fired
+
 	local useTechnique = remotes:WaitForChild("UseTechnique")
 	assert(useTechnique:IsA("RemoteEvent"), "UseTechnique must be a RemoteEvent")
 

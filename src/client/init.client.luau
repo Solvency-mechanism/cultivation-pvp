@@ -12,6 +12,7 @@ local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 
 local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
+local Vfx = require(script.Vfx)
 
 local player = Players.LocalPlayer
 local screen = Instance.new("ScreenGui")
@@ -281,6 +282,11 @@ sensed.OnClientEvent:Connect(function(nodes: { any })
 	refreshSense(latest)
 end)
 notice.OnClientEvent:Connect(showNotice)
+
+local techniqueFired = remotes:WaitForChild("TechniqueFired") :: RemoteEvent
+techniqueFired.OnClientEvent:Connect(function(shot: Vfx.Shot)
+	Vfx.play(shot)
+end)
 
 -- Arrows are relative to the camera, so they have to be redrawn as it turns
 -- even when the node list has not changed.

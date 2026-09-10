@@ -20,6 +20,9 @@
         },
         "Sensed": {
           "$className": "RemoteEvent"
+        },
+        "TechniqueFired": {
+          "$className": "RemoteEvent"
         }
       },
       "Packages": {
