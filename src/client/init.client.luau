@@ -1388,8 +1388,29 @@ local function refreshGuidance()
 	guidanceLabel.Text = guidanceText()
 end
 
-require(script.Impact).start()
-Nameplates.start()
+--[[ Fault-isolated, for the reason `init.server.luau` learned the hard way: one
+	throw in an early subsystem silently took every later one with it.
+
+	The client version of that mistake is worse than the server's. Input is bound
+	at the bottom of this file, so anything that throws up here would leave a
+	player with a working game, a visible world, and **no keys at all** -- unable
+	to cast, unable to break through, and with no way to tell that the cause was
+	a nameplate rather than the server. Losing hit feedback is survivable for an
+	evening. Losing the ability to press a button is not.
+
+	Warned rather than swallowed, so a failure is visible in the output window
+	instead of being merely quiet. ]]
+local function startSubsystem(name: string, start: () -> ())
+	-- Same arity cast, same reason.
+	local protectedStart = start :: () -> any
+	local ok, err = pcall(protectedStart)
+	if not ok then
+		warn(`[hud] {name} failed to start: {err}`)
+	end
+end
+
+startSubsystem("Impact", require(script.Impact).start)
+startSubsystem("Nameplates", Nameplates.start)
 
 --[[ The card waits for cultivation state rather than firing at load, so it can
 	name the stage the player actually spawned into. ]]
@@ -1403,7 +1424,16 @@ task.spawn(function()
 	showCard()
 end)
 
-RunService.RenderStepped:Connect(function()
+--[[ Guarded, and the warning throttled, for the same reason the server tick is.
+
+	A throw in here fires sixty times a second. Unguarded it would bury the
+	output window in the noise of its own reporting -- and the output window is
+	the only diagnostic anyone has during a session, so an error that destroys it
+	takes the ability to diagnose anything else with it. Guarded, a fault in the
+	target frame costs the target frame and leaves the action bar working. ]]
+local lastRenderWarnAt = 0
+
+local function renderStep()
 	refreshSlots()
 	refreshOwnCast()
 
@@ -1414,6 +1444,23 @@ RunService.RenderStepped:Connect(function()
 	end
 	refreshTarget()
 	refreshReticle()
+end
+
+-- pcall's result arity follows its callee, and this returns nothing, so the
+-- error value has to be asked for explicitly -- the same cast init.server.luau
+-- already documents for its own guarded ticks.
+local protectedRenderStep = renderStep :: () -> any
+
+RunService.RenderStepped:Connect(function()
+	local ok, err = pcall(protectedRenderStep)
+	if ok then
+		return
+	end
+	local now = os.clock()
+	if now - lastRenderWarnAt >= 5 then
+		lastRenderWarnAt = now
+		warn(`[hud] render step failed: {err}`)
+	end
 end)
 
 -- Arrows are relative to the camera, so they are redrawn as it turns even when
