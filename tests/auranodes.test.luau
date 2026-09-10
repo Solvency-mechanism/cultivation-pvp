@@ -63,13 +63,25 @@ for _, entry in Config.Field.spawnWeights do
 	table.insert(bands, { tier = entry.tier, lo = lo, hi = cursor / totalWeight })
 end
 
-eq("low roll picks the first weighted tier", AuraNodes.rollTier(Config, scripted({ 0.0 })), bands[1].tier)
-eq("top of range stays valid", AuraNodes.rollTier(Config, scripted({ 0.999999 })), bands[#bands].tier)
+eq(
+	"low roll picks the first weighted tier",
+	AuraNodes.rollTier(Config, scripted({ 0.0 })),
+	bands[1].tier
+)
+eq(
+	"top of range stays valid",
+	AuraNodes.rollTier(Config, scripted({ 0.999999 })),
+	bands[#bands].tier
+)
 
 -- Each band's interior resolves to its own tier, on both sides of every edge.
 for _, band in bands do
 	local inside = (band.lo + band.hi) / 2
-	eq(`mid-band roll picks {band.tier}`, AuraNodes.rollTier(Config, scripted({ inside })), band.tier)
+	eq(
+		`mid-band roll picks {band.tier}`,
+		AuraNodes.rollTier(Config, scripted({ inside })),
+		band.tier
+	)
 	eq(
 		`just inside {band.tier}'s lower edge`,
 		AuraNodes.rollTier(Config, scripted({ band.lo + 1e-6 })),
@@ -94,7 +106,12 @@ for _ = 1, N do
 	counts[t] += 1
 end
 for _, entry in Config.Field.spawnWeights do
-	near(`{entry.tier} tracks its configured weight`, counts[entry.tier] / N, entry.weight / totalWeight, 0.02)
+	near(
+		`{entry.tier} tracks its configured weight`,
+		counts[entry.tier] / N,
+		entry.weight / totalWeight,
+		0.02
+	)
 end
 
 -- Lifetime and expiry
