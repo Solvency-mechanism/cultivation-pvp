@@ -491,7 +491,10 @@ UserInputService.InputBegan:Connect(function(input: InputObject, processed: bool
 	end
 	local slot = SLOT_KEYS[input.KeyCode]
 	if slot then
-		useTechnique:FireServer(slot)
+		-- The camera is the aim. The server validates the vector and still owns
+		-- range, cost, cooldown and the raycast.
+		local camera = Workspace.CurrentCamera
+		useTechnique:FireServer(slot, if camera then camera.CFrame.LookVector else nil)
 	elseif input.KeyCode == Enum.KeyCode.B then
 		breakthrough:FireServer()
 	end

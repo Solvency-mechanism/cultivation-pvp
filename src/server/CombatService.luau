@@ -306,7 +306,43 @@ local function spawnConstruct(
 	})
 end
 
-local function resolveStriker(caster: Player, actor: Combat.Actor, techId: string, now: number)
+--[[ Where a cast is pointed.
+
+	The client sends this because it is the one thing the client genuinely knows
+	better than the server: where the player is looking. Aiming by the
+	character's facing instead reads as broken the moment the camera is free of
+	the body.
+
+	This is not a security hole. The server still owns range, cost, cooldown,
+	bracket, the raycast itself and therefore every wall between the two of you;
+	a lying direction buys nothing a real aimbot would not already have, and
+	aimbots cannot be prevented from the server side of a client-authoritative
+	camera. What is checked is only that the value is usable. ]]
+local function aimOf(caster: Player, supplied: unknown): Vector3
+	local root = rootOf(caster)
+	local fallback = if root then root.CFrame.LookVector else Vector3.new(0, 0, -1)
+	if typeof(supplied) ~= "Vector3" then
+		return fallback
+	end
+	local aim = supplied :: Vector3
+	-- Reject NaN and infinities before they reach Raycast, where a bad vector
+	-- is an error rather than a miss.
+	if aim ~= aim or aim.Magnitude ~= aim.Magnitude then
+		return fallback
+	end
+	if aim.Magnitude < 1e-3 or aim.Magnitude > 1e6 then
+		return fallback
+	end
+	return aim.Unit
+end
+
+local function resolveStriker(
+	caster: Player,
+	actor: Combat.Actor,
+	techId: string,
+	aim: Vector3,
+	now: number
+)
 	local root = rootOf(caster)
 	local character = caster.Character
 	if not root or not character then
@@ -317,7 +353,7 @@ local function resolveStriker(caster: Player, actor: Combat.Actor, techId: strin
 	params.FilterType = Enum.RaycastFilterType.Exclude
 	params.FilterDescendantsInstances = { character }
 
-	local direction = root.CFrame.LookVector * Config.Combat.ranges.striker
+	local direction = aim * Config.Combat.ranges.striker
 	local origin = root.Position
 	local hit = Workspace:Raycast(origin, direction, params)
 	local landing = if hit then hit.Position else origin + direction
@@ -367,7 +403,7 @@ end
 --[[ Land a technique after its windup. Cost and cooldown were paid at cast; this
 	is only the effect, and it is dropped if the caster died during the
 	telegraph. ]]
-local function resolveEffect(caster: Player, actor: Combat.Actor, techId: string)
+local function resolveEffect(caster: Player, actor: Combat.Actor, techId: string, aim: Vector3)
 	if actors[caster.UserId] ~= actor or actor.health <= 0 then
 		return
 	end
@@ -376,7 +412,7 @@ local function resolveEffect(caster: Player, actor: Combat.Actor, techId: string
 	local now = os.clock()
 
 	if tech.kind == "striker" then
-		resolveStriker(caster, actor, techId, now)
+		resolveStriker(caster, actor, techId, aim, now)
 	elseif tech.kind == "ruler" then
 		resolveRuler(caster, actor, techId, now)
 	elseif tech.kind == "enforcer" then
@@ -399,7 +435,7 @@ local function resolveEffect(caster: Player, actor: Combat.Actor, techId: string
 	end
 end
 
-local function onUseTechnique(player: Player, slot: unknown)
+local function onUseTechnique(player: Player, slot: unknown, suppliedAim: unknown)
 	local now = os.clock()
 	local last = lastRequestAt[player.UserId]
 	if last and now - last < MIN_REQUEST_INTERVAL then
@@ -429,13 +465,18 @@ local function onUseTechnique(player: Player, slot: unknown)
 
 	publish(player)
 
+	-- Aim is sampled at cast, not at resolution: a long windup is a commitment,
+	-- and letting it track the camera through the telegraph would erase the
+	-- counterplay the windup is there to buy.
+	local aim = aimOf(player, suppliedAim)
+
 	local tech = Config.Techniques[techId]
 	if tech.windup > 0 then
 		task.delay(tech.windup, function()
-			resolveEffect(player, actor, techId)
+			resolveEffect(player, actor, techId, aim)
 		end)
 	else
-		resolveEffect(player, actor, techId)
+		resolveEffect(player, actor, techId, aim)
 	end
 end
 
@@ -540,8 +581,8 @@ function CombatService.start()
 	local useTechnique = remotes:WaitForChild("UseTechnique")
 	assert(useTechnique:IsA("RemoteEvent"), "UseTechnique must be a RemoteEvent")
 
-	useTechnique.OnServerEvent:Connect(function(player: Player, slot: unknown)
-		onUseTechnique(player, slot)
+	useTechnique.OnServerEvent:Connect(function(player: Player, slot: unknown, aim: unknown)
+		onUseTechnique(player, slot, aim)
 	end)
 end
 
