@@ -4,12 +4,13 @@ Date: 2026-09-10
 Scope: `starter-game` combat loop as currently implemented in:
 `src/shared/Config.luau`, `src/shared/Combat.luau`, `src/shared/ImpactSpec.luau`, `src/server/CombatService.luau`, `src/client/init.client.luau`, `src/client/Vfx.luau`, `src/client/Impact.luau`.
 Round 6 (movement techniques and aura farming, see (d)) also touches `src/shared/Progression.luau`, `src/shared/AuraNodes.luau`, `src/server/CultivationService.luau`, `src/server/PersistenceService.luau`, and `src/server/NodeService.luau`.
+Round 7 (breadth-over-balance mode change and the resource framework, see (k)/(l)) touches the same files as round 6, plus nothing new -- the resource framework lives in `Combat`/`AuraNodes`/`Config`/`CombatService`/`init.client.luau`, all already in scope.
 
 Constraints locked by user:
 1) No universal defense system (no dodge button, no block, no parry, no i-frames, no universal forced-movement defense). A slot-costing, madra-costing, cooldown-gated, opponent-visible movement commitment -- e.g. Swiftstep, defined in (d) -- is exactly the kind of deliberate defense the design calls for; what is disallowed is any defensive movement that is free, unlimited, or not a committed choice.
 2) Shared modules in `src/shared` remain pure and never require each other.
 3) Server authoritative, client sends intent only.
-4) Invariants: exact 18% intra-bracket TTK advantage, constant TTK across brackets, and flat health within stage.
+4) Invariants, **amended by round 7 -- see (k)/(l):** TTK constant across brackets still holds unconditionally. The exact-18%-intra-bracket-advantage figure and flat-health-within-a-stage do not: round 7 explicitly authorizes revisiting both, and (l) exercises that authorization -- health now scales with refinement tier, and the intra-bracket advantage is a derived `~1.50`, not a locked `1.18`. Balance-invariant tests built on the old figures are expected to change; TTK-constant-across-brackets is not.
 5) Presentation is severity-driven through `ImpactSpec`; new mechanics must use existing channels.
 6) No global terrain combat stat layers outside nodes.
 
@@ -281,7 +282,7 @@ This is a 3-node cycle:
 
 Option 2 is chosen. Routing the old delta through `landingRadius` (option 1) entangles two things a player would have to read as one: a bigger hitbox is not obviously "the same kind of better" as a shorter falloff ramp, and the sign is not even guaranteed to point the intuitive way once smoothstep and the floor are in the mix. Applying the delta straight to `d_cross` is legible on its own terms and reuses a magnitude that was already tuned for exactly this purpose: a match pulls the full-damage crossover 4 studs closer (more of the field is full-damage territory), a counter pushes it 6 studs further out (less of it is). `landingRadius`'s own match/counter deltas are untouched and keep doing only their original job -- hit geometry, not damage scaling.
 
-Why this does not break invariant math:
+Why this does not break invariant math (the `1.18` figure below is round 4/5's; round 7 revises it to `~1.50` -- see (k)/(l)/(h), unrelated to affinity and left as originally written here):
 - `tests/combat.test.luau` currently checks:
   - `ruler` scales with region and `lance` ignores region for damage.
   - low-to-high refinement TTK ratio exactly `1.18`.
@@ -294,7 +295,7 @@ The spec is therefore intentionally constrained: affinity is the readable mechan
 
 ## d) Movement techniques and the aura-farming axis (round 6)
 
-The human's directive: give aura farming a reason to matter outside a combat matchup by gating movement techniques behind it, spanning burst-versus-sustain genuinely rather than sampling it once, with several options that work as a default dodge. Three structural rulings came with it, held below rather than relitigated: movement is a fifth kind with its own slot (not an enforcer subcategory); movement techniques are sidegrades, never upgrades; aura farming is a new progression axis this doc has to spec, not wave at.
+The human's directive: give aura farming a reason to matter outside a combat matchup by gating movement techniques behind it, spanning burst-versus-sustain genuinely rather than sampling it once, with several options that work as a default dodge. Three structural rulings came with it, held below rather than relitigated: movement is a fifth kind with its own slot (not an enforcer subcategory); ~~movement techniques are sidegrades, never upgrades~~ (**retracted in round 7 -- see (k). Balance/dominance reasoning no longer applies to this roster; left below only where it also carried a non-balance point**); aura farming is a new progression axis this doc has to spec, not wave at.
 
 ### Why a fifth kind
 
@@ -335,7 +336,7 @@ Three techniques, one aura each, reusing the same `auraType` field every techniq
 - Burst-to-sustain position: the extreme sustain pole -- no instant displacement at all, just faster feet for six seconds. See "Sustain speed cannot solve the close-range dodge problem" below for why this is a deliberate, not an accidental, weakness in a fight.
 - Feel: the ground opens up. Not useful in the two seconds a duel actually turns on, invaluable in the twenty it takes to get there, or away.
 
-No dominance between the three (ruling 2, held explicitly): Swiftstep beats Lunge on cooldown frequency (7.0s vs 9.0s) and carries a trailing defensive buff Lunge lacks entirely; Lunge beats Swiftstep on stealth (no telegraph), reach (6.0 studs clears every current bolt's landing tolerance; Swiftstep's 5.0 does not -- see the arithmetic below), damage, and madra cost. Windstride is incomparable to both on the same axes -- it moves the *most total distance* of the three (22.4 studs/sec × 6s = 134.4 studs of bonus travel across its window, against Lunge's one-time 6 studs), and it is the only one of the three with zero standalone value in an active exchange. Each is a genuine tradeoff a player has reason to prefer situationally; none is strictly better.
+How the three actually compare, for texture rather than as a balance proof (round 7 retracts the requirement that they be non-dominant -- see (k)): Swiftstep has cooldown frequency (7.0s vs 9.0s) and a trailing defensive buff Lunge lacks entirely; Lunge has stealth (no telegraph), reach (6.0 studs clears every current bolt's landing tolerance; Swiftstep's 5.0 does not -- see the arithmetic below), damage, and a lower madra cost -- Lunge is close to a strictly better burst option than Swiftstep on paper, and that is fine now. Windstride is incomparable to both -- it moves the *most total distance* of the three (22.4 studs/sec × 6s = 134.4 studs of bonus travel across its window, against Lunge's one-time 6 studs), and it is the only one of the three with zero standalone value in an active exchange. Whatever gap exists between them is exactly the kind of thing earned level or aura-depth gating is meant to be the cost of, once those systems exist -- not something this round needs to flatten.
 
 **Why Swiftstep stays ungated.** All three techniques gated behind farming would leave a brand-new character with an empty strider slot -- `Combat.validateLoadout` requires exactly one technique per slot, and `CultivationService`'s starting state has farmed nothing. One technique has to be free. Swiftstep is the natural pick: it already existed, every player already had access to it (via the enforcer slot, pre-round-6), and "the founding member" language in the ruling that created this kind already treats it as the inherited default rather than something newly earned. This also gives the onboarding curve a shape that matches the rest of the game: one working option from minute one (matching `newPlayerState`, which starts players mid-ladder at Lowgold with a full striker/enforcer/forger/ruler kit already), growing to "a few to choose from" once a player has farmed even one more aura, and to all three once they've farmed both. The interesting choice -- which aura to farm first -- only exists because there's already something to compare it against.
 
@@ -350,7 +351,7 @@ Compare Lunge's `8` damage against Lance, the technique explicitly designed as t
 | Lance | 42 | 18 | 2.33 | 1.48s | 28.4 |
 | Lunge | 8 | 20 | 0.40 | 9.06s | 0.88 |
 
-Lunge deals 17% of Lance's damage per madra spent and about 3% of Lance's damage-per-second if both were spammed on cooldown. Nobody picks the strider slot for that ratio; the damage exists so that dashing into someone's face reads as a hit rather than a teleport, not so that Lunge competes on a striker's own terms. That asymmetry is the whole point and should stay wide if this ever gets retuned -- closing the gap even to "10% as efficient as Lance" would start making Lunge a legitimate second striker, and the loadout math (3 strider options, each meant to be a sidegrade of the *other two striders*, not of the *striker kind*) does not want that.
+Lunge deals 17% of Lance's damage per madra spent and about 3% of Lance's damage-per-second if both were spammed on cooldown. The numbers here are left as committed rather than retuned, but the reasoning behind them was half balance ("this would become a second striker") and round 7 retracts that half explicitly -- see (k). What survives is the fantasy half: the damage exists so that arriving reads as a hit rather than a teleport, not so it competes on a striker's own terms. A future damaging movement technique is free to hit much harder than this; it is not free to feel like it's doing damage math instead of arriving somewhere.
 
 ### The dodge inequality changes -- reworking (a)
 
@@ -406,7 +407,7 @@ Ruling 1's consequence: enforcer needs a third member to stay at three, and it h
 
 - `id` `anchor`, `kind` `enforcer`, `auraType` `ash` (chosen to keep the aura distribution close to even once swiftstep's kind changes -- see (j)).
 - `windup` **0.1**, `cooldown` **10.0**, `buffDuration` **8.0**, `mitigation` **0.15**, `madraCost` **26**, `damage`/`damageBuff` **0**.
-- `buffDuration / cooldown = 0.80` -- the highest uptime fraction of the three enforcers (surge 0.556, bulwark 0.545), paired with the lowest single-hit magnitude (0.15 vs 0.25 and 0.50). No dominance: bulwark still answers one big spike better than anything Anchor offers, surge sits in between on both axes.
+- `buffDuration / cooldown = 0.80` -- the highest uptime fraction of the three enforcers (surge 0.556, bulwark 0.545), paired with the lowest single-hit magnitude (0.15 vs 0.25 and 0.50): bulwark still answers one big spike better than anything Anchor offers, surge sits in between on both axes. Not offered as a balance proof (round 7, see (k)) -- just the shape that makes the three feel different to pick between.
 - Pick it when: you expect a long grinding exchange rather than one spike, and you'd rather have *some* mitigation active almost all the time than a lot of it some of the time.
 
 ### The aura-farming axis
@@ -421,7 +422,7 @@ Deliberately **not** multiplied by `Config.StaticRegionMultipliers` (`barren 0.5
 
 **Threshold.** `Config.AuraFarming.unlockThreshold = 600`, one shared value for both gated techniques (first-pass simplification; nothing yet demands per-technique numbers). That's `200s` (~3.3 min) of continuous occupancy at a common node, `75s` at rare, `30s` at prime -- reachable inside a single node's own lifetime (`600s`/`420s`/`300s`) even without exclusive occupancy.
 
-**Spent or merely reached: reached, permanently.** This follows from ruling 2 directly. A sidegrade has to remain a standing choice in the loadout screen, which means once unlocked it has to *stay* unlocked -- a spend-to-use model would turn "different options" back into "one option you paid for," which contradicts what "farming unlocks a technique" means in the human's own framing. Once `auraProgress.verdant >= 600`, `lunge` is a legal `strider` selection for that character forever, independent of what they farm afterward.
+**Spent or merely reached: reached, permanently.** This no longer follows from the (retracted) sidegrade ruling, but it still holds -- it's exactly the gating shape round 7 asks every unlock to have (see (k)): an earned, permanent capability, not a consumable spent per use. A spend-to-use model would turn "farm this to earn it" back into "pay for this every time," which contradicts what "farming unlocks a technique" means in the human's own framing regardless of whether the unlocked thing is a sidegrade or a straight upgrade. Once `auraProgress.verdant >= 600`, `lunge` is a legal `strider` selection for that character forever, independent of what they farm afterward.
 
 **Not touched by death.** `Progression.applyLoss`/`Combat.deathLoss` drain refinement on death -- a combat-performance ratchet. Aura farming measures breadth of exploration, not combat performance, and draining it on death would punish exactly the wrong thing: a player experimenting with a new region would be pushed straight back to the aura they already know. `applyLoss` must not touch `auraProgress`; recorded here as a rule, not an oversight.
 
@@ -492,30 +493,38 @@ Known collision points:
 - `src/shared` purity:
   - no new `require` among shared modules.
   - round 6 adds `Progression.addAuraProgress` and extends `Progression.sanitizeState`; both stay pure, Config passed as a parameter, same as every existing function in that module.
-- Balance invariants:
+  - round 7 adds a larger batch of pure `Combat.luau` helpers (Settling regen, overdraw, deviation, flow, momentum) and a `reserve` field plus regen step in `AuraNodes.luau` -- all Config-parameterized, all zero-require, same posture as everything already in `src/shared`. None of it needs a shared module to know about another shared module; `CombatService` is what wires them together, same as today.
+- Balance invariants (round 4/5 philosophy; round 7 explicitly permits these to lose -- see (k)):
   - `tests/combat.test.luau` asserts:
     - intra-bracket TTK advantage exactly 18%
     - TTK constant Lowgold vs Highgold
     - TTK constant Lowgold vs Truegold
     - striker ignores terrain while ruler scales with region.
-  - Base damage for non-ruler techniques must remain unchanged unless assertions are updated.
+  - **This test will need to change, per (k):** round 7's health-vitality step in (l) retires the exact `18%` figure -- the derivation in (l) gets `~1.50` instead, and that is the intended new target, not a regression to chase back down to `1.18`. This is flagged, not blocked; (i)/11 already plans the test rewrite.
+  - `ttkAt` (cross-bracket) is **not** expected to break: it compares fresh players (`tier = 1`) across stages, where the new vitality step contributes zero on both sides of the comparison -- verify this directly once built rather than trusting the reasoning in (l), same standard every other invariant claim in this doc has been held to.
+  - Base damage for non-ruler techniques must remain unchanged unless assertions are updated -- still the operating default outside `outgoingDamage`'s own new callers (overdraw, momentum's overcharge multiplier) below.
   - Range falloff (round 5 ruling, see (a)) must not touch these. It is kept out of `Combat.outgoingDamage` entirely and applied only in `CombatService` at resolve time, so none of the four assertions above ever exercise it -- `tests/combat.test.luau` calls `Combat.outgoingDamage` directly and never supplies a distance.
-  - Falloff is also symmetric across refinement tiers even where it *is* eventually applied, so it cannot widen the intra-bracket spread on its own: `hitsFreshToKillMaxed / hitsMaxedToKillFresh` in the 18% test reduces to `maxedHit / freshHit` (the `hp /` on both sides cancels). If a caller later multiplied both `freshHit` and `maxedHit` by the *same* `falloff(distance)` -- which is all falloff can be, since it is a function of distance only, never of power -- that factor cancels out of the ratio identically: `(maxedHit*f) / (freshHit*f) = maxedHit/freshHit`. The 18% ratio is unaffected at any fixed distance. Verified against the actual assertion at `tests/combat.test.luau:47-65`, not assumed.
-  - `lunge`'s damage (round 6, see (d)) is not an exception either: it scales by `power / referencePower` exactly like every other technique's `outgoingDamage` call, which is what makes the invariant technique-agnostic in the first place. Nothing about a fifth kind changes that.
+  - Falloff is also symmetric across refinement tiers even where it *is* eventually applied, so it cannot widen the intra-bracket spread on its own: `hitsFreshToKillMaxed / hitsMaxedToKillFresh` in the 18% test reduces to `maxedHit / freshHit` (the `hp /` on both sides cancels). If a caller later multiplied both `freshHit` and `maxedHit` by the *same* `falloff(distance)` -- which is all falloff can be, since it is a function of distance only, never of power -- that factor cancels out of the ratio identically: `(maxedHit*f) / (freshHit*f) = maxedHit/freshHit`. Verified against the actual assertion at `tests/combat.test.luau:47-65`, not assumed. **This symmetry argument survives round 7's health change too**, worked the same way: with `hp` now split into `freshHP`/`maxedHP`, the ratio becomes `(maxedHP*maxedDamage)/(freshHP*freshDamage)`, and a shared falloff factor `f` on both `maxedDamage` and `freshDamage` still cancels identically. Falloff still can't widen the spread on its own -- only the baseline it's symmetric around moved, from `1.18` to `~1.50`.
+  - `lunge`'s damage (round 6, see (d)) is not an exception either: it scales by `power / referencePower` exactly like every other technique's `outgoingDamage` call, which is what makes the invariant technique-agnostic in the first place. Momentum's overcharge multiplier (round 7, see (l)) is applied the same outside-`outgoingDamage` way falloff already is, for the same reason.
 - Terrain scale scope:
   - only ruler currently has `regionScaled=true`; keep it that way for damage.
 - Presentation:
   - no new severity channel; use existing ImpactSpec contract.
   - round 6 needs a fifth `ImpactSpec.Cast.byKind` entry (`strider`) and two new `Vfx.PALETTE` rows (`lunge`, `windstride`) -- data additions to an existing table, not a new channel.
+  - round 7's three new meters (deviation/flow/momentum) are HUD bars in `src/client/init.client.luau`, the same `bar()`/`label()` primitives the health/madra bars already use -- not a new `ImpactSpec` channel, since they're ambient state readouts rather than per-hit feedback. Momentum's *gain*, however, reuses `ImpactSpec.severity` -- computed server-side now, not just client-side, which means `CombatService` (a server file, not a shared one) gains a new `require(ImpactSpec)`. That is a server file requiring a shared module, same as it already requires `Combat`/`Config`/`Progression` -- it does not touch the "shared modules never require each other" rule, which is about `src/shared` files requiring other `src/shared` files.
 - PvP feedback:
   - opponent cast telegraph is not visible from code today; adding a cast event at intent time is required. Round 6 raises the stakes on this same gap and adds a second one on top: even once that extension exists, `lunge`'s `0.06s` windup is close enough to zero that a cast broadcast and its resolution land almost the same frame, so the fix helps `swiftstep` a great deal and `lunge` barely at all. See (d) for why that's judged acceptable (the opponent needs to react to where the caster lands, not to the cast itself) and what it still requires (a fast, legible arrival effect).
+  - round 7 adds a distinct legibility problem: `insufficient_madra` and `insufficient_flow` need to read as different refusals to the player pressing the button, or Flow just looks like an unexplained second madra cost. Not solved here; noted as a requirement for whoever builds the slot-bar refusal feedback.
 - Movement server authority (round 6, see (d)):
   - a strider displacement (`swiftstep`, `lunge`) has to be validated the same way a striker raycast already is -- swept against world geometry before the character is repositioned, so a dash can't be used to clip through a wall. `windstride`'s `WalkSpeed` change is server-set and client-visible by ordinary replication, no new remote needed; the client still only ever sends slot + aim, same as every other technique.
+- Channel server authority (round 7, see (l)):
+  - `UseTechniqueStart`/`UseTechniqueStop` are new remotes, but they carry the same posture every other remote in this doc already does: the client says "I am pressing" and "I am releasing," nothing about how much that drains, what tick rate it resolves on, or what effect it produces -- all server-decided, same as `UseTechnique`'s slot+aim today. A client that spams `Start` without a matching `Stop`, or fakes a `Stop` immediately, changes nothing about what the server actually charges or resolves; the server ticks drain and effect on its own clock and stops on its own funding check regardless of what the client claims.
 
 Potential hidden risk:
 - If fixed-point vs tracking is reversed, dodgeability as designed collapses.
 - If contest is damped rather than amplified, close-node fights lose intended readability.
 - If a strider technique's own commit time (`windup`, or `windup + swiftstepWindow`) is ever shortened without redoing the arithmetic in (d), the reactive-dodge table there goes stale silently -- it is derived from specific numbers, not a rule the code enforces.
+- If `RefinementVitalityStep` is retuned without redoing the `1.27 * 1.18` derivation in (l), the tuning-table figure and whatever the rewritten test asserts will silently drift apart -- the same class of risk as the strider-commit-time one above, now with a second instance.
 
 ## i) Ordered implementation plan (smallest verifiable step first), with test checkpoints
 
@@ -606,21 +615,66 @@ Potential hidden risk:
 - Keep techniques unchanged.
 - Test with path containing illegal IDs and slot-kind mismatch.
 
-10) Two-client PvP gate (highest confidence check, must happen before final retune)
+10) Gating-metadata schema and affinity-typed cost (round 7, see (k)/(l))
+- Add `unlockRequirement` to `Config.Techniques.*`, shape per (k); set `{ kind = "always" }` on all fifteen existing techniques except `lunge`/`windstride`, which get the `auraDepth` form restating what (d) already built.
+- `CombatService`'s loadout-assignment path checks `unlockRequirement` the same place it already validates kind/slot (`Combat.resolveSlot`/`validateLoadout`); with everything but `lunge`/`windstride` set to `always`, this is a no-op check today and a real gate the moment earned-level or Path gating exists.
+- Extend (c)'s relation matrix with the `madraCost` channel (match `-15%`, counter `+25%`); applied in `CombatService` at cost-resolution time, alongside the existing `d_cross`/`landingRadius`/construct/buff-duration channels.
+- Tests:
+  - every technique (old and new) has a well-formed `unlockRequirement`.
+  - `Combat.resolveSlot`/`validateLoadout` still passes for the default loadout with `unlockRequirement` present but unchecked (an `always` gate blocks nothing).
+  - affinity match/counter shifts `outgoingDamage`'s *caller-supplied cost*, never `outgoingDamage` itself -- same discipline as `d_cross`, verified the same way (c)'s existing tests are.
+
+11) Resource framework, part one: health, madra, deviation (round 7, see (l))
+- `Combat.maxHealth` gains the `RefinementVitalityStep` term; `Combat.regen` gains the Settling branch (`lastUseAt` on `Actor`, `settledRegenFraction` after `settlingDelaySeconds`).
+- Add `Combat.canOverdraw`/`Combat.applyOverdraw`-shaped pure helpers: given a shortfall, return the health cost and deviation gained; `CombatService` calls them from the same place `Combat.canUse`/`Combat.use` are called today, replacing a hard refusal with a health-priced path.
+- Add `deviation` to `Actor`, plus `Combat.enterQiDeviation`/`Combat.deviationDecay` pure helpers implementing the cap-and-reset behavior in (l).
+- Tests:
+  - `near("intra-bracket TTK advantage is revised to ~1.50", ..., 1.4986, 1e-3)` -- **this replaces, not adds to, the existing `1.18` assertion at `tests/combat.test.luau:60-65`**, per (h) and (k): the old assertion is expected to fail and be rewritten, not preserved alongside the new one.
+  - `ttkAt` (cross-bracket) still passes unchanged -- verify directly, don't assume (see (l)'s own reasoning for why it should).
+  - `Combat.regen` at `< settlingDelaySeconds` since last use returns the active rate; at `>=` returns the settled rate.
+  - overdraw below pool charges health at `overdrawHealthRate` and adds `overdrawDeviationRate * shortfall` to `deviation`.
+  - `deviation` hitting `deviationCap` zeroes it and returns a Qi Deviation status; mitigation reads `0` and backlash accrues for its duration regardless of active buffs.
+
+12) Resource framework, part two: flow and momentum (round 7, see (l))
+- Add `flow`/`flowCost` (default `round(madraCost * 0.8)` where unset) to `Actor`/`Config.Techniques`; `Combat.canUse` gains a second, non-overdrawable check against it, with its own refusal reason `insufficient_flow`.
+- Add `momentum`/`momentumReadyAt` to `Actor`, and `Combat.momentumGain(config, stageIndex, damage)` -- calling the same `ImpactSpec.severity` the client already uses for presentation, so `CombatService` needs a new `require(ImpactSpec)` (a server file requiring a shared module, not a shared module requiring another one -- doesn't touch the purity rule, see (h)).
+- `CombatService` applies momentum gain from the same place `damagePlayer` already fires the `Impact` remote, to both attacker and target.
+- An overcharged cast (`momentumReady`) refunds `madraCost`/`flowCost` after resolving and multiplies dealt damage by `1 + momentumOverchargeDamageBonus`.
+- Tests:
+  - `flow` insufficient refuses with `insufficient_flow` even when `madra` is ample, and is never payable via overdraw.
+  - `flow`/`madra` both regenerate correctly on their own independent rates.
+  - `Combat.momentumGain` matches `ImpactSpec.severity * momentumGainScale` exactly for a range of damage values -- the two must never drift.
+  - momentum decays only after `momentumDecayDelay` of no hits, at `momentumDecayPerSecond`.
+  - an overcharged cast's refund and damage multiplier apply exactly once, then `momentum` is `0`.
+
+13) Node reserve, field-draw, and the channel input model (round 7, see (l))
+- Add `reserve`/`reserveMax` to `AuraNodes.Node`, initialized from `Config.NodeTiers.*.reserveCap` in `AuraNodes.create`, regenerating in `AuraNodes.step` at the tier-scaled rate.
+- Add `fieldDraw` to `Config.Techniques.*`; `CombatService` checks the occupied node's `reserve` before charging the caster's own `madra`/`flow`, per (l)'s fallback rule.
+- Extend the `Sensed` payload (`NodeService`/`AuraNodes.sensed`) with `reserve`/`reserveMax` per entry; extend the client sense panel to show it.
+- Add `UseTechniqueStart`/`UseTechniqueStop` remotes for `channelled` techniques; `CombatService` ticks drain and re-resolves effect on the existing construct-tick cadence while held, and forces a release (resolving a partial effect, per (l)) when funding runs out.
+- Add the three illustrative techniques (`torrent`, `wellstep`, `steadyhand`) to `Config.Techniques`.
+- Tests:
+  - `reserve` never exceeds `reserveMax`, never goes negative, regenerates at the tier-scaled rate.
+  - a `fieldDraw` cast on a node with sufficient `reserve` charges the node and not the caster; on a dry node it charges the caster in full; on a partially-stocked node it splits correctly.
+  - a channelled technique's drain ticks at the construct-tick cadence and stops immediately on `UseTechniqueStop` or on running out of funding.
+  - `steadyhand` requires `momentumReady`, zeroes `deviation`, and applies its mitigation for exactly its stated duration.
+
+14) Two-client PvP gate (highest confidence check, must happen before final retune)
 - Run 2 clients with:
   1) read clarity,
   2) cast telegraph visibility,
   3) defended movement in close range,
   4) duel timing 20-40 seconds at Lowgold,
   5) no untelegraphed surprise deaths,
-  6) round 6: does `lunge` read as a hit-and-reposition rather than a teleport or a desync; does a fresh character's single `swiftstep` option feel adequate before any farming; does farming an aura toward `600` feel like a destination or a chore at the placeholder rate in (d).
+  6) round 6: does `lunge` read as a hit-and-reposition rather than a teleport or a desync; does a fresh character's single `swiftstep` option feel adequate before any farming; does farming an aura toward `600` feel like a destination or a chore at the placeholder rate in (d),
+  7) round 7: does a five-bar HUD (health/madra/deviation/flow/momentum) read as information or as noise; does hitting the flow wall feel distinguishable from running out of madra; does Qi Deviation feel like a real consequence or an annoyance; does an overcharged cast feel like a payoff worth waiting for.
 
 Confidence note:
-- Unverified in live two-client combat remains the largest blocker and is expected to force numerical retune, not structural rewrite.
+- Unverified in live two-client combat remains the largest blocker and is expected to force numerical retune, not structural rewrite. Round 7 adds a second, explicit exception to "retune not rewrite": the intra-bracket TTK assertion is *expected* to need rewriting outright, per (k) -- that is not a sign this went wrong.
 
 ## j) First-pass tuning numbers -- asserted, not derived
 
-Every number in this table was chosen by this spec to hit a stated intent (e.g. "beat one close lance-speed dodge gap," or "visibly the wrong tool at contact range but not disabled"), or as a plausible first value -- none of them fall out of a formula the way `d_cross` or the 18% TTK ratio do. They are first-pass targets pending the two-client PvP gate in (i)/10, not verified balance. Anyone reading this doc later should not treat a number below as load-bearing until it has been played.
+Every number in this table was chosen by this spec to hit a stated intent (e.g. "beat one close lance-speed dodge gap," or "visibly the wrong tool at contact range but not disabled"), or as a plausible first value -- none of them fall out of a formula the way `d_cross` or the 18% TTK ratio do. They are first-pass targets pending the two-client PvP gate in (i)/14, not verified balance. Anyone reading this doc later should not treat a number below as load-bearing until it has been played.
 
 For contrast, `v = 16 studs/sec` (Roblox's default walk speed) and the `0.25s` human-reaction / `0.08-0.15s` net-delay figures in (a) are *not* in this table: they are external inputs this spec takes as given, not values it chose.
 
@@ -673,5 +727,174 @@ For contrast, `v = 16 studs/sec` (Roblox's default walk speed) and the `0.25s` h
 | affinity counter: forger construct pulse window | -1 pulse | (c) |
 | affinity counter: enforcer buff duration | -20% | (c) |
 | densityFactor | `1 + 0.10 * densityIndex` | (e) |
+| RefinementVitalityStep (health, per tier) | 0.03 | (l) |
+| intra-bracket TTK advantage, revised | ~1.50 (was exactly 1.18; test must change) | (l) |
+| settledRegenFraction (madra, after settlingDelaySeconds) | 0.12 (vs active 0.06) | (l) |
+| settlingDelaySeconds | 3.0s | (l) |
+| overdrawHealthRate | 2.0 health per madra shortfall | (l) |
+| overdrawDeviationRate | 3.0 deviation per madra shortfall | (l) |
+| deviationCap | 100 | (l) |
+| deviationDecayPerSecond | 8 | (l) |
+| qiDeviationDuration | 4.0s | (l) |
+| qiDeviationBacklashFraction | 0.05 max health/sec | (l) |
+| flowCap | 100 | (l) |
+| flowRegenPerSecond | 40 (flat, not fractional) | (l) |
+| default flowCost (existing pool) | `round(madraCost * 0.8)` | (l) |
+| momentumCap | 100 | (l) |
+| momentumGainScale | 40 × `ImpactSpec.severity` per hit (dealt or taken) | (l) |
+| momentumDecayDelay | 3.0s | (l) |
+| momentumDecayPerSecond | 5 | (l) |
+| momentumOverchargeDamageBonus | +0.50 (50%) | (l) |
+| node reserveCap (common / rare / prime) | 150 / 400 / 1000 | (l) |
+| node reserve regen/sec (common / rare / prime) | 1.5 / 4 / 10 | (l) |
+| affinity match: madraCost | -15% | (l) |
+| affinity counter: madraCost | +25% | (l) |
+| torrent channelMadraRate / channelFlowRate | 22/sec / 30/sec | (l) |
+| wellstep madraCost | 50 | (l) |
+| steadyhand mitigation / duration | 0.30 / 3.0s | (l) |
 
-Everything else in this spec that looks like a number -- `d_cross`, the flight-time table, the dodge-distance table, the 18% TTK ratio, `regen 6%/s`, and every unmodified `Config.Techniques` field carried forward as "unchanged" -- is either already live in the codebase (verified against `src/shared/Config.luau` and `tests/combat.test.luau`) or is derived in this doc from numbers that are. Only the table above is new and asserted.
+Everything else in this spec that looks like a number -- `d_cross`, the flight-time table, the dodge-distance table, `regen 6%/s`'s *active* rate, and every unmodified `Config.Techniques` field carried forward as "unchanged" -- is either already live in the codebase (verified against `src/shared/Config.luau` and `tests/combat.test.luau`) or is derived in this doc from numbers that are. The exact `18%` TTK ratio is the one exception that used to belong in that list and no longer does: round 7's health-vitality step (above) retires it as a target, in favor of the derived `~1.50` figure also in this table. Everything else marked "(l)" above is new and asserted, same as every other row in this table.
+
+Round 7 adds numbers of its own, spec'd in (l); they follow the same convention and are appended to this same table below rather than kept separate, since several of them (health's new tier scaling in particular) directly retire the framing of rows already above.
+
+## k) Mode change: breadth over balance, and the gating-metadata contract (round 7)
+
+The human's directive, in substance: pay no mind to balance or to whether something reads as overpowered against today's tiny pool. This is one step in a much longer process of building out hundreds of techniques and then gating the strong ones behind earned level, aura depth, and Paths. Design for the pool that will eventually exist, not the dozen or so that exist today.
+
+**Ruling 2 is retracted.** Round 6 required every movement technique to be provably non-dominant against the other two in its kind. That requirement is struck. If `lunge` is simply better than `swiftstep` once you look past the trailing buff, that's fine now -- the eventual cost of picking it is farming `verdant` to whatever depth it ends up gated behind, not an artificial numeric handicap baked in today to stay "fair" inside a starter kit of fifteen techniques. Every place in (d) that argued non-dominance as a requirement has been re-marked to point here rather than silently deleted, because the underlying comparisons are still true and still useful texture -- they're just no longer load-bearing, and the numbers they were protecting (Lunge's damage restraint in particular) are left as committed rather than retroactively buffed, since nobody asked for that and undoing a design nobody objected to isn't this round's job.
+
+**The comparison class changes, not just the rule.** "Is this too strong against lance" stops being a meaningful question, because lance is a starter technique nearly every character will eventually outgrow once earned-level and aura-depth gating exist. The right question is closer to "is this distinct and worth building toward," judged against a pool of hundreds where anything genuinely strong is one locked option among many -- not "does this break today's five-kind starter set." Every technique from here on is designed as though it already sits in that larger pool.
+
+**Breadth beats polish.** Where earlier rounds of this doc withheld a mechanic pending playtest or trimmed a number to stay safe, that instinct is wrong for this phase. An interesting, untuned mechanic is worth more right now than a safe, tuned one, because tuning is cheap later and invention is not. This doc's existing "first-pass, asserted, not derived" convention (see (j)) already does the job "needs playtest validation before this can be committed to" was doing, without blocking the design -- round 7 just leans on it harder and more often.
+
+**What is still binding, because it breaks the build rather than the balance:**
+- `src/shared` purity: pure functions, `Config` passed as a parameter, zero internal `require`s.
+- Server-authoritative: the client sends slot + aim (intent) only, same as every technique today, including every resource-shaped one added below.
+- Presentation through existing `ImpactSpec`/`Vfx` channels: severity-driven flash/shard/dust/number/marker/hitstop/shake/FOV, not a new channel invented per mechanic.
+- Every collision with the exact-18%-TTK and constant-cross-bracket assertions gets flagged in (h) as **"this test will need to change,"** never as a reason not to design the thing. Those tests encode round-4/5's balance philosophy; round 7 explicitly permits them to lose, and (l) below hands them their first real collision.
+
+**The gating-metadata contract.** Nothing reads earned level, aura depth, or Path today outside the one case round 6 already built (`lunge`/`windstride`'s `auraProgress` thresholds). Round 7 generalizes that into a shape every technique carries from now on, whether or not anything gates on it yet:
+
+```
+UnlockRequirement =
+    { kind = "always" }
+  | { kind = "auraDepth", aura: "ash" | "verdant" | "lumen", threshold: number }
+  | { kind = "tier", tier: number }              -- refinement-tier gate within a stage
+  | { kind = "path", path: string }              -- Path-restricted, see (g)
+```
+
+Every technique in the pool -- all fifteen from rounds 4-6, and every one round 7 adds in (l) -- carries `unlockRequirement = { kind = "always" }` except `lunge` and `windstride`, which get `{ kind = "auraDepth", aura = "verdant"/"lumen", threshold = 600 }`: a restatement of the mechanic (d) already built, not a new one. `{ kind = "always" }` being trivially satisfied and unread by anything today is correct, not a placeholder to apologize for -- an always-true gate on everything that hasn't earned a real one yet is exactly what "carries the metadata even though nothing reads it" means.
+
+This coexists with the Path seam in (g) rather than replacing it: `Config.Paths` restricts *which* techniques a given Path can select from at all (a visibility question), `unlockRequirement` answers whether a specific technique is *available yet* to a character regardless of Path (an earned-progress question). A future Path could restrict a player to techniques that are also individually gated by `unlockRequirement` -- both checks would apply, neither replaces the other.
+
+## l) The resource framework (round 7)
+
+Today's entire resource model: health, flat within a stage; madra, regenerating at a flat 6% of pool per second regardless of anything; a per-technique cooldown; a flat 0.4s global cooldown. Four ideas, one real decision surface -- madra is the only pool a player actually manages, everything else is a clock. A combat system built on one resource cannot be deep no matter how many techniques draw on it. This section is a framework other resources can plug into, not a list of one-offs -- each entry below is specified the same way, and the closing subsection is about how they touch each other, because independent resources are a spec, not a system.
+
+**The contract every resource in this section answers:** where it lives in state, whether it persists across death and across sessions, how it's published to the client, what happens at zero, what happens at maximum, and which techniques (existing or illustrative-new) actually use it.
+
+### Revisiting health
+
+Flat health within a stage was a balance decision, stated as one in the original code comment (`src/shared/Combat.luau`): "Health scales per stage but is flat within one... That asymmetry is what pins the intra-bracket advantage at the intended 18%." Round 7's mode change frees this. Adopted: health gains its own per-tier growth, separate from and in addition to power's existing step.
+
+- New constant `Config.RefinementVitalityStep = 0.03` (vs. `RefinementPowerStep`'s `0.02`), same shape: `Combat.maxHealth` becomes `stage.basePower * config.Combat.healthMultiplier * (1 + (state.tier - 1) * config.RefinementVitalityStep)`, mirroring how `Progression.effectivePower` already scales damage by tier. Nine steps (`RefinementTiers = 10`) gives a maxed cultivator `27%` more health than a fresh one in the same stage, against the existing `18%` more damage.
+- **What this does to the invariant the old test asserted:** both sides of an engagement now scale. Working the same ratio `tests/combat.test.luau` already computes: `hitsFreshToKillMaxed / hitsMaxedToKillFresh` reduces to `(maxedHealth / freshDamage) / (freshHealth / maxedDamage) = (maxedHealth/freshHealth) * (maxedDamage/freshDamage) = 1.27 * 1.18 ≈ 1.50`. A maxed Lowgold cultivator now has roughly a **50%** intra-bracket TTK advantage over a fresh one in the same bracket, not 18%. That is a real, deliberate design change, not an approximation error -- health compounding with damage the way the original doc explicitly rejected ("If health also scaled with refinement this would compound to roughly 64%") is exactly what round 7's mode permits. `0.03` is a first-pass step, not derived; a smaller or larger value moves the compounded ratio directly and is worth turning into a lever once this is played rather than fought over now.
+- **This test will need to change**, per (k): `near("intra-bracket TTK advantage is exactly 18%", ..., 1.18, 1e-9)` at `tests/combat.test.luau:60-65` will fail as written and should be rewritten to assert against the new derived ratio (or loosened into a range) rather than treated as a reason not to ship this.
+- TTK-constant-across-brackets (`ttkAt`) is untouched: that assertion compares a fresh player (`tier = 1`) at different stages, where the new vitality step contributes zero at `tier = 1` in both cases -- the ratio it checks still reduces identically. Only the intra-bracket spread test is affected.
+
+### Revisiting madra: Settling
+
+Flat `6%` of pool per second forever is a placeholder with no decision in it. Adopted: regen depends on whether you've been casting.
+
+- `Config.Combat.madraRegenFraction` stays the *active* rate (`0.06`, unchanged); a new `Config.Combat.settledRegenFraction = 0.12` applies once `Config.Combat.settlingDelaySeconds = 3.0` have passed since the actor's last successful `Combat.use`. Doubling on settling, not a small bump, so it reads as a real state change rather than a rounding curiosity.
+- Lives entirely on `Combat.Actor` (a new `lastUseAt: number` field, already implicitly tracked by `cooldowns`/`gcdUntil` but not currently exposed as "time since any cast" -- this makes it explicit) and the existing `Combat.regen` reads it; no new persisted state, no new publish beyond what `Madra`/`MaxMadra` attributes already show (the *rate* changing is felt, not read as a number).
+- What this creates: a real decision at the edge of an exchange -- pressing one more cheap technique resets the three-second clock and keeps you at the slow rate, while backing off for a beat doubles your recovery. Two fighters who both disengage briefly both get faster regen -- a mutual "clinch" moment this game didn't have a mechanic for before.
+- Interacts with Flow and Momentum below: settling is keyed off *casting*, not off spending flow or taking hits, so a player who is purely evading (dashing, blocking with posture, not casting) settles even mid-exchange -- movement and defense don't reset the clock, only using a technique does.
+
+### New resource: Deviation, and Overdraw
+
+The genre's own answer to "what happens when you want more than your pool has": burn health instead of refusing the cast, at the cost of a meter that eventually forces a bad state on you.
+
+- **Mechanic.** Any technique can be *overdrawn*: if `actor.madra < tech.madraCost`, the shortfall is payable in health instead of refusing the cast (`Combat.canUse` gains a second, more permissive path rather than a hard `insufficient_madra` refusal). `Config.Combat.overdrawHealthRate = 2.0` -- each point of madra shortfall costs 2 health, a steep rate on purpose, so overdraw is a real gamble, not a discount.
+- **Where it lives.** A new `deviation: number` field on `Combat.Actor`, `0` to `Config.Combat.deviationCap = 100`. Every overdrawn cast adds `shortfall * Config.Combat.overdrawDeviationRate` (`3.0`) to it.
+- **Persistence.** Not persisted anywhere -- resets to `0` on every new `Combat.newActor` (death, stage change), exactly like `health`/`madra` today. This is a combat-moment resource, not a progression one.
+- **Publish.** New `Deviation`/`MaxDeviation` attributes, a third HUD bar under health and madra, filling in a color that reads as a warning rather than a resource (this doc's presentation conventions already reserve red for "damage taken" -- deviation needs its own hue, picked when this is actually built).
+- **At maximum.** Hitting `100` triggers **Qi Deviation**: a forced `Config.Combat.qiDeviationDuration = 4.0s` status. While active: `mitigation` is forced to `0` regardless of active buffs (posture techniques don't protect you from your own overdraw), the actor takes `Config.Combat.qiDeviationBacklashFraction = 0.05` of max health as backlash damage per second, and further overdraw is locked out for the duration (a circuit breaker, not a death spiral). Entering the status resets `deviation` to `0` immediately -- you break, then you're whole again, scarred for the rest of the exchange rather than stuck permanently vulnerable.
+- **At zero.** Nothing -- the normal state, no penalty for never having overdrawn.
+- **Getting out early.** `deviation` decays passively at `Config.Combat.deviationDecayPerSecond = 8` once an actor stops overdrawing (a full `100` drains in `12.5s` of not pushing further -- the same decay-without-delay shape `ImpactSpec.Shake`'s trauma already uses, applied to a combat stat instead of a camera one, reused rather than invented fresh). A posture technique active *during* Qi Deviation shortens the backlash window -- `surge`/`bulwark`/`anchor` all already exist to answer "I am about to take damage I can't avoid," and "I just broke my own qi" is exactly that situation from a new angle. This is deliberate cross-resource design, not incidental: see "How these interact" below.
+- **Which techniques use it.** All of them, universally -- overdraw is a property of the cost system, not a per-technique flag. No existing technique needs a field added for this to apply to it.
+
+### New resource: Flow -- capacity separate from pool
+
+Madra says how deep your reserves are. Nothing today says how fast you can draw on them. Flow is that cap.
+
+- **Mechanic.** A new per-technique field, `flowCost`, paid alongside `madraCost` on every cast, drawn from a separate pool that recovers at a flat rate rather than a percentage. A cast additionally requires `actor.flow >= tech.flowCost`; failing that check refuses the cast with a new reason, `insufficient_flow`, distinct from `insufficient_madra` -- and unlike madra, **flow cannot be overdrawn**. No amount of health is a substitute for throughput; that asymmetry is the point -- madra has an escape hatch for the desperate, flow does not, because flow is meant to read as a measure of trained capacity (an earned-level/Path lever later) rather than willpower.
+- **Where it lives.** `flow: number` on `Combat.Actor`, `0` to `Config.Combat.flowCap = 100`, regenerating `Config.Combat.flowRegenPerSecond = 40` per second flat (not a fraction of the cap, unlike madra) -- full recovery from empty in 2.5s.
+- **Default `flowCost` for the existing pool:** first-pass, `round(tech.madraCost * 0.8)` for every technique that doesn't set its own -- `lance` 14, `volley` 24, `pierce` 35, `tempest` 68, and so on, without hand-tuning all fifteen individually. A future technique is free to set its own `flowCost` independent of `madraCost` once that's worth doing deliberately.
+- **Persistence.** Not persisted -- resets with the actor, like madra.
+- **Publish.** New `Flow`/`MaxFlow` attributes, a fourth HUD bar.
+- **At zero.** Every cast refused regardless of madra on hand, until flow regenerates -- a hard wall, not a soft one.
+- **At maximum.** No special effect; "ready to burst."
+- **What decision this creates.** Cooldowns already gate how often *one* technique can be re-fired; flow gates how much can be fired *in total* across every technique in a loadout inside a short window, regardless of which slots it comes from. Two players with identical madra pools now have very different bursts if one spends it on a single `tempest` (`flowCost 68` -- one cast leaves only `32` of `100` flow, nowhere near enough for a second heavy cast) versus chaining `lance`s (`flowCost 14` each -- seven fit inside the same `100` before flow runs dry) -- the same total madra spend produces a very different flow footprint depending on the *shape* of the spend, which is the "capacity versus flow" seed's whole point.
+
+### New resource: Momentum -- an accumulating meter with an arc
+
+A fight that stays flat from first hit to last is missing something the genre's own fiction promises: a moment where the battle turns. Momentum is that promise, made mechanical.
+
+- **Mechanic.** A meter that rises from *any* hit -- landed or taken -- scaled by the same `ImpactSpec.severity(config, stageIndex, damage)` the presentation layer already computes for every hit (a direct reuse, not a parallel formula): `momentum += severity * Config.Combat.momentumGainScale (40)`. At `Config.Combat.momentumCap = 100`, the actor becomes `momentumReady`. The next technique that actor successfully casts consumes the full meter and is **overcharged**: its `madraCost` and `flowCost` for that one cast are refunded after resolving, and if it deals damage, that damage is multiplied by `1 + Config.Combat.momentumOverchargeDamageBonus (0.50)`.
+- **Where it lives.** `momentum: number` on `Combat.Actor`, plus a `momentumReadyAt: number?` marking when it last capped (for decay timing).
+- **Persistence.** Not persisted -- resets with the actor.
+- **Publish.** New `Momentum`/`MaxMomentum` attributes, a fifth HUD bar (or a glow/fill state on the slot bar itself once `momentumReady` is true, so it reads as "your next press is special" rather than another number to watch -- a presentation choice for whenever this is built, not decided here).
+- **At zero.** Nothing -- a pure reward resource, unlike deviation's pure risk. The two accumulating meters this round adds are deliberately opposite in shape: one punishes recklessness, one rewards being in the fight at all.
+- **Decay.** If `momentum < 100` and no hit (dealt or taken) lands for `Config.Combat.momentumDecayDelay (3.0s)`, it bleeds off at `Config.Combat.momentumDecayPerSecond (5)` -- the same decay-after-delay shape as Settling above and the same decay-without-delay shape `ImpactSpec.Shake`'s trauma already uses, reused a third time rather than invented fresh.
+- **Which techniques use it.** Universal on the gain side (every hit feeds it, no technique needs a flag). The spend side is also universal -- any technique can be the one that gets overcharged, which is deliberate: a player builds momentum however the fight happens to go, then chooses *where* to cash it in, which is a real decision every single time it caps.
+
+### New resource: node reserve -- drawing from the field
+
+Ties combat directly to the node economy this whole game already runs on, and gives a contested node a second reason to be worth standing in beyond cycling refinement.
+
+- **Mechanic.** Every `AuraNodes.Node` gains a `reserve: number`, capped by tier (`Config.NodeTiers.*.reserveCap`: `common 150`, `rare 400`, `prime 1000`) and regenerating slowly and passively (`0.5 * tierData.cycleMultiplier` per second -- `common 1.5`, `rare 4`, `prime 10` -- the same tier-scaling shape refinement cycling and aura farming both already use, applied to a third quantity rather than shared with either). A technique flagged `fieldDraw = true` pays its `madraCost` (and `flowCost`) from the reserve of the node the caster currently occupies instead of from the caster's own pools, up to what the reserve has -- any shortfall is paid from the caster's own madra/flow normally, so running a node dry never hard-refuses the cast, it just stops being free.
+- **Where it lives.** On the node record itself (`AuraNodes.Node`), not per-player -- genuinely shared state. `AuraNodes.create` initializes it to the tier's cap (a freshly spawned node starts full).
+- **Persistence.** Not persisted across sessions -- nodes themselves don't survive a server restart today, and reserve is scoped to the node's own lifetime the same way.
+- **Publish.** Extends the existing `Sensed` broadcast: each entry already carries `tier`/`distance`/`occupants`/`capacity` (`src/client/init.client.luau`'s sense panel reads exactly those fields) -- add `reserve`/`reserveMax` alongside them, so the sense panel can show a node reading low before a player commits to fighting over it.
+- **At zero.** `fieldDraw` techniques fall back to costing the caster's own madra/flow in full -- "the well runs dry, you pay from your own reserves," never a refusal.
+- **At maximum.** No special effect; a freshly spawned or long-unused node is simply fully available.
+- **What this does to node contest.** Occupancy already contests capacity (three-player cap) and, as of round 6, aura-farming progress. A shared, drainable reserve adds a third axis: aggressive `fieldDraw` use by one occupant measurably thins what's left for the others standing on the same node, which is a new kind of tension between allies-of-convenience sharing a node and a new reason a `prime` node (reserve `1000`, the deepest well) is worth fighting to hold rather than just tapping and leaving.
+
+### Affinity-typed cost -- extending (c), not a new pool
+
+The seed offered separate pools per aura or a conversion cost for off-affinity casting. Separate pools are rejected here, not for balance reasons (round 7 doesn't screen for those) but for legibility ones: four mana bars is an attention problem regardless of how balanced they are relative to each other, and that cost doesn't go away under a looser balance mandate. The conversion-cost version is adopted instead, because it's a single extension to a dispatch (c) already has rather than new state:
+
+- (c)'s relation matrix (Match/Counter/Neutral) gains a fourth channel alongside `landingRadius`/`d_cross`/construct geometry/buff duration: **Match: `madraCost -15%`. Counter: `madraCost +25%`.** Applied uniformly across kinds for this first pass (existing channels vary by kind; this one doesn't yet, and there's no reason it has to stay that way once it's actually played).
+- No new state, no new field beyond reading the existing `auraType` vs. node `region` comparison (c) already computes for every other channel.
+- This is where "a loadout spanning several auras pays for its flexibility" comes from without a second currency: casting a countered-affinity technique on a matched node costs *more* madra on top of whatever geometric penalty (c) already applies, and casting into a matching node costs less -- flexibility (a loadout that isn't all one aura) trades against efficiency (always being on-affinity ground), which is exactly the tension aura-typed resources were meant to create.
+
+### Channelled and sustained cost -- a technique shape, not a resource
+
+Not a new pool -- a new way for a technique to spend the pools above, continuously instead of once.
+
+- **Mechanic.** A technique flagged `channelled = true` carries `channelMadraRate`/`channelFlowRate` (per second, while held) instead of a one-time `madraCost`/`flowCost`. This needs a real input-model change: the client sends `UseTechniqueStart(slot, aim)` on press and `UseTechniqueStop(slot)` on release (or the key simply being released client-side, mirrored to the server), rather than one `UseTechnique` firing-and-forgetting. The server ticks the drain every `Config.Combat.constructTickSeconds`-equivalent interval (reusing the cadence forger constructs already tick on rather than inventing a new one) and re-resolves the technique's effect each tick it's still held and still funded.
+- **What happens running dry mid-channel.** Not an ugly instant cutoff -- a forced release, and the technique resolves whatever partial effect it had already built up (or nothing, for an effect with a minimum hold time it never reached) rather than either the full effect or silence. Running out mid-channel needs to be a felt moment, not a null result.
+- **Persistence/publish.** No new resource-level state; publishing is whatever the technique's own effect already needs, same as any other technique.
+- **Example, illustrative:** `torrent` (`ruler`, `channelled`), detailed below.
+
+### How these interact -- a framework, not a list
+
+- **Overdraw feeds Deviation, which posture techniques can shorten.** `surge`/`bulwark`/`anchor` already exist to answer "damage I can't avoid"; Qi Deviation's forced-vulnerable window is exactly that, from a self-inflicted angle. A future revision could let any active posture buff reduce `qiDeviationDuration` directly -- noted as the natural next tie, not built here.
+- **Affinity cost modulation feeds Overdraw.** A countered-affinity cast costs `+25%` madra on top of its base cost; if that pushes the cast past what's on hand, the shortfall is what overdraw actually burns health against. Fighting off-affinity on hostile ground doesn't just geometrically weaken a striker (as (c) already established) -- it now makes running out of madra, and the health-and-deviation cost of pushing through anyway, measurably more likely.
+- **Flow cannot be bailed out by Overdraw; madra can.** The one deliberate asymmetry in the whole framework: health is a valid substitute for depth of reserve, never for rate of throughput. This is what keeps Flow meaningfully different from "a second madra" rather than a reskin of it.
+- **Momentum's payoff is denominated in the same currencies Flow and Overdraw gate.** An overcharged cast refunds `madraCost` and `flowCost` in full -- a capped Momentum meter is the one moment in this framework where spending is free, which is what makes banking it worth the wait instead of dumping it defensively the instant it's available.
+- **Field-draw substitutes the *source* of a payment, not a discount on the amount.** A `fieldDraw` technique still has a real `madraCost`/`flowCost` -- occupying a healthy-reserve node just changes whose pool pays it. Every other interaction above (affinity cost, overdraw, momentum's refund) still applies on top, computed against the same nominal cost regardless of which pool ends up paying it.
+- **Settling is the one regen-side lever, and it's gated by casting specifically.** A player who is purely dashing (Lunge), holding posture (Anchor), or channelling a technique that's still draining does not reset the settling clock -- only a *resolved* cast does. This means committing to a long channel is also, quietly, a decision to keep your madra regen at the slow rate for its whole duration.
+
+### Illustrative new techniques (a handful, not an exhaustive pass)
+
+Three techniques exist only to prove the framework above actually produces something a player would press, not to seed a new full per-kind pool this round -- that's later iterations' work, per (k).
+
+- **`torrent`** (`ruler`, `channelled`, `unlockRequirement = { kind = "always" }`): drains `channelMadraRate 22`/sec and `channelFlowRate 30`/sec while held; deals a damage tick every `constructTickSeconds` to everyone in ruler range, and its radius grows the longer it's held (first-pass: `Config.Combat.ranges.ruler * (1 + 0.15 * secondsHeld)`, uncapped for now). A storm that builds rather than a single cast -- the longer you commit, the more it costs per second and the more ground it covers, and letting go early is a real choice, not a failure state.
+- **`wellstep`** (`forger`, `fieldDraw = true`, `unlockRequirement = { kind = "always" }`): a construct technique identical in shape to `barrier`/`caltrops`/`sentry`, but its `madraCost` (`50`) is paid from the occupied node's reserve whenever there is one to draw from. Cheap-to-free on a healthy node, full price on open ground -- the clearest possible demonstration that field-draw changes economics, not power.
+- **`steadyhand`** (`enforcer`, `unlockRequirement = { kind = "always" }`): spends a full `momentum` meter (requires `momentumReady`) to instantly zero the caster's own `deviation` and grant a flat `0.30` mitigation for `3.0s`. The explicit mechanical link between the fight's two new accumulating meters -- momentum earned from being in the fight buys your way out of a deviation crisis you dug yourself into, rather than only ever buying more damage.
+
+### First-pass numbers this section introduces
+
+Added as new rows to the consolidated table in (j) rather than duplicated here.
