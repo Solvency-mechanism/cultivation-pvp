@@ -24,6 +24,9 @@
         "TechniqueFired": {
           "$className": "RemoteEvent"
         },
+        "CastStarted": {
+          "$className": "RemoteEvent"
+        },
         "Impact": {
           "$className": "RemoteEvent"
         }

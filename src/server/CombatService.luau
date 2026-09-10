@@ -41,6 +41,7 @@ local dying: { [number]: boolean } = {}
 local lastRequestAt: { [number]: number } = {}
 
 local techniqueFiredRemote: RemoteEvent? = nil
+local castStartedRemote: RemoteEvent? = nil
 local impactRemote: RemoteEvent? = nil
 local constructCounter = 0
 local constructFolder: Folder? = nil
@@ -137,6 +138,42 @@ local function broadcastVfx(
 		origin = origin,
 		target = target,
 		hit = hit,
+	})
+end
+
+--[[ Tell every client that a cast has *begun*, at intent time.
+
+	The telegraph. Until now `broadcastVfx` was the only thing clients heard
+	about a technique, and it fires from `resolveEffect` -- which runs after
+	`task.delay(tech.windup)`. An opponent therefore saw nothing at all until the
+	technique had already landed: a 1.8s Tempest windup was, from the defender's
+	side, instantaneous. Every piece of dodge arithmetic in the combat spec
+	assumes a telegraph that did not exist.
+
+	This leaks nothing. Cost, cooldown and the global cooldown were all paid by
+	`Combat.use` before this fires, so the cast is already committed; announcing
+	it early only reveals, a windup earlier, what the resolution would reveal
+	anyway. Presentation only -- no client reply is read, and a client that
+	ignores this changes nothing but its own screen.
+
+	`windup` travels as a duration rather than a deadline on purpose: `os.clock`
+	is not a shared clock between a server and a client, so a timestamp would be
+	meaningless on arrival. Each client starts its own bar on receipt and eats
+	the one-way latency as a small head start for the defender, which is the
+	right direction to be wrong in. ]]
+local function broadcastCastStart(caster: Player, techId: string)
+	if not castStartedRemote then
+		return
+	end
+	local tech = Config.Techniques[techId]
+	if not tech then
+		return
+	end
+	castStartedRemote:FireAllClients({
+		casterId = caster.UserId,
+		techId = techId,
+		kind = tech.kind,
+		windup = tech.windup,
 	})
 end
 
@@ -482,6 +519,10 @@ local function onUseTechnique(player: Player, slot: unknown, suppliedAim: unknow
 
 	publish(player)
 
+	-- Announced before the windup rather than after it, which is the whole
+	-- point: the defender's reaction window is the windup.
+	broadcastCastStart(player, techId)
+
 	-- Aim is sampled at cast, not at resolution: a long windup is a commitment,
 	-- and letting it track the camera through the telegraph would erase the
 	-- counterplay the windup is there to buy.
@@ -594,6 +635,10 @@ function CombatService.start()
 	local fired = remotes:WaitForChild("TechniqueFired")
 	assert(fired:IsA("RemoteEvent"), "TechniqueFired must be a RemoteEvent")
 	techniqueFiredRemote = fired
+
+	local castStarted = remotes:WaitForChild("CastStarted")
+	assert(castStarted:IsA("RemoteEvent"), "CastStarted must be a RemoteEvent")
+	castStartedRemote = castStarted
 
 	local impact = remotes:WaitForChild("Impact")
 	assert(impact:IsA("RemoteEvent"), "Impact must be a RemoteEvent")
