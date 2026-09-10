@@ -297,11 +297,14 @@ local function handleDeath(player: Player, attackerActor: Combat.Actor?)
 			a percentage does not. ]]
 		local lossAmount = math.floor(loss)
 		if killer then
-			AwarenessService.notify(killer, "kill", `You kill {player.Name}.`)
+			-- DisplayName, not Name: interface's nameplates and target frame
+			-- both read DisplayName, and a notice naming someone by their
+			-- username instead would be a different person to look for mid-fight.
+			AwarenessService.notify(killer, "kill", `You kill {player.DisplayName}.`)
 			AwarenessService.notify(
 				player,
 				"death",
-				`{killer.Name} kills you. Your refinement falls {lossAmount}.`
+				`{killer.DisplayName} kills you. Your refinement falls {lossAmount}.`
 			)
 			-- Everyone else gets the public version, which is what turns a kill
 			-- into a shared story in a small server instead of a silence only
@@ -311,7 +314,7 @@ local function handleDeath(player: Player, attackerActor: Combat.Actor?)
 					AwarenessService.notify(
 						spectator,
 						"server",
-						`{killer.Name} kills {player.Name}.`
+						`{killer.DisplayName} kills {player.DisplayName}.`
 					)
 				end
 			end
