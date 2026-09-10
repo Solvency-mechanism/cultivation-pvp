@@ -23,6 +23,9 @@
         },
         "TechniqueFired": {
           "$className": "RemoteEvent"
+        },
+        "Impact": {
+          "$className": "RemoteEvent"
         }
       },
       "Packages": {

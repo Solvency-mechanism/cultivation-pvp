@@ -41,6 +41,7 @@ local dying: { [number]: boolean } = {}
 local lastRequestAt: { [number]: number } = {}
 
 local techniqueFiredRemote: RemoteEvent? = nil
+local impactRemote: RemoteEvent? = nil
 local constructCounter = 0
 local constructFolder: Folder? = nil
 
@@ -231,6 +232,22 @@ local function damagePlayer(source: Combat.Actor, target: Player, raw: number, n
 
 	mirrorHumanoid(target, targetActor)
 	publish(target)
+
+	--[[ Every applied hit, from one place, so a Ruler sweep and a construct tick
+		land the same feedback a striker bolt does. Presentation only: the damage
+		above is already final, and read before death is processed so the body is
+		still where it was struck. ]]
+	local impactAt = rootOf(target)
+	if impactRemote and impactAt then
+		impactRemote:FireAllClients({
+			attackerId = tonumber(source.id) or 0,
+			targetId = target.UserId,
+			position = impactAt.Position,
+			damage = result.dealt,
+			stageIndex = targetActor.stageIndex,
+			died = result.died,
+		})
+	end
 
 	if result.died then
 		handleDeath(target)
@@ -577,6 +594,10 @@ function CombatService.start()
 	local fired = remotes:WaitForChild("TechniqueFired")
 	assert(fired:IsA("RemoteEvent"), "TechniqueFired must be a RemoteEvent")
 	techniqueFiredRemote = fired
+
+	local impact = remotes:WaitForChild("Impact")
+	assert(impact:IsA("RemoteEvent"), "Impact must be a RemoteEvent")
+	impactRemote = impact
 
 	local useTechnique = remotes:WaitForChild("UseTechnique")
 	assert(useTechnique:IsA("RemoteEvent"), "UseTechnique must be a RemoteEvent")

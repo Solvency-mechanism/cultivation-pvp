@@ -15,22 +15,58 @@
 		target   Vector3? -- where a striker landed; nil for area kinds
 		hit      boolean  -- whether it connected
 
-	Three rules hold everywhere below.
+	================================ THE FOUR LAWS ================================
 
-	1. **Never obstruct the server.** Every BasePart is Anchored, CanCollide=false,
-	   CanQuery=false, CanTouch=false. The striker raycast and both Ruler/construct
-	   overlap queries run on the server against instances that do not exist there
-	   at all -- but the same code runs in a listen-server Studio session, so the
-	   query flags are what actually guarantee a beam cannot eat a shot.
+	Measured off the reference, not invented, and every technique below obeys all
+	four. The first pass broke three of them and the frames showed it: Lance read
+	as a white blob because it had no dark volume, and Siphon washed the screen
+	purple because hue was carrying readability that value should have carried.
 
-	2. **Each of the twelve reads in one frame.** A blind frame of Volley must not
-	   be confusable with Lance, and Upheaval must not be confusable with Tempest.
-	   Silhouette does that work, not colour: spear, fan, beam; column, plates,
-	   ribbons; dome, spikes, floating core; slabs, inward streaks, vortex.
+	1. VALUE CARRIES READABILITY; HUE ONLY CARRIES FLAVOUR.
+	   Every effect pairs a near-black opaque volume (`VOID`, which occludes the
+	   world) with a pure-white neon shell (`SHELL`). That pairing is legible
+	   against grass, stone, daylight or shadow with no reliance on colour at all.
+	   The technique's own colour appears only as a thin, very transparent rim and
+	   in particles. **No large, low-transparency neon plane, ever** -- an emissive
+	   sheet flattens the frame, and in a PvP game that means you cannot see the
+	   person you are fighting.
 
-	3. **Cost scales with what you can see.** Detail is chosen per cast from camera
-	   distance and a live part budget, so a six-way brawl degrades to fewer
-	   segments rather than to a frame-rate cliff.
+	2. MASS. The heavy techniques are sized in character-heights, not studs.
+	   Pierce spans up to fourteen; a Ruler field is fifteen across. Lance is
+	   deliberately under the reference ratio: it fires every 1.2 seconds, and a
+	   frame-filling effect on the spam button is noise rather than power. Weight
+	   is spent where the cooldown says it should be.
+
+	3. IMPACT IS THREE ELEMENTS WITH THREE LIFETIMES.
+	   A white flash core (~0.15s), white spark shards (~0.4s), and a dark dust
+	   puff that outlives both (~1.2s). The dust is what gives a move screen time
+	   without adding a single lumen of glare, because it is dark.
+
+	4. A MOVE OCCUPIES 1.5-2.5 SECONDS. Charge, body, impact, settle. Techniques
+	   that command terrain leave a scar behind that both players have to read.
+
+	================================== THE SEAMS ==================================
+
+	**Impact.luau owns the moment of contact and this file does not touch it.**
+	It is driven by its own server broadcast, fired from `damagePlayer` at the
+	instant damage is applied, and it draws the flash, the shards, the dust, the
+	damage number, the hitmarker, the hitstop and the camera shake -- all scaled
+	to the fraction of a health bar that just vanished. So a technique that
+	*connects* stops here at its own destruction: drawing a second flash and a
+	second dust puff on the same stud would not read as twice the punch, it would
+	read as mush. The camera belongs to Impact too, and nothing below writes to
+	it.
+
+	What is left on this side of that line is everything Impact cannot know
+	about: the charge, the body, the travel, the terrain, the auras -- and the
+	*miss*, which applies no damage, fires no impact event, and would otherwise
+	be completely silent.
+
+	`Vfx.charge` renders a windup. The server broadcasts only on *resolve*, so
+	the client cannot see an opponent's windup at all -- the counterplay half of
+	that needs one broadcast at cast time, and this is the function it should
+	call. Until then the local caster's own windup is driven from the keypress and
+	collapses visibly if the server never confirms it.
 ]]
 
 local Debris = game:GetService("Debris")
@@ -38,6 +74,7 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 
 local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
@@ -53,42 +90,65 @@ export type Shot = {
 	hit: boolean,
 }
 
---[[ Two colours per technique and nothing else. `core` is the near-white hot
-	centre, `glow` the saturated identity colour. Anything that wants a third
-	tone darkens `glow` rather than inventing one, so a technique can never drift
-	away from its own palette. ]]
+-- Colour is flavour. `core` is the hot near-white, `glow` the identity hue, used
+-- only for thin rims and particles.
 type Palette = {
 	core: Color3,
 	glow: Color3,
 }
 
-type Draw = (Shot, Palette, number, number) -> ()
+-- Everything a draw function needs, resolved once at dispatch. One table, so
+-- adding a field is not twelve signature changes.
+type Cast = {
+	shot: Shot,
+	palette: Palette,
+	duration: number,
+	weight: number,
+	level: number,
+}
+
+type Draw = (Cast) -> ()
 
 local RNG = Random.new()
 
--- Cylinder parts run along their local X, so a flat ground disc is a cylinder
--- rotated a quarter turn about Z. Every ground ring in this file uses this.
-local FLAT = CFrame.Angles(0, 0, math.pi / 2)
+-- ------------------------------------------------------------------- the laws
 
--- Cylinder X aligned with the frame's look direction, for impact rings that face
--- back down the path a shot travelled.
-local FACING = CFrame.Angles(0, math.pi / 2, 0)
+-- One character height. Every size below that claims to be "big" is written as a
+-- multiple of this, so the ratio survives anyone retuning the numbers.
+local CHAR = 5.5
+
+--[[ Law one, as two constants.
+
+	VOID is opaque and reads dark against a world whose ground sits around 55%
+	grey and whose stone sits at 30-50%. SHELL is the brightest thing allowed on
+	screen. Everything reads off the distance between them. ]]
+local VOID = Color3.fromRGB(10, 10, 14)
+local SHELL = Color3.fromRGB(255, 255, 255)
+local ASH = Color3.fromRGB(96, 96, 104)
+local ROCK = Color3.fromRGB(52, 45, 40)
+
+-- Cylinder parts run along their local X: a quarter turn about Z stands the axis
+-- up (a ground plate), a quarter turn about Y lays it down a look-frame's -Z.
+local FLAT = CFrame.Angles(0, 0, math.pi / 2)
+local ALONG = CFrame.Angles(0, math.pi / 2, 0)
 
 local DETAIL_NONE = 0
 local DETAIL_LOW = 1
 local DETAIL_MID = 2
 local DETAIL_FULL = 3
 
--- Distances, in studs, at which a cast drops a detail tier. The far cut is well
--- past Ruler's radius so a fight is still legible from across the arena.
 local DETAIL_NEAR = 110
 local DETAIL_MEDIUM = 260
 local DETAIL_FAR = 520
 
---[[ Above this many live instances in the scene folder, every new cast is forced
-	down to DETAIL_LOW. A ceiling rather than a queue: dropping segments off a
-	cast nobody can follow anyway is always better than dropping frames. ]]
-local PART_BUDGET = 300
+--[[ Above the first ceiling every new cast drops to DETAIL_LOW; above the second
+	it is skipped entirely. Dark opaque volume is the cheapest thing the renderer
+	does, so this pass costs *less* fill rate than the glowing one it replaces
+	despite being far larger on screen. What it spends is instance count, and
+	these two numbers are what cap that -- held deliberately below what this file
+	alone could afford, because Impact.luau is spending from the same frame. ]]
+local PART_BUDGET = 220
+local PART_CEILING = 560
 
 local RULER_RADIUS = Config.Combat.ranges.ruler
 local FORGER_RADIUS = Config.Combat.ranges.forger
@@ -98,23 +158,19 @@ local FORGER_RADIUS = Config.Combat.ranges.forger
 local PULSE_SECONDS = Config.Combat.constructTickSeconds
 
 local PALETTE: { [string]: Palette } = {
-	-- Striker: cold, fast, single-target.
 	lance = { core = Color3.fromRGB(220, 246, 255), glow = Color3.fromRGB(60, 170, 255) },
 	volley = { core = Color3.fromRGB(255, 240, 200), glow = Color3.fromRGB(255, 165, 50) },
 	pierce = { core = Color3.fromRGB(255, 255, 255), glow = Color3.fromRGB(190, 90, 255) },
 
-	-- Enforcer: worn on the body, so these read against skin and shirts.
 	surge = { core = Color3.fromRGB(255, 226, 170), glow = Color3.fromRGB(255, 92, 40) },
 	bulwark = { core = Color3.fromRGB(222, 240, 255), glow = Color3.fromRGB(70, 130, 255) },
 	swiftstep = { core = Color3.fromRGB(226, 255, 232), glow = Color3.fromRGB(70, 235, 140) },
 
-	-- Forger: placed, and has to stay readable for its whole duration.
 	barrier = { core = Color3.fromRGB(228, 248, 255), glow = Color3.fromRGB(90, 185, 255) },
 	caltrops = { core = Color3.fromRGB(255, 214, 160), glow = Color3.fromRGB(226, 88, 46) },
 	sentry = { core = Color3.fromRGB(255, 246, 214), glow = Color3.fromRGB(255, 188, 66) },
 
-	-- Ruler: terrain colours, because the terrain is what these command.
-	upheaval = { core = Color3.fromRGB(255, 186, 112), glow = Color3.fromRGB(158, 92, 52) },
+	upheaval = { core = Color3.fromRGB(255, 186, 112), glow = Color3.fromRGB(198, 96, 40) },
 	siphon = { core = Color3.fromRGB(236, 206, 255), glow = Color3.fromRGB(132, 58, 216) },
 	tempest = { core = Color3.fromRGB(246, 250, 255), glow = Color3.fromRGB(128, 178, 255) },
 }
@@ -125,8 +181,6 @@ local FALLBACK: Palette =
 -- A miss still has to draw, or the button reads as broken. It draws in this
 -- instead of the technique's own colour, which is the whole tell.
 local MISS: Palette = { core = Color3.fromRGB(206, 210, 222), glow = Color3.fromRGB(120, 124, 138) }
-
-local ROCK = Color3.fromRGB(74, 63, 55)
 
 -- ---------------------------------------------------------------- scene, budget
 
@@ -163,13 +217,16 @@ local function detailAt(position: Vector3): number
 		level = DETAIL_LOW
 	end
 
-	if level > DETAIL_LOW and #scene():GetChildren() > PART_BUDGET then
+	local live = #scene():GetChildren()
+	if live > PART_CEILING then
+		return DETAIL_NONE
+	elseif live > PART_BUDGET and level > DETAIL_LOW then
 		level = DETAIL_LOW
 	end
 	return level
 end
 
--- Pick a count per detail tier. Written out at every call site so the cost of a
+-- Pick a count per detail tier. Written out at every call site, so the cost of a
 -- cast is legible where the cast is written.
 local function tier(level: number, low: number, mid: number, full: number): number
 	if level >= DETAIL_FULL then
@@ -196,7 +253,40 @@ local function decorate(part: BasePart)
 	part.Parent = scene()
 end
 
-local function block(size: Vector3, cf: CFrame, color: Color3, transparency: number): Part
+--[[ Law one, part one: the dark mass.
+
+	SmoothPlastic rather than Neon, because this is supposed to take light and
+	occlude what is behind it. Opaque geometry is also the cheapest thing the
+	renderer does, which is why a pass built on dark volume costs less than the
+	glowing one it replaced. ]]
+local function volume(size: Vector3, cf: CFrame, transparency: number): Part
+	local part = Instance.new("Part")
+	part.Size = size
+	part.CFrame = cf
+	part.Color = VOID
+	part.Material = Enum.Material.SmoothPlastic
+	part.Reflectance = 0
+	part.Transparency = transparency
+	decorate(part)
+	return part
+end
+
+-- Law one, part two: the white shell. Pure white neon, and the only thing in the
+-- file allowed to be the brightest value on screen.
+local function shell(size: Vector3, cf: CFrame, transparency: number): Part
+	local part = Instance.new("Part")
+	part.Size = size
+	part.CFrame = cf
+	part.Color = SHELL
+	part.Material = Enum.Material.Neon
+	part.Transparency = transparency
+	decorate(part)
+	return part
+end
+
+-- Flavour. Always thin, always very transparent, never a plane. If a rim is
+-- doing readability work, the shell beside it is too small.
+local function rim(size: Vector3, cf: CFrame, color: Color3, transparency: number): Part
 	local part = Instance.new("Part")
 	part.Size = size
 	part.CFrame = cf
@@ -213,15 +303,16 @@ local function ball(position: Vector3, diameter: number, color: Color3, transpar
 	part.Size = Vector3.one * diameter
 	part.CFrame = CFrame.new(position)
 	part.Color = color
-	part.Material = Enum.Material.Neon
+	part.Material = if color == VOID then Enum.Material.SmoothPlastic else Enum.Material.Neon
 	part.Transparency = transparency
 	decorate(part)
 	return part
 end
 
---[[ A disc. `pivot` already carries the axis rotation (FLAT for a ground ring,
-	lookAt * FACING for one that faces a direction), because callers know which
-	way their disc should point and this should not have to guess. ]]
+--[[ A disc. `pivot` already carries the axis rotation (FLAT for a ground plate,
+	look * ALONG for one that faces a direction), because callers know which way
+	their disc should point and this should not have to guess. Size is given in
+	cylinder convention: thickness first, then diameter. ]]
 local function disc(
 	pivot: CFrame,
 	diameter: number,
@@ -234,18 +325,19 @@ local function disc(
 	part.Size = Vector3.new(thickness, diameter, diameter)
 	part.CFrame = pivot
 	part.Color = color
-	part.Material = Enum.Material.Neon
+	part.Material = if color == VOID then Enum.Material.SmoothPlastic else Enum.Material.Neon
 	part.Transparency = transparency
 	decorate(part)
 	return part
 end
 
-local function wedge(size: Vector3, cf: CFrame, color: Color3, material: Enum.Material): WedgePart
+-- A dark wedge, for anything that needs a point on it.
+local function wedgeVolume(size: Vector3, cf: CFrame): WedgePart
 	local part = Instance.new("WedgePart")
 	part.Size = size
 	part.CFrame = cf
-	part.Color = color
-	part.Material = material
+	part.Color = VOID
+	part.Material = Enum.Material.SmoothPlastic
 	decorate(part)
 	return part
 end
@@ -260,8 +352,6 @@ local function tweenTo(
 		:Play()
 end
 
--- Grow and fade in one gesture, then clean up. The single most used motion in
--- the file: every shockwave, halo and bloom is this.
 local function bloom(part: BasePart, seconds: number, endSize: Vector3, style: Enum.EasingStyle)
 	tweenTo(part, seconds, style, { Size = endSize, Transparency = 1 })
 	Debris:AddItem(part, seconds + 0.05)
@@ -272,8 +362,8 @@ local function fadeOut(part: BasePart, seconds: number)
 	Debris:AddItem(part, seconds + 0.05)
 end
 
---[[ A short-lived light. Capped hard, because lights are the one thing here that
-	costs more than its pixels: a handful is punch, a dozen is a stutter. ]]
+--[[ A short-lived light. Used sparingly, because lights are the one thing here
+	that costs more than its pixels: a handful is punch, a dozen is a stutter. ]]
 local function flare(position: Vector3, color: Color3, brightness: number, range: number)
 	local host = Instance.new("Part")
 	host.Size = Vector3.one * 0.2
@@ -306,22 +396,24 @@ type SprayConfig = {
 	drag: number?,
 	rate: number?,
 	direction: Enum.NormalId?,
-	square: boolean?,
+	-- Dust and smoke: takes light instead of emitting it, so a big slow cloud
+	-- adds mass to a frame instead of glare. This is what buys law four's screen
+	-- time without breaking law one.
+	dusty: boolean?,
 }
 
 local function configureSpray(emitter: ParticleEmitter, config: SprayConfig)
+	local dusty = config.dusty == true
 	emitter.Color = ColorSequence.new(config.core, config.glow)
 	emitter.Size = NumberSequence.new({
 		NumberSequenceKeypoint.new(0, config.sizeFrom),
 		NumberSequenceKeypoint.new(0.4, (config.sizeFrom + config.sizeTo) * 0.6),
 		NumberSequenceKeypoint.new(1, config.sizeTo),
 	})
-	-- Fading in over the first frames rather than popping is most of why a burst
-	-- reads as energy instead of as a texture.
 	emitter.Transparency = NumberSequence.new({
 		NumberSequenceKeypoint.new(0, 1),
-		NumberSequenceKeypoint.new(0.09, 0.05),
-		NumberSequenceKeypoint.new(0.7, 0.35),
+		NumberSequenceKeypoint.new(0.09, if dusty then 0.45 else 0.05),
+		NumberSequenceKeypoint.new(0.7, if dusty then 0.7 else 0.35),
 		NumberSequenceKeypoint.new(1, 1),
 	})
 	emitter.Speed = config.speed or NumberRange.new(14, 30)
@@ -334,8 +426,8 @@ local function configureSpray(emitter: ParticleEmitter, config: SprayConfig)
 	emitter.Rate = config.rate or 0
 	emitter.Rotation = NumberRange.new(0, 360)
 	emitter.RotSpeed = NumberRange.new(-260, 260)
-	emitter.LightEmission = 0.9
-	emitter.LightInfluence = 0
+	emitter.LightEmission = if dusty then 0 else 0.9
+	emitter.LightInfluence = if dusty then 1 else 0
 	emitter.Enabled = true
 end
 
@@ -344,7 +436,6 @@ local function sprayLife(config: SprayConfig): number
 	return if life then life.Max else 0.5
 end
 
--- A one-shot burst at a point in the world.
 local function spray(position: Vector3, count: number, config: SprayConfig)
 	if count <= 0 then
 		return
@@ -363,8 +454,9 @@ local function spray(position: Vector3, count: number, config: SprayConfig)
 end
 
 --[[ A continuous emitter riding an existing part. Parented to an Attachment on
-	the part, which means the engine moves it for free -- no per-frame work for
-	anything that only has to stay with a body. ]]
+	the part, so the engine moves it for free -- no per-frame work for anything
+	that only has to stay with a body. The Attachment is what comes back: it owns
+	the emitter, so whoever holds it can dispose of the whole thing. ]]
 local function stream(host: BasePart, offset: Vector3, config: SprayConfig): Attachment
 	local attachment = Instance.new("Attachment")
 	attachment.Position = offset
@@ -373,8 +465,6 @@ local function stream(host: BasePart, offset: Vector3, config: SprayConfig): Att
 	local emitter = Instance.new("ParticleEmitter")
 	configureSpray(emitter, config)
 	emitter.Parent = attachment
-	-- The Attachment is returned, not the emitter: it is the owner of everything
-	-- created here, so whoever holds it can dispose of the whole thing.
 	return attachment
 end
 
@@ -385,12 +475,18 @@ end
 	Aura rings, orbiting plates and hovering cores are all anchored -- rule one is
 	not negotiable -- so nothing welds and nothing is simulated. One Heartbeat
 	drives every one of them from a table, and disconnects itself the moment the
-	table empties, so an idle client pays nothing at all. ]]
+	table empties, so an idle client pays nothing at all.
+
+	`offsetTo` and `morph` let an offset travel over time: a ring can close on the
+	caster while still tracking the caster, which a plain CFrame tween cannot do
+	because the follower would overwrite it every frame. ]]
 type Follower = {
 	part: BasePart,
 	anchor: BasePart?,
 	position: Vector3,
 	offset: CFrame,
+	offsetTo: CFrame,
+	morph: number,
 	spin: number,
 	bob: number,
 	born: number,
@@ -416,16 +512,49 @@ local function stepFollowers()
 		end
 
 		local age = now - follower.born
+		local seat = follower.offset
+		if follower.morph > 0 then
+			seat = follower.offset:Lerp(follower.offsetTo, math.clamp(age / follower.morph, 0, 1))
+		end
+
 		local base = if anchor then anchor.Position else follower.position
 		local lift = if follower.bob ~= 0 then math.sin(age * 2.3) * follower.bob else 0
 		follower.part.CFrame = CFrame.new(base + Vector3.new(0, lift, 0))
 			* CFrame.Angles(0, age * follower.spin, 0)
-			* follower.offset
+			* seat
 	end
 
 	if #followers == 0 and heartbeat then
 		heartbeat:Disconnect()
 		heartbeat = nil
+	end
+end
+
+local function followMorph(
+	part: BasePart,
+	anchor: BasePart?,
+	position: Vector3,
+	offset: CFrame,
+	offsetTo: CFrame,
+	morph: number,
+	spin: number,
+	bob: number,
+	duration: number
+)
+	table.insert(followers, {
+		part = part,
+		anchor = anchor,
+		position = position,
+		offset = offset,
+		offsetTo = offsetTo,
+		morph = morph,
+		spin = spin,
+		bob = bob,
+		born = os.clock(),
+		expiresAt = os.clock() + duration,
+	})
+	if not heartbeat then
+		heartbeat = RunService.Heartbeat:Connect(stepFollowers)
 	end
 end
 
@@ -438,162 +567,7 @@ local function follow(
 	bob: number,
 	duration: number
 )
-	table.insert(followers, {
-		part = part,
-		anchor = anchor,
-		position = position,
-		offset = offset,
-		spin = spin,
-		bob = bob,
-		born = os.clock(),
-		expiresAt = os.clock() + duration,
-	})
-	if not heartbeat then
-		heartbeat = RunService.Heartbeat:Connect(stepFollowers)
-	end
-end
-
--- ----------------------------------------------------------------------- shake
-
---[[ Camera shake, applied as an offset after the default camera has already
-	written its CFrame for the frame. Never stored, so it cannot leave the camera
-	somewhere strange if this errors -- next frame the camera scripts overwrite it
-	and the offset simply stops being added. ]]
-local SHAKE_BIND = "ClientVfxShake"
-local SHAKE_CEILING = 0.75
-
-local shakePower = 0
-local shakeBound = false
-
-local function stepShake(deltaSeconds: number)
-	local camera = Workspace.CurrentCamera
-	if not camera or shakePower <= 0.002 then
-		shakePower = 0
-		if shakeBound then
-			RunService:UnbindFromRenderStep(SHAKE_BIND)
-			shakeBound = false
-		end
-		return
-	end
-
-	local power = shakePower
-	camera.CFrame = camera.CFrame
-		* CFrame.new(
-			RNG:NextNumber(-power, power),
-			RNG:NextNumber(-power, power),
-			RNG:NextNumber(-power, power) * 0.35
-		)
-		* CFrame.Angles(
-			RNG:NextNumber(-power, power) * 0.014,
-			RNG:NextNumber(-power, power) * 0.014,
-			RNG:NextNumber(-power, power) * 0.03
-		)
-
-	shakePower = power * math.exp(-deltaSeconds * 7.5)
-end
-
-local function shake(amount: number)
-	if amount <= 0 then
-		return
-	end
-	shakePower = math.min(SHAKE_CEILING, math.max(shakePower, amount))
-	if not shakeBound then
-		shakeBound = true
-		RunService:BindToRenderStep(SHAKE_BIND, Enum.RenderPriority.Camera.Value + 1, stepShake)
-	end
-end
-
---[[ Shake falls off with distance, so a Tempest across the arena is felt and a
-	Tempest at your feet is felt properly. Nothing shakes for something the camera
-	is too far away to see. ]]
-local function shakeAt(position: Vector3, amount: number, radius: number)
-	local camera = Workspace.CurrentCamera
-	if not camera then
-		return
-	end
-	local distance = (camera.CFrame.Position - position).Magnitude
-	if distance >= radius then
-		return
-	end
-	shake(amount * (1 - distance / radius))
-end
-
--- ------------------------------------------------------------------- hit marker
-
---[[ Four ticks at screen centre when *your* shot connects.
-
-	The world already shows an impact, but in third person the impact is where the
-	enemy is, not where the eye is. This is the one piece of feedback aimed at the
-	caster rather than at the scene, and it is drawn only on `hit` -- which the
-	server decided, so it can never lie about a miss. ]]
-local hitTicks: { Frame } = {}
-local hitScale: UIScale? = nil
-
-local function buildHitMarker()
-	local player = Players.LocalPlayer
-	if not player then
-		return
-	end
-	local gui = player:FindFirstChildOfClass("PlayerGui")
-	if not gui then
-		return
-	end
-
-	local screen = Instance.new("ScreenGui")
-	screen.Name = "TechniqueFeedback"
-	screen.ResetOnSpawn = false
-	screen.IgnoreGuiInset = true
-	screen.DisplayOrder = 4
-	screen.Parent = gui
-
-	local holder = Instance.new("Frame")
-	holder.AnchorPoint = Vector2.new(0.5, 0.5)
-	holder.Position = UDim2.fromScale(0.5, 0.5)
-	holder.Size = UDim2.fromOffset(48, 48)
-	holder.BackgroundTransparency = 1
-	holder.Parent = screen
-
-	local scale = Instance.new("UIScale")
-	scale.Scale = 1
-	scale.Parent = holder
-	hitScale = scale
-
-	-- Four diagonal ticks, corner outward, so the shape is unmistakably a hit
-	-- confirmation and not a crosshair the game does not otherwise have.
-	local corners: { { at: UDim2, turn: number } } = {
-		{ at = UDim2.fromScale(0.16, 0.16), turn = 45 },
-		{ at = UDim2.fromScale(0.84, 0.16), turn = -45 },
-		{ at = UDim2.fromScale(0.16, 0.84), turn = -45 },
-		{ at = UDim2.fromScale(0.84, 0.84), turn = 45 },
-	}
-	for _, corner in corners do
-		local tick = Instance.new("Frame")
-		tick.AnchorPoint = Vector2.new(0.5, 0.5)
-		tick.Position = corner.at
-		tick.Size = UDim2.fromOffset(3, 13)
-		tick.Rotation = corner.turn
-		tick.BorderSizePixel = 0
-		tick.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-		tick.BackgroundTransparency = 1
-		tick.Parent = holder
-		table.insert(hitTicks, tick)
-	end
-end
-
-local function markHit(palette: Palette)
-	if #hitTicks == 0 then
-		buildHitMarker()
-	end
-	local scale = hitScale
-	if scale then
-		scale.Scale = 0.62
-		tweenTo(scale, 0.22, Enum.EasingStyle.Back, { Scale = 1.15 })
-	end
-	for _, tick in hitTicks do
-		tick.BackgroundColor3 = palette.core
-		tick.BackgroundTransparency = 0
-		tweenTo(tick, 0.26, Enum.EasingStyle.Quad, { BackgroundTransparency = 1 })
-	end
+	followMorph(part, anchor, position, offset, offset, 0, spin, bob, duration)
 end
 
 -- ------------------------------------------------------------------ geometry aid
@@ -619,13 +593,10 @@ local function rootOf(userId: number): BasePart?
 	return nil
 end
 
---[[ Where the floor is under a point.
-
-	Ground effects that guess at the floor read as broken the first time anyone
-	casts on a slope, and node spawn heights are already a known open question, so
-	this asks. Characters and this folder are excluded; every part here is
-	CanQuery=false anyway, but excluding the folder keeps that true even if a
-	future part is added carelessly. ]]
+--[[ Where the floor is under a point. Ground effects that guess at the floor
+	read as broken the first time anyone casts on a slope. Characters and this
+	folder are excluded; every part here is CanQuery=false anyway, but excluding
+	the folder keeps that true even if a future part is added carelessly. ]]
 local function groundY(position: Vector3, fallback: number): number
 	local params = RaycastParams.new()
 	params.FilterType = Enum.RaycastFilterType.Exclude
@@ -645,7 +616,6 @@ local function groundY(position: Vector3, fallback: number): number
 	return if result then result.Position.Y else fallback
 end
 
--- A direction, guaranteed unit and never zero.
 local function aim(from: Vector3, to: Vector3): Vector3
 	local delta = to - from
 	if delta.Magnitude < 1e-3 then
@@ -654,8 +624,6 @@ local function aim(from: Vector3, to: Vector3): Vector3
 	return delta.Unit
 end
 
--- Horizontal right-hand vector for a direction, so muzzles can sit beside the
--- body instead of inside the chest.
 local function sideways(direction: Vector3): Vector3
 	local flat = Vector3.new(direction.Z, 0, -direction.X)
 	if flat.Magnitude < 1e-3 then
@@ -664,11 +632,9 @@ local function sideways(direction: Vector3): Vector3
 	return flat.Unit
 end
 
---[[ A frame looking from one point at another.
-
-	`CFrame.lookAt` produces NaN when the direction it is given is parallel to its
-	up vector, and a part assigned a NaN CFrame does not draw at all. Tempest's
-	bolts fall almost straight down, so every oriented part in this file is built
+--[[ `CFrame.lookAt` produces NaN when the direction it is given is parallel to
+	its up vector, and a part assigned a NaN CFrame does not draw at all. Tempest
+	drops bolts almost straight down, so every oriented part in this file is built
 	through here and picks a different up when the direction is near vertical. ]]
 local function look(from: Vector3, to: Vector3): CFrame
 	local direction = aim(from, to)
@@ -676,223 +642,560 @@ local function look(from: Vector3, to: Vector3): CFrame
 	return CFrame.lookAt(from, to, up)
 end
 
--- ------------------------------------------------------------- shared motifs
+-- --------------------------------------------------------------------- motifs
 
---[[ A crisp ring, built from segments because the engine has no torus and an
-	expanding filled disc reads as a wash rather than as an edge. Reserved for the
-	moments that want a hard edge: placements, activations, ground waves. ]]
-local function segmentRing(
-	centre: Vector3,
+--[[ A ring of tangent bars.
+
+	The engine has no torus and a filled disc is a wash, so every hard edge in
+	this file is segments. The quarter turn is what makes each bar lie along the
+	arc instead of pointing out of it: a ring of tangents reads as a circle, a
+	ring of spokes reads as a starburst. ]]
+local function ringSeat(angle: number, radius: number): CFrame
+	return CFrame.Angles(0, angle, 0) * CFrame.new(radius, 0, 0) * ALONG
+end
+
+--[[ A ring that travels: it lies in `frame`'s XZ plane, ends in `frameTo`'s, and
+	scales its radius by `growTo` on the way. That covers opening, closing and
+	rising, which is every ring in the file. ]]
+local function edgeRing(
+	frame: CFrame,
+	frameTo: CFrame,
 	radius: number,
 	segments: number,
 	thickness: number,
-	palette: Palette,
+	color: Color3,
 	seconds: number,
 	growTo: number
 )
-	if segments <= 0 then
+	if segments <= 0 or radius <= 0 then
 		return
 	end
 	local span = (2 * math.pi * radius) / segments
 	for index = 1, segments do
 		local angle = (index / segments) * math.pi * 2
-		local offset = Vector3.new(math.cos(angle) * radius, 0, math.sin(angle) * radius)
-		-- The quarter turn is what makes each segment lie along the arc instead of
-		-- pointing out of it: a ring of tangents reads as a circle, a ring of
-		-- radial spokes reads as a starburst.
-		local facing = CFrame.Angles(0, -angle + math.pi / 2, 0)
-		local part = block(
-			Vector3.new(span * 0.82, thickness, thickness),
-			CFrame.new(centre + offset) * facing,
-			palette.core,
-			0.1
-		)
-		-- Segments scale with the radius they travel to, so the ring stays closed
+		local size = Vector3.new(span * 0.84, thickness, thickness * 1.6)
+		local start = frame * ringSeat(angle, radius)
+		local part = if color == VOID then volume(size, start, 0) else shell(size, start, 0)
+		-- Bars scale with the radius they travel to, so the ring stays closed
 		-- whether it is opening outward or closing inward.
-		local target = centre + offset.Unit * (radius * growTo)
 		tweenTo(part, seconds, Enum.EasingStyle.Quint, {
-			CFrame = CFrame.new(target) * facing,
-			Size = Vector3.new(span * growTo, thickness * 0.4, thickness * 0.4),
+			CFrame = frameTo * ringSeat(angle, radius * growTo),
+			Size = Vector3.new(span * growTo, thickness * 0.35, thickness * 0.6),
 			Transparency = 1,
-			Color = palette.glow,
 		})
 		Debris:AddItem(part, seconds + 0.05)
 	end
 end
 
--- The flat expanding wash. One part, so this is what carries scale when the
--- budget is tight.
-local function groundWave(
+-- A ring that stays put. The common case.
+local function ringAt(
+	centre: Vector3,
+	radius: number,
+	segments: number,
+	thickness: number,
+	color: Color3,
+	seconds: number,
+	growTo: number
+)
+	local frame = CFrame.new(centre)
+	edgeRing(frame, frame, radius, segments, thickness, color, seconds, growTo)
+end
+
+--[[ A ring worn by a body, made of followers so it tracks the caster.
+
+	Filled discs are forbidden by law one -- an eleven-stud white plate at chest
+	height is the blob the first pass shipped -- so every ring on a character is
+	bars with a hole in the middle. ]]
+local function barRing(
+	anchor: BasePart?,
+	position: Vector3,
+	radius: number,
+	segments: number,
+	thickness: number,
+	seat: CFrame,
+	spin: number,
+	duration: number
+): { BasePart }
+	local bars: { BasePart } = {}
+	local span = (2 * math.pi * radius) / segments
+	local base = if anchor then anchor.Position else position
+	for index = 1, segments do
+		local angle = (index / segments) * math.pi * 2
+		local offset = seat * ringSeat(angle, radius)
+		local bar = shell(
+			Vector3.new(span * 0.8, thickness, thickness * 1.5),
+			CFrame.new(base) * offset,
+			0.05
+		)
+		follow(bar, anchor, position, offset, spin, 0, duration)
+		table.insert(bars, bar)
+	end
+	return bars
+end
+
+--[[ The ground wave, rebuilt under law one.
+
+	The first pass made this a low-transparency neon disc and it blew the frame
+	out. It is now a *dark* plate -- which darkens rather than glares, keeps
+	everything standing on it readable, and gives the white leading edge something
+	to read against. This is the lava-field structure from the reference: black
+	crust, bright boundary. ]]
+local function shadowWave(
 	centre: Vector3,
 	fromDiameter: number,
 	toDiameter: number,
-	palette: Palette,
-	seconds: number
-)
-	-- Lifted clear of the floor here rather than at every call site, because a
-	-- disc centred exactly on the ground z-fights with it along its whole radius.
-	local at = centre + Vector3.new(0, 0.25, 0)
-	local part = disc(CFrame.new(at) * FLAT, fromDiameter, 0.6, palette.core, 0.35)
-	tweenTo(part, seconds, Enum.EasingStyle.Quint, {
-		Size = Vector3.new(0.2, toDiameter, toDiameter),
-		Transparency = 1,
-		Color = palette.glow,
-	})
-	Debris:AddItem(part, seconds + 0.05)
-end
-
---[[ Where a striker shot ends.
-
-	`connected` is the whole point of this function. A hit blooms white, throws
-	shards back along the surface and kicks the camera; a miss puffs grey and does
-	none of it. Told apart at a glance, in a single frame, at any distance. ]]
-local function impact(
-	position: Vector3,
-	direction: Vector3,
-	palette: Palette,
-	scale: number,
-	connected: boolean,
+	seconds: number,
 	level: number
 )
-	local shown = if connected then palette else MISS
-	local facing = look(position, position + direction)
-
-	-- The ring faces back down the path, which is what makes an impact read as an
-	-- impact rather than as a puff that happened to be there.
-	local ring = disc(facing * FACING, 2 * scale, 0.5, shown.core, 0.2)
-	bloom(
-		ring,
-		if connected then 0.28 else 0.2,
-		Vector3.new(0.15, 13 * scale, 13 * scale),
-		Enum.EasingStyle.Quint
-	)
-
-	if connected then
-		local flash = ball(position, 1.5 * scale, palette.core, 0.05)
-		bloom(flash, 0.18, Vector3.one * 8 * scale, Enum.EasingStyle.Quad)
-	end
-
-	spray(position, tier(level, 8, 16, 26) * scale, {
-		core = shown.core,
-		glow = shown.glow,
-		sizeFrom = 0.5 * scale,
-		sizeTo = 0,
-		speed = NumberRange.new(18 * scale, 46 * scale),
-		life = NumberRange.new(0.18, 0.42),
-		spread = 180,
-		acceleration = Vector3.new(0, if connected then -30 else -60, 0),
+	local at = centre + Vector3.new(0, 0.25, 0)
+	local plate = disc(CFrame.new(at) * FLAT, fromDiameter, 0.5, VOID, 0.62)
+	tweenTo(plate, seconds, Enum.EasingStyle.Quint, {
+		Size = Vector3.new(0.2, toDiameter, toDiameter),
+		Transparency = 1,
 	})
+	Debris:AddItem(plate, seconds + 0.05)
 
-	if connected and level >= DETAIL_MID then
-		flare(position, palette.glow, 7, 22 * scale)
-	end
+	ringAt(
+		at,
+		fromDiameter * 0.5,
+		tier(level, 6, 10, 16),
+		0.6,
+		SHELL,
+		seconds,
+		toDiameter / math.max(fromDiameter, 0.1)
+	)
+end
 
-	-- Shards fly back along the surface -- the readable difference between "it
-	-- hit something" and "it stopped somewhere".
-	if connected and level >= DETAIL_FULL then
-		for _ = 1, 5 do
-			local scatter =
-				Vector3.new(RNG:NextNumber(-1, 1), RNG:NextNumber(-0.2, 1), RNG:NextNumber(-1, 1))
-			local away = (-direction * 1.6 + scatter).Unit
-			local shard = block(
-				Vector3.new(0.28, 0.28, RNG:NextNumber(1.6, 3.4) * scale),
-				look(position, position + away),
-				palette.core,
-				0.1
-			)
-			local landing = position + away * RNG:NextNumber(6, 12) * scale
-			tweenTo(shard, 0.3, Enum.EasingStyle.Quad, {
-				CFrame = look(landing, landing + away) * CFrame.Angles(0, 0, 3),
-				Size = Vector3.new(0.05, 0.05, 0.6),
-				Transparency = 1,
-			})
-			Debris:AddItem(shard, 0.36)
-		end
-	end
+--[[ Terrain that stays changed.
 
-	if connected then
-		shakeAt(position, 0.16 * scale, 90)
+	Law four: a heavy move alters the world and both players then have to read it.
+	Black crust with bright cracks through it, holding for several seconds before
+	it fades. Dark, so a persistent zone never costs anybody visibility. ]]
+local function scar(
+	centre: Vector3,
+	radius: number,
+	palette: Palette,
+	seconds: number,
+	level: number
+)
+	local at = centre + Vector3.new(0, 0.12, 0)
+	-- Held at better than half transparency: a scar has to darken the ground
+	-- enough to be a fact, and not so much that anyone standing on it vanishes.
+	local crust = disc(CFrame.new(at) * FLAT, radius * 2, 0.4, VOID, 0.55)
+	tweenTo(crust, seconds, Enum.EasingStyle.Sine, { Transparency = 1 })
+	Debris:AddItem(crust, seconds + 0.1)
+
+	local cracks = tier(level, 3, 6, 10)
+	for index = 1, cracks do
+		local angle = (index / cracks) * math.pi * 2 + RNG:NextNumber(-0.3, 0.3)
+		local direction = Vector3.new(math.cos(angle), 0, math.sin(angle))
+		local length = radius * RNG:NextNumber(0.5, 0.95)
+		local middle = at + direction * (length * 0.5) + Vector3.new(0, 0.08, 0)
+		local crack = rim(
+			Vector3.new(RNG:NextNumber(0.5, 1.1), 0.3, length),
+			look(middle, middle + direction),
+			palette.core,
+			0.25
+		)
+		tweenTo(crack, seconds, Enum.EasingStyle.Sine, { Transparency = 1, Color = palette.glow })
+		Debris:AddItem(crack, seconds + 0.1)
 	end
 end
 
--- The discharge at the caster's end. Cheap, and it is what stops a bolt from
--- looking like it teleported into existence.
-local function muzzle(position: Vector3, direction: Vector3, palette: Palette, scale: number)
-	local cone = disc(look(position, position + direction) * FACING, 1, 0.4, palette.core, 0.2)
-	bloom(cone, 0.16, Vector3.new(0.1, 7 * scale, 7 * scale), Enum.EasingStyle.Quad)
+--[[ Where a technique ends.
 
-	spray(position, math.floor(10 * scale), {
-		core = palette.core,
+	Impact.luau draws the moment of contact -- warm flash, white shards, dark
+	dust, number, marker, hitstop, shake -- from the server's applied-damage
+	broadcast. So when a shot lands on a body, this stops at the projectile's own
+	destruction and gets out of the way.
+
+	When it does *not* land on a body, nothing else will draw here at all, and
+	this becomes the whole event: three elements with three lifetimes, in grey.
+	Collar ring at 0.24s, scuff at 0.4s, dust at 1.2s. That is what makes a miss
+	read as a miss in one frame rather than as a button that did nothing. ]]
+local function terminate(
+	cast: Cast,
+	position: Vector3,
+	direction: Vector3,
+	weight: number,
+	bodyHit: boolean
+)
+	local level = cast.level
+	local palette = if bodyHit then cast.palette else MISS
+	local facing = look(position, position + direction)
+
+	--[[ The collar, facing back down the path the shot travelled. Bars rather
+		than a plate -- a fifteen-stud white disc is a blob however briefly it
+		exists -- and identical for a hit and a miss, because this is the
+		projectile dying, not a statement about what it struck. ]]
+	local plane = facing * CFrame.Angles(-math.pi / 2, 0, 0)
+	edgeRing(plane, plane, 1.4 * weight, tier(level, 5, 8, 12), 0.5 * weight, SHELL, 0.24, 5)
+
+	spray(position, tier(level, 3, 6, 10), {
+		core = SHELL,
 		glow = palette.glow,
-		sizeFrom = 0.45 * scale,
+		sizeFrom = 0.4 * weight,
 		sizeTo = 0,
-		speed = NumberRange.new(10, 26),
-		life = NumberRange.new(0.12, 0.28),
-		spread = 45,
-		acceleration = direction * 30,
+		speed = NumberRange.new(20 * weight, 46 * weight),
+		life = NumberRange.new(0.14, 0.34),
+		spread = 180,
+		acceleration = Vector3.new(0, -34, 0),
+	})
+
+	if bodyHit then
+		return
+	end
+
+	-- Scuff: white slivers skidding off the surface it hit instead.
+	for _ = 1, tier(level, 0, 2, 4) do
+		local scatter =
+			Vector3.new(RNG:NextNumber(-1, 1), RNG:NextNumber(-0.2, 1), RNG:NextNumber(-1, 1))
+		local away = -direction * 1.5 + scatter
+		away = if away.Magnitude < 0.15 then -direction else away.Unit
+		local length = RNG:NextNumber(1.8, 4) * weight
+		local sliver = shell(
+			Vector3.new(0.26 * weight, 0.26 * weight, length),
+			look(position, position + away),
+			0.15
+		)
+		local landing = position + away * RNG:NextNumber(6, 13) * weight
+		tweenTo(sliver, 0.4, Enum.EasingStyle.Quad, {
+			CFrame = look(landing, landing + away),
+			Size = Vector3.new(0.05, 0.05, length * 0.3),
+			Transparency = 1,
+		})
+		Debris:AddItem(sliver, 0.46)
+	end
+
+	-- Dust: dark, slow, and the element that outlives everything else, which is
+	-- what turns a flicker into an event.
+	for index = 1, tier(level, 1, 2, 3) do
+		local drift = Vector3.new(
+			RNG:NextNumber(-2, 2),
+			RNG:NextNumber(-0.5, 2),
+			RNG:NextNumber(-2, 2)
+		) * weight
+		local puff = ball(position + drift * 0.4, 2.5 * weight, VOID, 0.5)
+		tweenTo(puff, 1.2 + index * 0.12, Enum.EasingStyle.Sine, {
+			Size = Vector3.one * (10 + index * 2.5) * weight,
+			CFrame = CFrame.new(position + drift + Vector3.new(0, 2.5 * weight, 0)),
+			Transparency = 1,
+		})
+		Debris:AddItem(puff, 1.5 + index * 0.12)
+	end
+
+	spray(position, tier(level, 4, 8, 14), {
+		core = ASH,
+		glow = VOID,
+		sizeFrom = 1.6 * weight,
+		sizeTo = 5.5 * weight,
+		speed = NumberRange.new(5, 16),
+		life = NumberRange.new(0.7, 1.3),
+		spread = 180,
+		acceleration = Vector3.new(0, -3, 0),
+		drag = 2.5,
+		dusty = true,
+	})
+end
+
+-- The discharge at the caster's end: a dark kick, not a white plate. The first
+-- pass put a seven-stud white disc here, and that disc is the blob in the frame.
+local function muzzle(position: Vector3, direction: Vector3, palette: Palette, weight: number)
+	local kick = ball(position, 1.2 * weight, VOID, 0.3)
+	bloom(kick, 0.24, Vector3.one * 5 * weight, Enum.EasingStyle.Quad)
+	ringAt(position, 1.4 * weight, 8, 0.5 * weight, SHELL, 0.22, 3.4)
+
+	spray(position, math.floor(7 * weight), {
+		core = SHELL,
+		glow = palette.glow,
+		sizeFrom = 0.4 * weight,
+		sizeTo = 0,
+		speed = NumberRange.new(12, 30),
+		life = NumberRange.new(0.12, 0.3),
+		spread = 40,
+		acceleration = direction * 34,
 		drag = 6,
 	})
 end
 
---[[ A travelling bolt: hot core, soft shell, ribbon behind.
+-- ----------------------------------------------------------------------- rigs
 
-	The Trail is the important part. Roblox draws a bolt at a discrete position
-	each frame, and at these speeds that is a dotted line; the ribbon is what
-	makes the eye read one continuous streak. ]]
-local function bolt(
-	from: Vector3,
-	to: Vector3,
-	palette: Palette,
-	width: number,
-	length: number,
-	seconds: number,
-	level: number
-)
-	local direction = aim(from, to)
-	local start = look(from, to)
-	local finish = look(to, to + direction)
+--[[ A composite that moves as one piece.
 
-	local core = block(Vector3.new(width, width, length), start, palette.core, 0)
-	tweenTo(core, seconds, Enum.EasingStyle.Linear, { CFrame = finish })
-	Debris:AddItem(core, seconds + 0.08)
+	Parts are anchored -- rule one -- so a projectile is a set of parts each
+	tweened from `frame * offset` to `destination * offset`. Cheaper than welding
+	and nothing can knock it out of alignment. ]]
+type Rig = {
+	parts: { BasePart },
+	offsets: { CFrame },
+}
 
-	local shell =
-		block(Vector3.new(width * 2.8, width * 2.8, length * 1.4), start, palette.glow, 0.5)
-	tweenTo(shell, seconds, Enum.EasingStyle.Linear, { CFrame = finish, Transparency = 0.9 })
-	Debris:AddItem(shell, seconds + 0.08)
+local function rigFly(rig: Rig, destination: CFrame, seconds: number, style: Enum.EasingStyle)
+	for index, part in rig.parts do
+		tweenTo(part, seconds, style, { CFrame = destination * rig.offsets[index] })
+	end
+end
 
-	if level >= DETAIL_MID then
+local function rigDismiss(rig: Rig, seconds: number)
+	for _, part in rig.parts do
+		tweenTo(part, seconds, Enum.EasingStyle.Quad, { Transparency = 1 })
+		Debris:AddItem(part, seconds + 0.06)
+	end
+end
+
+--[[ The striker silhouette: a black shaft with a white head and white bands.
+
+	This is law one made physical. The shaft is opaque and occludes what is behind
+	it, so the thing has mass; the bands are pure white against it, so the eye
+	catches its length and its speed; the hue is a barely-there sleeve. A frame of
+	this is unmistakably a lance, which is exactly what the first pass's white
+	blob was not. ]]
+local function spearRig(nose: CFrame, length: number, girth: number, cast: Cast): Rig
+	local rig: Rig = { parts = {}, offsets = {} }
+	local palette = cast.palette
+
+	-- Forward is -Z, so the body extends toward +Z behind the nose.
+	local function seat(z: number): CFrame
+		return CFrame.new(0, 0, z) * ALONG
+	end
+
+	-- Typed to Part rather than BasePart because the shaft pieces are cylinders,
+	-- and Shape lives on Part.
+	local function segment(part: Part, offset: CFrame): Part
+		part.Shape = Enum.PartType.Cylinder
+		part.CFrame = nose * offset
+		table.insert(rig.parts, part)
+		table.insert(rig.offsets, offset)
+		return part
+	end
+
+	segment(
+		shell(Vector3.new(length * 0.11, girth * 0.45, girth * 0.45), nose, 0),
+		seat(length * 0.05)
+	)
+	segment(
+		shell(Vector3.new(length * 0.05, girth * 0.95, girth * 0.95), nose, 0),
+		seat(length * 0.14)
+	)
+	segment(volume(Vector3.new(length * 0.8, girth, girth), nose, 0), seat(length * 0.55))
+	local tail = segment(
+		shell(Vector3.new(length * 0.05, girth * 0.62, girth * 0.62), nose, 0),
+		seat(length * 0.95)
+	)
+
+	if cast.level >= DETAIL_MID then
+		local band = Vector3.new(length * 0.032, girth * 1.32, girth * 1.32)
+		segment(shell(band, nose, 0), seat(length * 0.33))
+		segment(shell(band, nose, 0), seat(length * 0.63))
+		segment(
+			rim(Vector3.new(length * 0.86, girth * 1.95, girth * 1.95), nose, palette.glow, 0.76),
+			seat(length * 0.5)
+		)
+
+		-- The ribbon is what makes a fast object read as one streak rather than
+		-- as a part teleporting once a frame.
 		local back = Instance.new("Attachment")
-		back.Position = Vector3.new(-width * 1.6, 0, length * 0.4)
-		back.Parent = core
+		back.Position = Vector3.new(0, girth * 0.5, 0)
+		back.Parent = tail
 
 		local front = Instance.new("Attachment")
-		front.Position = Vector3.new(width * 1.6, 0, length * 0.4)
-		front.Parent = core
+		front.Position = Vector3.new(0, -girth * 0.5, 0)
+		front.Parent = tail
 
 		local trail = Instance.new("Trail")
 		trail.Attachment0 = back
 		trail.Attachment1 = front
-		trail.Lifetime = 0.16
+		trail.Lifetime = 0.2
 		trail.MinLength = 0
 		trail.FaceCamera = true
 		trail.LightEmission = 1
 		trail.LightInfluence = 0
-		trail.Color = ColorSequence.new(palette.core, palette.glow)
-		trail.Transparency = NumberSequence.new(0.15, 1)
+		trail.Color = ColorSequence.new(SHELL, palette.glow)
+		trail.Transparency = NumberSequence.new(0.1, 1)
 		trail.WidthScale = NumberSequence.new(1, 0)
-		trail.Parent = core
+		trail.Parent = tail
 	end
+
+	return rig
+end
+
+-- ------------------------------------------------------------ windup / charge
+
+--[[ The counterplay budget, rendered.
+
+	`Config.Techniques[id].windup` runs from 0.05s to 1.8s and is the whole reason
+	a Tempest can be walked out of. A dark mass gathers at the chest, a white ring
+	closes on it, and the ring arriving *is* the release -- so the tell is also a
+	timer that reads with no number attached.
+
+	The server broadcasts only on resolve, so nothing here can show an opponent's
+	windup yet. That needs one broadcast at cast time, and this function is what
+	it should call. ]]
+type Charge = {
+	pieces: { Instance },
+	token: number,
+}
+
+local charges: { [number]: Charge } = {}
+local chargeToken = 0
+
+local function clearCharge(casterId: number, released: boolean)
+	local existing = charges[casterId]
+	if not existing then
+		return
+	end
+	charges[casterId] = nil
+	for _, piece in existing.pieces do
+		if piece:IsA("BasePart") then
+			if released then
+				-- Spent outward -- but a Ruler telegraph is already eighty studs
+				-- across, and doubling that for a sixth of a second would black
+				-- the frame out at the exact moment the technique lands.
+				local spread = if piece.Size.Magnitude > 30 then 1.05 else 2.2
+				tweenTo(piece, 0.16, Enum.EasingStyle.Quad, {
+					Size = piece.Size * spread,
+					Transparency = 1,
+				})
+			else
+				-- Collapsed. A refused cast must not look like a cast that fired
+				-- and did nothing.
+				tweenTo(piece, 0.2, Enum.EasingStyle.Quad, {
+					Size = piece.Size * 0.1,
+					Transparency = 1,
+				})
+			end
+			Debris:AddItem(piece, 0.3)
+		else
+			if piece:IsA("Attachment") then
+				for _, child in piece:GetChildren() do
+					if child:IsA("ParticleEmitter") then
+						child.Enabled = false
+					end
+				end
+			end
+			Debris:AddItem(piece, 0.8)
+		end
+	end
+end
+
+--[[ Draw a windup at a caster. Public, so a server-side charge broadcast can
+	drive it for every player; until that exists, only the local caster's own
+	press reaches here. ]]
+function Vfx.charge(techId: string, casterId: number)
+	local tech = Config.Techniques[techId]
+	if not tech or tech.windup <= 0 then
+		return
+	end
+
+	local root = rootOf(casterId)
+	if not root then
+		return
+	end
+
+	local localPlayer = Players.LocalPlayer
+	local level = if localPlayer and localPlayer.UserId == casterId
+		then DETAIL_FULL
+		else detailAt(root.Position)
+	if level <= DETAIL_NONE then
+		return
+	end
+
+	clearCharge(casterId, false)
+	chargeToken += 1
+	local palette = PALETTE[techId] or FALLBACK
+	local charge: Charge = { pieces = {}, token = chargeToken }
+	charges[casterId] = charge
+
+	local seconds = tech.windup
+	-- Heavier techniques gather more. Tempest at 1.8s should look like a
+	-- decision; Swiftstep at 0.05s should barely register.
+	local heft = math.clamp(tech.madraCost / 45, 0.55, 1.9)
+	local hold = seconds + 0.45
+	local chest = CFrame.new(0, 0.4, -0.9)
+
+	local mass = ball(root.Position, 0.5 * heft, VOID, 0.15)
+	tweenTo(mass, seconds, Enum.EasingStyle.Quad, { Size = Vector3.one * 3.4 * heft })
+	follow(mass, root, root.Position, chest, 0, 0.18, hold)
+	table.insert(charge.pieces, mass)
+
+	local husk = ball(root.Position, 1.1 * heft, SHELL, 0.45)
+	tweenTo(husk, seconds, Enum.EasingStyle.Quad, { Size = Vector3.one * 4.6 * heft })
+	follow(husk, root, root.Position, chest, 0, 0.18, hold)
+	table.insert(charge.pieces, husk)
+
+	--[[ The closing ring: a timer readable from across the arena. Its offset
+		morphs inward over the windup rather than being tweened, because the
+		follower owns the CFrame and would overwrite a tween every frame. ]]
+	local segments = tier(level, 5, 8, 12)
+	local span = (2 * math.pi * 7 * heft) / segments
+	local lift = CFrame.new(0, 0.4, 0)
+	for index = 1, segments do
+		local angle = (index / segments) * math.pi * 2
+		local outer = lift * ringSeat(angle, 7 * heft)
+		local inner = lift * ringSeat(angle, 1.9 * heft)
+		local bar =
+			shell(Vector3.new(span * 0.7, 0.45, 0.7), CFrame.new(root.Position) * outer, 0.1)
+		followMorph(bar, root, root.Position, outer, inner, seconds, 0, 0, hold)
+		tweenTo(bar, seconds, Enum.EasingStyle.Quad, { Size = Vector3.new(span * 0.3, 0.5, 0.8) })
+		table.insert(charge.pieces, bar)
+	end
+
+	-- The floor commitment: a dark plate growing to the size of what is coming,
+	-- which is the part an opponent reads to decide whether to leave.
+	local floor = groundY(root.Position, root.Position.Y - 3)
+	local reach = if tech.kind == "ruler"
+		then RULER_RADIUS
+		elseif tech.kind == "forger" then FORGER_RADIUS
+		else 4 * heft
+	local plate = disc(
+		CFrame.new(Vector3.new(root.Position.X, floor + 0.2, root.Position.Z)) * FLAT,
+		1,
+		0.4,
+		VOID,
+		0.6
+	)
+	tweenTo(plate, seconds, Enum.EasingStyle.Quad, {
+		Size = Vector3.new(0.35, reach * 2, reach * 2),
+	})
+	table.insert(charge.pieces, plate)
+
+	table.insert(
+		charge.pieces,
+		stream(root, Vector3.new(0, 0.4, -0.9), {
+			core = SHELL,
+			glow = palette.glow,
+			sizeFrom = 1.2,
+			sizeTo = 0,
+			-- Negative speed draws particles inward: energy arriving, not
+			-- leaving. The one place in the file where that reads correctly.
+			speed = NumberRange.new(-16, -7),
+			life = NumberRange.new(0.25, 0.45),
+			spread = 180,
+			acceleration = Vector3.zero,
+			drag = 0,
+			rate = tier(level, 6, 14, 26),
+		})
+	)
+
+	local token = charge.token
+	task.delay(seconds + 0.4, function()
+		local current = charges[casterId]
+		if current and current.token == token then
+			clearCharge(casterId, false)
+		end
+	end)
 end
 
 -- ---------------------------------------------------------------- striker: 3
 
---[[ Lance. One spear, one target, gone in a tenth of a second.
+--[[ Lance. One spear, and now it is actually a spear.
 
-	The cheapest technique in the game costs the least to draw, which is not a
-	coincidence -- at 1.2s cooldown this is the button that will be pressed most,
-	so it has to stay clean at six casters on screen. ]]
-local function drawLance(shot: Shot, palette: Palette, _duration: number, level: number)
+	Deliberately the smallest of the three: it fires every 1.2 seconds, and a
+	frame-filling effect on the spam button is noise rather than power. Four
+	character-lengths of black shaft with a white head owns the middle of the
+	frame without erasing it. ]]
+local function drawLance(cast: Cast)
+	local shot = cast.shot
 	local target = shot.target
 	if not target then
 		return
@@ -900,26 +1203,29 @@ local function drawLance(shot: Shot, palette: Palette, _duration: number, level:
 
 	local direction = aim(shot.origin, target)
 	local from = shot.origin + sideways(direction) * 1.3 - Vector3.new(0, 0.2, 0)
-	local travel = math.clamp((target - from).Magnitude / 640, 0.04, 0.16)
+	local distance = (target - from).Magnitude
+	local length = math.min(4 * CHAR, math.max(distance * 0.55, CHAR))
+	-- Law four: visible travel. The first pass crossed the arena in 0.04s, which
+	-- is one frame -- there was nothing to see and nothing to react to.
+	local travel = math.clamp(distance / 260, 0.16, 0.4)
 
-	muzzle(from, direction, palette, 1)
-	bolt(from, target, palette, 0.55, 7, travel, level)
+	muzzle(from, direction, cast.palette, 1)
+	local rig = spearRig(look(from, target), length, 0.55 * CHAR, cast)
+	rigFly(rig, look(target, target + direction), travel, Enum.EasingStyle.Linear)
 
 	task.delay(travel, function()
-		impact(target, direction, palette, 1, shot.hit, level)
-		if shot.hit and isLocalCaster(shot) then
-			markHit(palette)
-		end
+		rigDismiss(rig, 0.12)
+		terminate(cast, target, direction, cast.weight, shot.hit)
 	end)
 end
 
---[[ Volley. Five bolts in a fan, staggered, converging.
+--[[ Volley. Five spears in a fan.
 
-	The identity is the *count*: a frame of Volley has several bright streaks in
-	it where Lance has exactly one, and that difference survives being shrunk to a
-	thumbnail. The stagger is what makes it read as a burst rather than as one
-	thick bolt. ]]
-local function drawVolley(shot: Shot, palette: Palette, _duration: number, level: number)
+	The identity is the count: a frame of Volley has several black shafts in it
+	where Lance has exactly one, and that difference survives being shrunk to a
+	thumbnail. The stagger makes it a burst rather than one thick bolt. ]]
+local function drawVolley(cast: Cast)
+	local shot = cast.shot
 	local target = shot.target
 	if not target then
 		return
@@ -929,109 +1235,112 @@ local function drawVolley(shot: Shot, palette: Palette, _duration: number, level
 	local right = sideways(direction)
 	local up = right:Cross(direction)
 	local from = shot.origin + right * 1.1
-	local count = tier(level, 2, 3, 5)
-	local travel = math.clamp((target - from).Magnitude / 700, 0.04, 0.14)
+	local count = tier(cast.level, 2, 3, 5)
+	local distance = (target - from).Magnitude
+	local length = math.min(2.4 * CHAR, math.max(distance * 0.4, CHAR * 0.8))
+	local travel = math.clamp(distance / 300, 0.14, 0.34)
 
-	muzzle(from, direction, palette, 1.3)
+	muzzle(from, direction, cast.palette, 1.3)
 
 	for index = 1, count do
-		-- Spread evenly about the centre line so the fan is symmetric no matter
-		-- how many bolts the detail tier allows.
 		local lateral = ((index - 1) / math.max(1, count - 1)) * 2 - 1
-		local launch = from + right * (lateral * 3.2) + up * (RNG:NextNumber(-1.2, 1.6))
-		local landing = target + right * (lateral * 1.6) + up * RNG:NextNumber(-1.4, 1.4)
-		local delay = (index - 1) * 0.045
+		local launch = from + right * (lateral * 3.4) + up * RNG:NextNumber(-1.2, 1.6)
+		local landing = target + right * (lateral * 2.2) + up * RNG:NextNumber(-1.8, 1.8)
 
-		task.delay(delay, function()
-			bolt(launch, landing, palette, 0.34, 4.5, travel, level)
+		task.delay((index - 1) * 0.06, function()
+			local rig = spearRig(look(launch, landing), length, 0.34 * CHAR, cast)
+			rigFly(rig, look(landing, landing + direction), travel, Enum.EasingStyle.Linear)
 			task.delay(travel, function()
-				impact(landing, direction, palette, 0.55, shot.hit, level - 1)
+				rigDismiss(rig, 0.1)
+				terminate(cast, landing, direction, cast.weight * 0.5, shot.hit)
 			end)
 		end)
 	end
 
-	-- One full-weight impact under the scatter, so the burst still lands as a
+	-- One full-weight landing under the scatter, so the volley resolves as a
 	-- single event rather than as five small ones.
-	task.delay(travel + (count - 1) * 0.045, function()
-		impact(target, direction, palette, 1.1, shot.hit, level)
-		if shot.hit and isLocalCaster(shot) then
-			markHit(palette)
-		end
+	task.delay(travel + (count - 1) * 0.06, function()
+		terminate(cast, target, direction, cast.weight, shot.hit)
 	end)
 end
 
---[[ Pierce. A beam, instant, the length of the arena.
+--[[ Pierce. The one that gets the whole frame.
 
-	Three times Lance's damage on a five second cooldown, so it gets the frame to
-	itself: the beam snaps to full length in one frame and holds, halos peel off
-	along its length, and the caster's camera takes the recoil. Nothing else in
-	the striker set spans the whole screen. ]]
-local function drawPierce(shot: Shot, palette: Palette, _duration: number, level: number)
+	Three times Lance's damage on a five second cooldown, so this is where the
+	reference ratio gets spent: up to fourteen character-lengths of beam. The
+	silhouette is the inverse of Lance -- a white core with black fins and black
+	bands riding it -- so the two heaviest strikers can never be confused. ]]
+local function drawPierce(cast: Cast)
+	local shot = cast.shot
 	local target = shot.target
 	if not target then
 		return
 	end
 
+	local level = cast.level
 	local direction = aim(shot.origin, target)
 	local from = shot.origin + sideways(direction) * 0.9
 	local length = (target - from).Magnitude
 	local midpoint = from:Lerp(target, 0.5)
 	local axis = look(midpoint, target)
+	local girth = CHAR
 
-	local core = block(Vector3.new(1.1, 1.1, length), axis, palette.core, 0)
-	tweenTo(core, 0.3, Enum.EasingStyle.Quart, {
-		Size = Vector3.new(0.05, 0.05, length),
+	-- The white core, held long enough to be read.
+	local core = disc(axis * ALONG, girth * 0.45, length, SHELL, 0)
+	tweenTo(core, 0.45, Enum.EasingStyle.Quart, {
+		Size = Vector3.new(length, 0.08, 0.08),
 		Transparency = 1,
 	})
-	Debris:AddItem(core, 0.36)
+	Debris:AddItem(core, 0.52)
 
-	local shell = block(Vector3.new(3.2, 3.2, length), axis, palette.glow, 0.45)
-	tweenTo(shell, 0.42, Enum.EasingStyle.Quint, {
-		Size = Vector3.new(7, 7, length),
-		Transparency = 1,
-	})
-	Debris:AddItem(shell, 0.48)
-
-	-- Halos peel off along the path, which is what gives a static beam direction.
-	local halos = tier(level, 1, 2, 4)
-	for index = 1, halos do
-		local at = from:Lerp(target, index / (halos + 1))
-		local halo = disc(look(at, at + direction) * FACING, 3, 0.4, palette.core, 0.25)
-		bloom(halo, 0.34, Vector3.new(0.1, 15, 15), Enum.EasingStyle.Quint)
+	-- Black fins riding it. This is the mass, and it occludes -- the beam passes
+	-- in front of the world rather than glowing on top of it.
+	local fins = tier(level, 2, 3, 4)
+	for index = 1, fins do
+		local angle = (index / fins) * math.pi * 2
+		local fin = volume(
+			Vector3.new(girth * 0.22, girth * 0.95, length * 0.94),
+			axis * CFrame.Angles(0, 0, angle) * CFrame.new(0, girth * 0.5, 0),
+			0
+		)
+		tweenTo(fin, 0.4, Enum.EasingStyle.Quart, {
+			Size = Vector3.new(girth * 0.05, girth * 0.2, length * 0.94),
+			Transparency = 1,
+		})
+		Debris:AddItem(fin, 0.47)
 	end
 
-	muzzle(from, direction, palette, 2.2)
-	spray(from, tier(level, 6, 14, 22), {
-		core = palette.core,
-		glow = palette.glow,
-		sizeFrom = 0.8,
-		sizeTo = 0,
-		speed = NumberRange.new(6, 20),
-		life = NumberRange.new(0.2, 0.45),
-		spread = 120,
-		acceleration = -direction * 24,
-	})
+	-- Black bands along its length, which is what gives a static beam direction
+	-- and scale.
+	local bands = tier(level, 2, 4, 7)
+	for index = 1, bands do
+		local at = from:Lerp(target, index / (bands + 1))
+		local band = disc(look(at, at + direction) * ALONG, girth * 1.5, 0.5, VOID, 0)
+		tweenTo(band, 0.34, Enum.EasingStyle.Quint, {
+			Size = Vector3.new(0.2, girth * 3.6, girth * 3.6),
+			Transparency = 1,
+		})
+		Debris:AddItem(band, 0.4)
+	end
 
-	impact(target, direction, palette, 1.8, shot.hit, level)
-	-- The spray keeps going past the target, so it reads as having gone through.
+	local sleeve = disc(axis * ALONG, girth * 2.1, length, cast.palette.glow, 0.78)
+	bloom(sleeve, 0.5, Vector3.new(length, girth * 4, girth * 4), Enum.EasingStyle.Quint)
+
+	muzzle(from, direction, cast.palette, 2.4)
+	terminate(cast, target, direction, cast.weight, shot.hit)
+
+	-- It went *through*: the spray keeps going past the target.
 	if shot.hit then
-		spray(target + direction * 3, tier(level, 4, 10, 18), {
-			core = palette.core,
-			glow = palette.glow,
-			sizeFrom = 0.7,
+		spray(target + direction * 3, tier(level, 4, 9, 16), {
+			core = SHELL,
+			glow = cast.palette.glow,
+			sizeFrom = 0.8,
 			sizeTo = 0,
-			speed = NumberRange.new(24, 60),
+			speed = NumberRange.new(26, 64),
 			life = NumberRange.new(0.2, 0.5),
-			spread = 28,
+			spread = 26,
 			acceleration = direction * 20,
 		})
-	end
-
-	if isLocalCaster(shot) then
-		shake(0.32)
-		if shot.hit then
-			markHit(palette)
-		end
 	end
 end
 
@@ -1039,14 +1348,14 @@ end
 
 --[[ Enforcer auras.
 
-	A self-buff that nobody else can see is a stat change, not a technique. Every
-	one of these three has to answer, from across the arena and for its whole
-	duration, "that player is currently dangerous" -- and answer *which* buff, so
-	an opponent can decide whether to trade or to wait it out.
+	A self-buff nobody else can see is a stat change, not a technique. Each of
+	these has to answer, from across the arena and for its whole duration, "that
+	player is dangerous right now" -- and answer *which* buff, so an opponent can
+	decide whether to trade or wait it out.
 
 	One aura per caster: recasting replaces rather than stacks, so a buff window
 	is never ambiguous. Emitters and lights hang off the root and ride it for
-	free; only the rings and plates need the follower loop. ]]
+	free; only rings and plates need the follower loop. ]]
 type Aura = {
 	pieces: { Instance },
 	token: number,
@@ -1086,8 +1395,6 @@ local function retireAura(userId: number, token: number)
 				{ FillTransparency = 1, OutlineTransparency = 1 }
 			)
 		elseif piece:IsA("Attachment") then
-			-- Stop emitting but let the particles already in the air live out
-			-- their lifetime; Debris takes the attachment afterwards.
 			for _, child in piece:GetChildren() do
 				if child:IsA("ParticleEmitter") then
 					child.Enabled = false
@@ -1113,8 +1420,11 @@ local function openAura(userId: number, duration: number): Aura
 	return aura
 end
 
--- The body glow every enforcer buff shares, coloured per technique. Occluded so
--- it does not shine through walls and give away a position it should not.
+--[[ The body read every enforcer buff shares.
+
+	The outline is pure white and the fill is the technique's hue held far back,
+	which is law one applied to a character: value says "buffed", hue says which
+	one. Occluded, so it does not shine through walls and give away a position. ]]
 local function auraBody(aura: Aura, root: BasePart, palette: Palette, fill: number)
 	local character = root.Parent
 	if character then
@@ -1123,8 +1433,8 @@ local function auraBody(aura: Aura, root: BasePart, palette: Palette, fill: numb
 		highlight.DepthMode = Enum.HighlightDepthMode.Occluded
 		highlight.FillColor = palette.glow
 		highlight.FillTransparency = fill
-		highlight.OutlineColor = palette.core
-		highlight.OutlineTransparency = 0.1
+		highlight.OutlineColor = SHELL
+		highlight.OutlineTransparency = 0
 		highlight.Parent = scene()
 		table.insert(aura.pieces, highlight)
 	end
@@ -1145,51 +1455,69 @@ local function auraBody(aura: Aura, root: BasePart, palette: Palette, fill: numb
 	table.insert(aura.pieces, light)
 end
 
--- The moment of activation, shared by all three: a ring off the feet and a
--- column up the body. Colour and speed are what tell them apart.
+-- The moment of activation, shared by all three: a dark plate off the feet, a
+-- white ring off that, and a column of mass up the body.
 local function auraOnset(centre: Vector3, palette: Palette, level: number, tall: number)
 	local floor = groundY(centre, centre.Y - 3)
 	local base = Vector3.new(centre.X, floor + 0.2, centre.Z)
 
-	groundWave(base, 4, 26, palette, 0.4)
-	segmentRing(base, 3, tier(level, 0, 8, 14), 0.7, palette, 0.45, 4.5)
+	shadowWave(base, 5, 30, 0.45, level)
 
-	local column = block(
-		Vector3.new(3.4, tall, 3.4),
-		CFrame.new(base + Vector3.new(0, tall * 0.5, 0)),
-		palette.core,
-		0.35
-	)
-	bloom(column, 0.32, Vector3.new(0.4, tall * 1.3, 0.4), Enum.EasingStyle.Quint)
+	local column =
+		volume(Vector3.new(3.4, tall, 3.4), CFrame.new(base + Vector3.new(0, tall * 0.5, 0)), 0.25)
+	bloom(column, 0.38, Vector3.new(0.6, tall * 1.35, 0.6), Enum.EasingStyle.Quint)
 
-	spray(base + Vector3.new(0, 1.5, 0), tier(level, 8, 18, 30), {
-		core = palette.core,
+	-- Four white staves up the dark column rather than a white slab around it.
+	-- Same read, a twentieth of the lit area.
+	for index = 1, 4 do
+		local angle = (index / 4) * math.pi * 2
+		local stave = shell(
+			Vector3.new(0.4, tall * 0.9, 0.4),
+			CFrame.new(base + Vector3.new(0, tall * 0.45, 0))
+				* CFrame.Angles(0, angle, 0)
+				* CFrame.new(1.9, 0, 0),
+			0.05
+		)
+		tweenTo(stave, 0.34, Enum.EasingStyle.Quint, {
+			CFrame = CFrame.new(base + Vector3.new(0, tall * 0.62, 0))
+				* CFrame.Angles(0, angle, 0)
+				* CFrame.new(3.4, 0, 0),
+			Size = Vector3.new(0.15, tall * 1.2, 0.15),
+			Transparency = 1,
+		})
+		Debris:AddItem(stave, 0.4)
+	end
+
+	spray(base + Vector3.new(0, 1.5, 0), tier(level, 6, 14, 24), {
+		core = SHELL,
 		glow = palette.glow,
 		sizeFrom = 0.9,
 		sizeTo = 0,
 		speed = NumberRange.new(10, 26),
 		life = NumberRange.new(0.3, 0.6),
-		spread = 30,
+		spread = 28,
 		acceleration = Vector3.new(0, 14, 0),
 		drag = 2,
 	})
-	flare(base + Vector3.new(0, 3, 0), palette.glow, 6, 26)
+	flare(base + Vector3.new(0, 3, 0), palette.core, 6, 26)
 end
 
 --[[ Surge. Damage up, so it burns.
 
-	Fire climbing the body, two fast counter-rotating rings, an orange cast over
-	the character. The aggressive one, and it looks it. ]]
-local function drawSurge(shot: Shot, palette: Palette, duration: number, level: number)
-	auraOnset(shot.origin, palette, level, 9)
-	shakeAt(shot.origin, 0.12, 40)
+	A dark smoke column climbing off the body with white-hot rings turning inside
+	it. The smoke is the mass -- without it a fire aura is a bright smear, and a
+	bright smear is what the first pass shipped. ]]
+local function drawSurge(cast: Cast)
+	local shot = cast.shot
+	local palette = cast.palette
+	auraOnset(shot.origin, palette, cast.level, 2 * CHAR)
 
 	local root = rootOf(shot.casterId)
 	if not root then
 		return
 	end
-	local aura = openAura(shot.casterId, duration)
-	auraBody(aura, root, palette, 0.78)
+	local aura = openAura(shot.casterId, cast.duration)
+	auraBody(aura, root, palette, 0.8)
 
 	table.insert(
 		aura.pieces,
@@ -1203,88 +1531,127 @@ local function drawSurge(shot: Shot, palette: Palette, duration: number, level: 
 			spread = 22,
 			acceleration = Vector3.new(0, 16, 0),
 			drag = 1.5,
-			rate = tier(level, 8, 22, 46),
+			rate = tier(cast.level, 6, 16, 34),
 		})
 	)
 
-	if level < DETAIL_MID then
+	-- Dark smoke over the flame, so the aura has a silhouette against a bright
+	-- sky as well as against dark stone.
+	table.insert(
+		aura.pieces,
+		stream(root, Vector3.new(0, 1.2, 0), {
+			core = ASH,
+			glow = VOID,
+			sizeFrom = 2,
+			sizeTo = 7,
+			speed = NumberRange.new(4, 9),
+			life = NumberRange.new(0.8, 1.4),
+			spread = 30,
+			acceleration = Vector3.new(0, 6, 0),
+			drag = 1.5,
+			rate = tier(cast.level, 3, 7, 14),
+			dusty = true,
+		})
+	)
+
+	if cast.level < DETAIL_MID then
 		return
 	end
 
 	-- Two rings turning against each other. Counter-rotation is the tell that
 	-- separates Surge from Swiftstep's single fast ring at a glance.
 	for index = 1, 2 do
-		local ring =
-			disc(CFrame.new(root.Position) * FLAT, 7 - index * 1.6, 0.35, palette.glow, 0.4)
-		follow(
-			ring,
+		local bars = barRing(
 			root,
 			root.Position,
-			CFrame.new(0, -2.4 + index * 2.1, 0) * FLAT,
+			CHAR - index * 0.9,
+			tier(cast.level, 5, 7, 10),
+			0.4,
+			CFrame.new(0, -2.4 + index * 2.1, 0),
 			if index == 1 then 5.5 else -4.2,
-			0,
-			duration + 0.4
+			cast.duration + 0.4
 		)
-		table.insert(aura.pieces, ring)
+		for _, bar in bars do
+			table.insert(aura.pieces, bar)
+		end
 	end
 end
 
 --[[ Bulwark. Mitigation up, so it armours.
 
-	Four plates orbiting the body -- deliberately *not* a dome, because Barrier is
-	a dome and these two must never be confused: 40% mitigation for six seconds
-	and 55% for eight are different decisions to fight into. ]]
-local function drawBulwark(shot: Shot, palette: Palette, duration: number, level: number)
-	auraOnset(shot.origin, palette, level, 7)
+	Black plates with white edges orbiting the body -- deliberately *not* a dome,
+	because Barrier is a dome and these two must never be confused: 40% for six
+	seconds and 55% for eight are different decisions to fight into. ]]
+local function drawBulwark(cast: Cast)
+	local shot = cast.shot
+	local palette = cast.palette
+	auraOnset(shot.origin, palette, cast.level, 1.6 * CHAR)
 
 	local root = rootOf(shot.casterId)
 	if not root then
 		return
 	end
-	local aura = openAura(shot.casterId, duration)
-	auraBody(aura, root, palette, 0.84)
+	local aura = openAura(shot.casterId, cast.duration)
+	auraBody(aura, root, palette, 0.86)
 
-	local plates = tier(level, 2, 3, 4)
+	local plates = tier(cast.level, 2, 3, 4)
 	for index = 1, plates do
 		local angle = (index / plates) * math.pi * 2
-		local plate =
-			block(Vector3.new(3.6, 4.4, 0.32), CFrame.new(root.Position), palette.glow, 0.35)
-		plate.Material = Enum.Material.ForceField
+		local seat = CFrame.Angles(0, angle, 0) * CFrame.new(0, 0.2, -4.1)
+
+		local plate = volume(Vector3.new(6.3, 7.8, 0.42), root.CFrame * seat, 0)
 		-- Slammed in from outside, so the guard *closes* rather than appearing.
-		plate.Size = Vector3.new(5.4, 6.6, 0.32)
-		tweenTo(plate, 0.28, Enum.EasingStyle.Back, { Size = Vector3.new(3.6, 4.4, 0.32) })
+		tweenTo(plate, 0.28, Enum.EasingStyle.Back, { Size = Vector3.new(4.2, 5.2, 0.42) })
+		follow(plate, root, root.Position, seat, 1.5, 0.25, cast.duration + 0.4)
+		table.insert(aura.pieces, plate)
+
+		-- The white edge. One thin strip is all the value contrast a black plate
+		-- needs to be legible against dark stone.
+		local edge = shell(Vector3.new(4.4, 0.34, 0.5), root.CFrame * seat, 0)
 		follow(
-			plate,
+			edge,
 			root,
 			root.Position,
-			CFrame.Angles(0, angle, 0) * CFrame.new(0, 0.2, -3.6),
+			seat * CFrame.new(0, 2.7, -0.08),
 			1.5,
 			0.25,
-			duration + 0.4
+			cast.duration + 0.4
 		)
-		table.insert(aura.pieces, plate)
+		table.insert(aura.pieces, edge)
 	end
 
-	local ring = disc(CFrame.new(root.Position) * FLAT, 8, 0.4, palette.core, 0.45)
-	follow(ring, root, root.Position, CFrame.new(0, -2.7, 0) * FLAT, 1.1, 0, duration + 0.4)
-	table.insert(aura.pieces, ring)
+	for _, bar in
+		barRing(
+			root,
+			root.Position,
+			CHAR,
+			tier(cast.level, 6, 8, 12),
+			0.45,
+			CFrame.new(0, -2.7, 0),
+			1.1,
+			cast.duration + 0.4
+		)
+	do
+		table.insert(aura.pieces, bar)
+	end
 end
 
 --[[ Swiftstep. The cheap one, so it stays light.
 
-	No shell, no plates: a low fast ring and a ribbon off the hips, which only
-	shows while the player is actually moving. Cheapest to cast and cheapest to
-	draw, and the only aura whose visual intensity depends on what the player
-	does with it. ]]
-local function drawSwiftstep(shot: Shot, palette: Palette, duration: number, level: number)
-	auraOnset(shot.origin, palette, level, 6)
+	No shell, no plates: a low fast ring, a ribbon off the hips, and dark
+	afterimages that exist only because the player is moving. The only aura whose
+	intensity depends on what the player does with it. ]]
+local function drawSwiftstep(cast: Cast)
+	local shot = cast.shot
+	local palette = cast.palette
+	auraOnset(shot.origin, palette, cast.level, 1.2 * CHAR)
 
 	local root = rootOf(shot.casterId)
 	if not root then
 		return
 	end
-	local aura = openAura(shot.casterId, duration)
-	auraBody(aura, root, palette, 0.88)
+	local aura = openAura(shot.casterId, cast.duration)
+	auraBody(aura, root, palette, 0.9)
 
 	local back = Instance.new("Attachment")
 	back.Position = Vector3.new(-1.1, -0.6, 0.4)
@@ -1299,99 +1666,171 @@ local function drawSwiftstep(shot: Shot, palette: Palette, duration: number, lev
 	local trail = Instance.new("Trail")
 	trail.Attachment0 = back
 	trail.Attachment1 = front
-	trail.Lifetime = 0.42
+	trail.Lifetime = 0.45
 	trail.MinLength = 0.2
 	trail.FaceCamera = true
 	trail.LightEmission = 1
 	trail.LightInfluence = 0
-	trail.Color = ColorSequence.new(palette.core, palette.glow)
-	trail.Transparency = NumberSequence.new(0.25, 1)
+	trail.Color = ColorSequence.new(SHELL, palette.glow)
+	trail.Transparency = NumberSequence.new(0.2, 1)
 	trail.WidthScale = NumberSequence.new(1, 0)
 	trail.Parent = root
 	table.insert(aura.pieces, trail)
 
-	table.insert(
-		aura.pieces,
-		stream(root, Vector3.new(0, -2.4, 0), {
-			core = palette.core,
-			glow = palette.glow,
-			sizeFrom = 0.5,
-			sizeTo = 0,
-			speed = NumberRange.new(3, 9),
-			life = NumberRange.new(0.2, 0.4),
-			spread = 180,
-			acceleration = Vector3.new(0, -6, 0),
-			rate = tier(level, 5, 12, 22),
-		})
-	)
+	for _, bar in
+		barRing(
+			root,
+			root.Position,
+			0.85 * CHAR,
+			tier(cast.level, 5, 7, 10),
+			0.35,
+			CFrame.new(0, -2.8, 0),
+			9,
+			cast.duration + 0.4
+		)
+	do
+		table.insert(aura.pieces, bar)
+	end
 
-	local ring = disc(CFrame.new(root.Position) * FLAT, 6.4, 0.3, palette.glow, 0.35)
-	follow(ring, root, root.Position, CFrame.new(0, -2.8, 0) * FLAT, 9, 0, duration + 0.4)
-	table.insert(aura.pieces, ring)
+	if cast.level < DETAIL_MID then
+		return
+	end
+
+	--[[ Afterimages: a dark slab dropped where the body just was, fading over
+		half a second. Invisible while standing still and unmistakable at a
+		sprint, which is exactly what the buff does. ]]
+	local finish = os.clock() + cast.duration
+	task.spawn(function()
+		local previous = root.Position
+		while os.clock() < finish do
+			task.wait(0.09)
+			if not root.Parent then
+				break
+			end
+			local moved = (root.Position - previous).Magnitude
+			previous = root.Position
+			if moved < 1.2 then
+				continue
+			end
+			local ghost = volume(Vector3.new(2.6, 5, 1.4), root.CFrame, 0.4)
+			tweenTo(ghost, 0.45, Enum.EasingStyle.Quad, {
+				Size = Vector3.new(2, 4.4, 1),
+				Transparency = 1,
+			})
+			Debris:AddItem(ghost, 0.5)
+
+			local spark = rim(Vector3.new(0.35, 5.2, 0.35), root.CFrame, palette.glow, 0.25)
+			fadeOut(spark, 0.35)
+		end
+	end)
 end
 
 -- ----------------------------------------------------------------- forger: 3
 
---[[ Barrier. A dome, slammed down.
+--[[ Barrier. A wall driven into the ground around you.
 
-	The placement moment is the point: 40 madra on a 12 second cooldown for 55%
-	mitigation is a commitment, so it arrives from above and lands hard rather
-	than fading in. ForceField material carries the hex read for free, and it is
-	the only dome in the game. ]]
-local function drawBarrier(shot: Shot, palette: Palette, duration: number, level: number)
+	The first pass made this a translucent dome and the dome was the brightest
+	thing in the frame. It is now a low black wall with white caps: opaque, so it
+	actually occludes; kept under head height, so it never blinds the caster it is
+	protecting; with the hue reduced to a film you can read the world through. ]]
+local function drawBarrier(cast: Cast)
+	local shot = cast.shot
+	local palette = cast.palette
+	local level = cast.level
 	local floor = groundY(shot.origin, shot.origin.Y - 3)
 	local base = Vector3.new(shot.origin.X, floor + 0.1, shot.origin.Z)
 
-	groundWave(base, 6, 34, palette, 0.45)
-	segmentRing(base, 6, tier(level, 6, 10, 18), 0.8, palette, 0.5, 1.9)
-	flare(base + Vector3.new(0, 4, 0), palette.glow, 8, 34)
-	shakeAt(base, 0.2, 60)
+	shadowWave(base, 7, 36, 0.5, level)
+	flare(base + Vector3.new(0, 4, 0), palette.core, 8, 34)
 
 	local root = rootOf(shot.casterId)
-	local anchorPosition = if root then root.Position else shot.origin
+	local seat = if root then root.Position else shot.origin
+	local duration = cast.duration
+	local radius = 1.05 * CHAR
+	local slabs = tier(level, 5, 8, 12)
 
-	local dome = ball(anchorPosition, 26, palette.glow, 0.55)
-	dome.Material = Enum.Material.ForceField
-	tweenTo(dome, 0.26, Enum.EasingStyle.Back, { Size = Vector3.one * 13, Transparency = 0.72 })
-	follow(dome, root, anchorPosition, CFrame.new(0, 0.6, 0), 0.35, 0, duration + 0.4)
+	for index = 1, slabs do
+		local angle = (index / slabs) * math.pi * 2
+		local span = (2 * math.pi * radius) / slabs
+		local stand = CFrame.Angles(0, angle, 0) * CFrame.new(0, -1.4, -radius) * ALONG
 
-	-- A second, tighter shell shimmering out of phase with the first reads as a
-	-- surface with depth rather than as a tinted balloon.
-	if level >= DETAIL_MID then
-		local inner = ball(anchorPosition, 10.4, palette.core, 0.88)
-		inner.Material = Enum.Material.ForceField
-		TweenService:Create(
-			inner,
-			TweenInfo.new(1.4, Enum.EasingStyle.Sine, Enum.EasingDirection.InOut, -1, true),
-			{ Transparency = 0.7 }
-		):Play()
-		follow(inner, root, anchorPosition, CFrame.new(0, 0.6, 0), -0.6, 0, duration + 0.4)
+		-- Dropped in from above rather than faded in: a placement should land.
+		local high = CFrame.new(seat + Vector3.new(0, 9, 0)) * stand
+		local slab = volume(Vector3.new(0.45, 2.6, span * 0.92), high, 0)
+		followMorph(
+			slab,
+			root,
+			seat,
+			stand * CFrame.new(0, 9, 0),
+			stand,
+			0.22,
+			0.25,
+			0,
+			duration + 0.4
+		)
+
+		local cap = shell(Vector3.new(0.55, 0.28, span * 0.92), high, 0)
+		followMorph(
+			cap,
+			root,
+			seat,
+			stand * CFrame.new(0, 10.4, 0),
+			stand * CFrame.new(0, 1.4, 0),
+			0.22,
+			0.25,
+			0,
+			duration + 0.4
+		)
+
+		task.delay(0.22 + index * 0.01, function()
+			if slab.Parent then
+				spray(slab.Position, tier(level, 2, 3, 5), {
+					core = ASH,
+					glow = VOID,
+					sizeFrom = 1,
+					sizeTo = 3,
+					speed = NumberRange.new(3, 9),
+					life = NumberRange.new(0.3, 0.6),
+					spread = 90,
+					dusty = true,
+				})
+			end
+		end)
+
 		task.delay(duration, function()
-			fadeOut(inner, 0.35)
+			fadeOut(slab, 0.35)
+			fadeOut(cap, 0.35)
 		end)
 	end
 
-	local skirt = disc(CFrame.new(base) * FLAT, 14, 0.5, palette.core, 0.4)
-	follow(skirt, root, anchorPosition, CFrame.new(0, -2.9, 0) * FLAT, 1.4, 0, duration + 0.4)
-
-	task.delay(duration, function()
-		fadeOut(dome, 0.35)
-		fadeOut(skirt, 0.35)
-	end)
+	-- The hue lives here and nowhere else in this technique: a film thin enough
+	-- to read the world straight through.
+	if level >= DETAIL_MID then
+		local film = ball(seat, 2.3 * CHAR, palette.glow, 0.9)
+		film.Material = Enum.Material.ForceField
+		follow(film, root, seat, CFrame.new(0, 0.6, 0), 0.35, 0, duration + 0.4)
+		task.delay(duration, function()
+			fadeOut(film, 0.35)
+		end)
+	end
 end
 
 --[[ Caltrops. Spikes thrown out and planted.
 
-	The server drops one flat translucent cylinder for the damage volume; this is
-	what makes that volume mean something. Spikes land in a scatter across the
-	whole radius so the hazard's *edge* is visible -- a zoning tool you cannot see
-	the boundary of is just unfair damage. ]]
-local function drawCaltrops(shot: Shot, palette: Palette, duration: number, level: number)
+	The server drops one flat cylinder for the damage volume; this is what makes
+	that volume mean something. Black spikes with white tips, scattered evenly by
+	area across the whole radius so the hazard's *edge* is visible -- a zoning
+	tool whose boundary you cannot see is just unfair damage. ]]
+local function drawCaltrops(cast: Cast)
+	local shot = cast.shot
+	local palette = cast.palette
+	local level = cast.level
+	local duration = cast.duration
 	local floor = groundY(shot.origin, shot.origin.Y - 3)
 	local centre = Vector3.new(shot.origin.X, floor, shot.origin.Z)
 
-	groundWave(centre, 4, FORGER_RADIUS * 2, palette, 0.4)
-	shakeAt(centre, 0.14, 50)
+	shadowWave(centre, 5, FORGER_RADIUS * 2, 0.45, level)
+	scar(centre, FORGER_RADIUS, palette, duration, level)
 
 	local count = tier(level, 4, 8, 13)
 	for index = 1, count do
@@ -1400,46 +1839,40 @@ local function drawCaltrops(shot: Shot, palette: Palette, duration: number, leve
 		-- clustering at the middle.
 		local radius = math.sqrt(RNG:NextNumber(0.08, 1)) * (FORGER_RADIUS - 1.5)
 		local at = centre + Vector3.new(math.cos(angle) * radius, 0, math.sin(angle) * radius)
-		local height = RNG:NextNumber(2.6, 4.2)
+		local height = RNG:NextNumber(3.4, 5.4)
 		local tilt = CFrame.Angles(
-			RNG:NextNumber(-0.24, 0.24),
+			RNG:NextNumber(-0.22, 0.22),
 			RNG:NextNumber(0, math.pi * 2),
-			RNG:NextNumber(-0.24, 0.24)
+			RNG:NextNumber(-0.22, 0.22)
 		)
 
-		local spike = wedge(
-			Vector3.new(0.55, height, 1.1),
-			CFrame.new(at + Vector3.new(0, height * 1.6, 0)) * tilt,
-			palette.glow,
-			Enum.Material.Neon
-		)
-		spike.Transparency = 0.15
-
+		local high = CFrame.new(at + Vector3.new(0, height * 1.8, 0)) * tilt
 		local planted = CFrame.new(at + Vector3.new(0, height * 0.44, 0)) * tilt
-		task.delay(index * 0.022, function()
+		local spike = wedgeVolume(Vector3.new(0.8, height, 1.5), high)
+		local tip = shell(Vector3.new(0.34, 0.9, 0.34), high, 0)
+		local tipSeat = planted * CFrame.new(0, height * 0.44, 0.35)
+
+		task.delay(index * 0.024, function()
 			if not spike.Parent then
 				return
 			end
 			-- Thrown, not grown: they arrive fast and stop dead.
-			tweenTo(spike, 0.14, Enum.EasingStyle.Quart, { CFrame = planted })
-			task.delay(0.14, function()
-				if not spike.Parent then
-					return
-				end
-				spray(at, tier(level, 3, 5, 8), {
-					core = palette.core,
-					glow = palette.glow,
-					sizeFrom = 0.7,
-					sizeTo = 0,
+			tweenTo(spike, 0.13, Enum.EasingStyle.Quart, { CFrame = planted })
+			tweenTo(tip, 0.13, Enum.EasingStyle.Quart, { CFrame = tipSeat })
+			task.delay(0.13, function()
+				spray(at, tier(level, 2, 4, 7), {
+					core = ASH,
+					glow = VOID,
+					sizeFrom = 0.9,
+					sizeTo = 2.6,
 					speed = NumberRange.new(4, 12),
-					life = NumberRange.new(0.16, 0.34),
+					life = NumberRange.new(0.3, 0.7),
 					spread = 90,
-					acceleration = Vector3.new(0, -20, 0),
+					dusty = true,
 				})
 			end)
 		end)
 
-		tweenTo(spike, duration, Enum.EasingStyle.Linear, { Color = palette.core })
 		task.delay(duration, function()
 			if spike.Parent then
 				tweenTo(spike, 0.4, Enum.EasingStyle.Quad, {
@@ -1447,8 +1880,10 @@ local function drawCaltrops(shot: Shot, palette: Palette, duration: number, leve
 					Transparency = 1,
 				})
 			end
+			fadeOut(tip, 0.4)
 		end)
 		Debris:AddItem(spike, duration + 0.5)
+		Debris:AddItem(tip, duration + 0.5)
 	end
 
 	--[[ A wave on the damage interval. Constructs tick rather than damaging
@@ -1461,49 +1896,51 @@ local function drawCaltrops(shot: Shot, palette: Palette, duration: number, leve
 			if os.clock() >= finish then
 				break
 			end
-			groundWave(centre, 2, FORGER_RADIUS * 2, palette, 0.55)
+			shadowWave(centre, 3, FORGER_RADIUS * 2, 0.55, level)
 		end
 	end)
 end
 
 --[[ Sentry. A core assembled in the air.
 
-	The most expensive Forger technique (55 madra, 16s cooldown) and the only one
-	with a silhouette above knee height, which is what makes it worth walking
-	around: you can see a Sentry from outside its radius. Plates converge, the
-	core snaps on, and a scan sweeps the ground on every damage tick. ]]
-local function drawSentry(shot: Shot, palette: Palette, duration: number, level: number)
+	The most expensive Forger technique and the only one with a silhouette above
+	knee height, which is what makes it worth walking around: you can see a Sentry
+	from outside its radius. Plates converge, the core snaps on, and a scan sweeps
+	the ground on every damage tick. ]]
+local function drawSentry(cast: Cast)
+	local shot = cast.shot
+	local palette = cast.palette
+	local level = cast.level
+	local duration = cast.duration
 	local floor = groundY(shot.origin, shot.origin.Y - 3)
 	local centre = Vector3.new(shot.origin.X, floor, shot.origin.Z)
-	local eye = centre + Vector3.new(0, 7, 0)
+	local eye = centre + Vector3.new(0, 1.4 * CHAR, 0)
 
-	groundWave(centre, 3, FORGER_RADIUS * 1.6, palette, 0.45)
-	segmentRing(centre, FORGER_RADIUS * 0.5, tier(level, 0, 10, 16), 0.6, palette, 0.5, 2)
+	shadowWave(centre, 4, FORGER_RADIUS * 1.7, 0.5, level)
+	scar(centre, FORGER_RADIUS, palette, duration, level)
 
-	-- Plates fly in and converge, which is the placement moment: it is being
-	-- built, not switched on.
+	-- Plates fly in and converge: it is being built, not switched on.
 	local plates = tier(level, 3, 4, 6)
 	for index = 1, plates do
 		local angle = (index / plates) * math.pi * 2
-		local away = Vector3.new(math.cos(angle) * 11, RNG:NextNumber(1, 5), math.sin(angle) * 11)
-		local plate = block(
-			Vector3.new(2.2, 0.35, 2.2),
+		local away = Vector3.new(math.cos(angle) * 13, RNG:NextNumber(1, 6), math.sin(angle) * 13)
+		local plate = volume(
+			Vector3.new(2.8, 0.45, 2.8),
 			CFrame.new(eye + away) * CFrame.Angles(RNG:NextNumber(0, 3), angle, 0),
-			palette.glow,
-			0.3
+			0
 		)
 		tweenTo(plate, 0.3, Enum.EasingStyle.Quint, {
 			CFrame = CFrame.new(eye) * CFrame.Angles(0, angle, 0),
-			Size = Vector3.new(0.6, 0.2, 0.6),
+			Size = Vector3.new(0.7, 0.25, 0.7),
 			Transparency = 1,
 		})
 		Debris:AddItem(plate, 0.38)
 	end
 
 	task.delay(0.3, function()
-		flare(eye, palette.glow, 9, 30)
-		spray(eye, tier(level, 6, 14, 24), {
-			core = palette.core,
+		flare(eye, palette.core, 9, 30)
+		spray(eye, tier(level, 5, 12, 20), {
+			core = SHELL,
 			glow = palette.glow,
 			sizeFrom = 0.8,
 			sizeTo = 0,
@@ -1513,40 +1950,58 @@ local function drawSentry(shot: Shot, palette: Palette, duration: number, level:
 			acceleration = Vector3.new(0, -10, 0),
 		})
 
-		local core = ball(eye, 0.4, palette.core, 0)
-		tweenTo(core, 0.18, Enum.EasingStyle.Back, { Size = Vector3.one * 2.6 })
-		follow(core, nil, eye, CFrame.identity, 2.4, 0.5, duration - 0.3)
+		-- Black body, white equator: the device reads at any distance and in any
+		-- light without depending on its colour.
+		local body = ball(eye, 0.6, VOID, 0)
+		tweenTo(body, 0.18, Enum.EasingStyle.Back, { Size = Vector3.one * 3.4 })
+		follow(body, nil, eye, CFrame.identity, 2.4, 0.5, duration - 0.3)
 
-		local shell = ball(eye, 4.6, palette.glow, 0.6)
-		shell.Material = Enum.Material.ForceField
-		follow(shell, nil, eye, CFrame.identity, -1.6, 0.5, duration - 0.3)
-
-		-- Ring on its side, orbiting: the silhouette that says "this is a device".
-		local orbit = disc(CFrame.new(eye), 8, 0.3, palette.core, 0.4)
-		follow(orbit, nil, eye, CFrame.Angles(0.5, 0, 0), 3.2, 0.5, duration - 0.3)
+		local equator = barRing(
+			nil,
+			eye,
+			2.5,
+			tier(level, 6, 8, 10),
+			0.34,
+			CFrame.identity,
+			2.4,
+			duration - 0.3
+		)
+		local orbit = barRing(
+			nil,
+			eye,
+			4.2,
+			tier(level, 6, 9, 12),
+			0.3,
+			CFrame.Angles(0.5, 0, 0),
+			3.2,
+			duration - 0.3
+		)
 
 		local light = Instance.new("PointLight")
 		light.Color = palette.glow
 		light.Brightness = 3
 		light.Range = 24
 		light.Shadows = false
-		light.Parent = core
+		light.Parent = body
 
-		-- The shaft ties the floating core to the ground it is guarding.
-		local shaft = block(
-			Vector3.new(1.6, 7, 1.6),
-			CFrame.new(centre + Vector3.new(0, 3.5, 0)),
-			palette.glow,
-			0.86
+		-- The mast ties the floating core to the ground it is guarding.
+		local mast = volume(
+			Vector3.new(0.9, 1.4 * CHAR, 0.9),
+			CFrame.new(centre + Vector3.new(0, 0.7 * CHAR, 0)),
+			0.25
 		)
 
 		task.delay(duration - 0.3, function()
-			fadeOut(core, 0.3)
-			fadeOut(shell, 0.3)
-			fadeOut(orbit, 0.3)
-			fadeOut(shaft, 0.3)
+			fadeOut(body, 0.3)
+			fadeOut(mast, 0.3)
+			for _, bar in equator do
+				fadeOut(bar, 0.3)
+			end
+			for _, bar in orbit do
+				fadeOut(bar, 0.3)
+			end
 		end)
-		Debris:AddItem(shaft, duration)
+		Debris:AddItem(mast, duration)
 	end)
 
 	task.spawn(function()
@@ -1556,62 +2011,40 @@ local function drawSentry(shot: Shot, palette: Palette, duration: number, level:
 			if os.clock() >= finish then
 				break
 			end
-			groundWave(centre, 2, FORGER_RADIUS * 2, palette, 0.5)
-			local drop = block(
-				Vector3.new(0.7, 0.7, 6),
+			shadowWave(centre, 3, FORGER_RADIUS * 2, 0.5, level)
+			local drop = shell(
+				Vector3.new(0.8, 0.8, 1.2 * CHAR),
 				CFrame.new(eye - Vector3.new(0, 3, 0)) * CFrame.Angles(math.pi / 2, 0, 0),
-				palette.core,
-				0.2
+				0.1
 			)
-			bloom(drop, 0.22, Vector3.new(0.1, 0.1, 7), Enum.EasingStyle.Quad)
+			bloom(drop, 0.24, Vector3.new(0.1, 0.1, 1.4 * CHAR), Enum.EasingStyle.Quad)
 		end
 	end)
 end
 
 -- ------------------------------------------------------------------ ruler: 3
 
---[[ Ruler techniques command terrain across a 42 stud radius and are the most
-	expensive things a player can spend madra on. They are supposed to be the
-	heaviest thing in the game, and the budget for them is spent accordingly:
-	they are the only casts that move the ground, throw real geometry, or shake
-	the camera hard. All three fill the same circle, so they are told apart by
-	direction of motion -- out, in, up. ]]
+--[[ Ruler techniques command terrain across a 42 stud radius -- fifteen
+	character-heights -- and are the most expensive things a player can spend
+	madra on. They are the only casts that throw real geometry and leave the
+	ground altered for seconds afterwards. All three fill the same circle, so they
+	are told apart by direction of motion: out, in, up. ]]
 
 --[[ Upheaval. The ground comes up.
 
-	Slabs punched out of the floor in a ring, fissures racing out from the
-	caster, dust. Reads as *outward and upward* in one frame. ]]
-local function drawUpheaval(shot: Shot, palette: Palette, _duration: number, level: number)
+	Slate slabs punched out of the floor with white rims along their broken top
+	edges, and dust that outlives all of it. Reads as *outward and upward* in one
+	frame. ]]
+local function drawUpheaval(cast: Cast)
+	local shot = cast.shot
+	local palette = cast.palette
+	local level = cast.level
 	local floor = groundY(shot.origin, shot.origin.Y - 3)
 	local centre = Vector3.new(shot.origin.X, floor, shot.origin.Z)
 
-	shakeAt(centre, 0.62, 190)
 	flare(centre + Vector3.new(0, 2, 0), palette.core, 8, 50)
-
-	-- Fissures first, so the eye is already at the edge of the radius when the
-	-- slabs arrive.
-	local cracks = tier(level, 3, 5, 8)
-	for index = 1, cracks do
-		local angle = (index / cracks) * math.pi * 2 + RNG:NextNumber(-0.2, 0.2)
-		local direction = Vector3.new(math.cos(angle), 0, math.sin(angle))
-		local crack = block(
-			Vector3.new(1.6, 0.4, 4),
-			look(centre + Vector3.new(0, 0.15, 0), centre + direction),
-			palette.core,
-			0.1
-		)
-		local reach = centre + direction * (RULER_RADIUS * 0.5) + Vector3.new(0, 0.15, 0)
-		tweenTo(crack, 0.5, Enum.EasingStyle.Quint, {
-			CFrame = look(reach, reach + direction),
-			Size = Vector3.new(0.5, 0.4, RULER_RADIUS),
-			Transparency = 1,
-			Color = palette.glow,
-		})
-		Debris:AddItem(crack, 0.56)
-	end
-
-	groundWave(centre, 6, RULER_RADIUS * 2, palette, 0.6)
-	segmentRing(centre, RULER_RADIUS * 0.35, tier(level, 0, 12, 20), 1.2, palette, 0.6, 2.7)
+	shadowWave(centre, 7, RULER_RADIUS * 2, 0.6, level)
+	scar(centre, RULER_RADIUS, palette, 4.5, level)
 
 	local slabs = tier(level, 5, 9, 15)
 	for _ = 1, slabs do
@@ -1619,150 +2052,183 @@ local function drawUpheaval(shot: Shot, palette: Palette, _duration: number, lev
 		local radius = math.sqrt(RNG:NextNumber(0.05, 1)) * (RULER_RADIUS - 3)
 		local at = centre + Vector3.new(math.cos(angle) * radius, 0, math.sin(angle) * radius)
 		local width = RNG:NextNumber(4, 9)
-		local height = RNG:NextNumber(7, 15)
+		local height = RNG:NextNumber(1.4 * CHAR, 2.9 * CHAR)
 		local tilt = CFrame.Angles(
 			RNG:NextNumber(-0.3, 0.3),
 			RNG:NextNumber(0, math.pi * 2),
 			RNG:NextNumber(-0.3, 0.3)
 		)
 
-		local slab = block(
-			Vector3.new(width, height, width * 0.8),
-			CFrame.new(at - Vector3.new(0, height, 0)) * tilt,
-			ROCK,
-			0
-		)
+		local buried = CFrame.new(at - Vector3.new(0, height, 0)) * tilt
+		local slab = Instance.new("Part")
+		slab.Size = Vector3.new(width, height, width * 0.8)
+		slab.CFrame = buried
+		slab.Color = ROCK
 		slab.Material = Enum.Material.Slate
+		decorate(slab)
+
+		local risen = CFrame.new(at + Vector3.new(0, height * RNG:NextNumber(0.16, 0.4), 0)) * tilt
+		local lip = shell(Vector3.new(width * 0.9, 0.35, width * 0.7), buried, 0)
 
 		-- Farther slabs erupt later, so the wave visibly travels outward instead
 		-- of the whole field popping at once.
-		local delay = (radius / RULER_RADIUS) * 0.22
-		local risen = CFrame.new(at + Vector3.new(0, height * RNG:NextNumber(0.16, 0.4), 0)) * tilt
+		local delay = (radius / RULER_RADIUS) * 0.24
 
 		task.delay(delay, function()
 			if not slab.Parent then
 				return
 			end
 			tweenTo(slab, 0.14, Enum.EasingStyle.Back, { CFrame = risen })
-			spray(at, tier(level, 4, 8, 14), {
-				core = palette.core,
-				glow = palette.glow,
-				sizeFrom = 1.6,
-				sizeTo = 4.5,
-				speed = NumberRange.new(8, 22),
-				life = NumberRange.new(0.35, 0.8),
-				spread = 60,
-				acceleration = Vector3.new(0, -14, 0),
-				drag = 2.5,
+			tweenTo(lip, 0.14, Enum.EasingStyle.Back, {
+				CFrame = risen * CFrame.new(0, height * 0.5, 0),
 			})
-			-- Magma in the seam it tore open.
-			if level >= DETAIL_MID then
-				local seam = disc(
-					CFrame.new(at + Vector3.new(0, 0.2, 0)) * FLAT,
-					width * 1.5,
-					0.4,
-					palette.core,
-					0.3
-				)
-				bloom(seam, 0.9, Vector3.new(0.2, width * 2.2, width * 2.2), Enum.EasingStyle.Sine)
-			end
+			spray(at, tier(level, 4, 8, 14), {
+				core = ASH,
+				glow = VOID,
+				sizeFrom = 2,
+				sizeTo = 7,
+				speed = NumberRange.new(8, 24),
+				life = NumberRange.new(0.6, 1.3),
+				spread = 60,
+				acceleration = Vector3.new(0, -10, 0),
+				drag = 2.5,
+				dusty = true,
+			})
 		end)
 
-		-- Held, then sunk. The settle is what gives the cast weight on the way
-		-- out as well as on the way in.
-		task.delay(delay + 0.7, function()
+		-- Held, then sunk. The settle gives the cast weight on the way out as
+		-- well as on the way in.
+		task.delay(delay + 0.8, function()
 			if slab.Parent then
-				tweenTo(slab, 0.8, Enum.EasingStyle.Quad, {
-					CFrame = CFrame.new(at - Vector3.new(0, height, 0)) * tilt,
+				tweenTo(slab, 0.9, Enum.EasingStyle.Quad, {
+					CFrame = buried,
 					Transparency = 1,
 				})
 			end
+			fadeOut(lip, 0.6)
 		end)
-		Debris:AddItem(slab, delay + 1.6)
+		Debris:AddItem(slab, delay + 1.8)
+		Debris:AddItem(lip, delay + 1.8)
 	end
 
-	-- One big dust column over the middle, on top of the per-slab dust.
-	spray(centre + Vector3.new(0, 2, 0), tier(level, 12, 26, 46), {
-		core = palette.core,
-		glow = palette.glow,
-		sizeFrom = 3,
-		sizeTo = 9,
-		speed = NumberRange.new(14, 40),
-		life = NumberRange.new(0.5, 1.1),
+	-- One dust column over the middle, on top of the per-slab dust. Dark, so a
+	-- second and a half of lingering mass costs nothing in readability.
+	spray(centre + Vector3.new(0, 2, 0), tier(level, 10, 22, 40), {
+		core = ASH,
+		glow = VOID,
+		sizeFrom = 4,
+		sizeTo = 13,
+		speed = NumberRange.new(12, 34),
+		life = NumberRange.new(0.9, 1.7),
 		spread = 180,
-		acceleration = Vector3.new(0, -8, 0),
+		acceleration = Vector3.new(0, -5, 0),
 		drag = 2,
+		dusty = true,
 	})
 end
 
 --[[ Siphon. Everything comes in.
 
-	Streaks from the rim converging on the caster, a ring closing rather than
-	opening, and a bright swallow at the centre. Reads as *inward* -- the exact
-	inverse of Upheaval, which is how the two stay distinguishable at the same
-	radius and the same duration. ]]
-local function drawSiphon(shot: Shot, palette: Palette, _duration: number, level: number)
+	The first pass painted the whole radius emissive purple and you could not see
+	the person you were fighting. The field is now a dark plate with a white
+	boundary and black furrows pointing inward; the hue survives only in the
+	streaks. Reads as *inward* -- the exact inverse of Upheaval, which is how the
+	two stay distinguishable at the same radius. ]]
+local function drawSiphon(cast: Cast)
+	local shot = cast.shot
+	local palette = cast.palette
+	local level = cast.level
 	local floor = groundY(shot.origin, shot.origin.Y - 3)
 	local centre = Vector3.new(shot.origin.X, floor, shot.origin.Z)
 	local heart = shot.origin
 
-	-- A stain over the whole radius, so the area of effect is stated even though
-	-- the motion is all in the middle.
-	local stain =
-		disc(CFrame.new(centre + Vector3.new(0, 0.1, 0)) * FLAT, 4, 0.4, palette.glow, 0.55)
-	tweenTo(stain, 0.28, Enum.EasingStyle.Quart, {
-		Size = Vector3.new(0.4, RULER_RADIUS * 2, RULER_RADIUS * 2),
-	})
-	fadeOut(stain, 0.9)
+	scar(centre, RULER_RADIUS, palette, 2.6, level)
 
+	-- Furrows: black bars pointing at the middle. They state the radius without
+	-- covering a single thing standing inside it.
+	local furrows = tier(level, 5, 9, 14)
+	for index = 1, furrows do
+		local angle = (index / furrows) * math.pi * 2
+		local direction = Vector3.new(math.cos(angle), 0, math.sin(angle))
+		local outer = centre + direction * (RULER_RADIUS * 0.62) + Vector3.new(0, 0.3, 0)
+		local inner = centre + direction * 4 + Vector3.new(0, 0.3, 0)
+		local furrow = volume(Vector3.new(1.6, 0.4, RULER_RADIUS * 0.75), look(outer, centre), 0.15)
+		tweenTo(furrow, 0.5, Enum.EasingStyle.Quart, {
+			CFrame = look(inner, centre),
+			Size = Vector3.new(0.4, 0.4, 6),
+			Transparency = 1,
+		})
+		Debris:AddItem(furrow, 0.58)
+	end
+
+	-- The closing ring: the one motion in the game that runs inward.
+	ringAt(
+		centre + Vector3.new(0, 0.3, 0),
+		RULER_RADIUS,
+		tier(level, 8, 14, 22),
+		1,
+		SHELL,
+		0.45,
+		0.1
+	)
+
+	-- Streaks from the rim. The hue lives here.
 	local streaks = tier(level, 6, 12, 20)
 	for index = 1, streaks do
 		local angle = (index / streaks) * math.pi * 2 + RNG:NextNumber(-0.25, 0.25)
-		local rim = centre
+		local edge = centre
 			+ Vector3.new(math.cos(angle), 0, math.sin(angle)) * RULER_RADIUS
-			+ Vector3.new(0, RNG:NextNumber(0.5, 13), 0)
-		local streak =
-			block(Vector3.new(0.4, 0.4, RNG:NextNumber(5, 11)), look(rim, heart), palette.core, 0.1)
+			+ Vector3.new(0, RNG:NextNumber(0.5, 2.4 * CHAR), 0)
+		local streak = shell(
+			Vector3.new(0.55, 0.55, RNG:NextNumber(1.2 * CHAR, 2.2 * CHAR)),
+			look(edge, heart),
+			0
+		)
 		task.delay(index * 0.012, function()
 			if not streak.Parent then
 				return
 			end
-			tweenTo(streak, 0.34, Enum.EasingStyle.Quart, {
-				CFrame = look(heart, heart + aim(rim, heart)),
+			tweenTo(streak, 0.36, Enum.EasingStyle.Quart, {
+				CFrame = look(heart, heart + aim(edge, heart)),
 				Size = Vector3.new(0.15, 0.15, 2),
-				Transparency = 0.6,
-				Color = palette.glow,
+				Transparency = 1,
 			})
 		end)
 		Debris:AddItem(streak, 0.5)
 	end
 
-	-- The closing ring: the one motion in the game that runs inward.
-	segmentRing(centre, RULER_RADIUS, tier(level, 8, 14, 22), 1, palette, 0.42, 0.12)
+	--[[ The column. Vertical mass is what stops a Ruler cast from being a rug --
+		the frame is landscape and a ground disc is squashed flat by perspective,
+		so the technique needs something standing up in it. ]]
+	local column = volume(
+		Vector3.new(1.6 * CHAR, 5.5 * CHAR, 1.6 * CHAR),
+		CFrame.new(centre + Vector3.new(0, 2.75 * CHAR, 0)),
+		0.5
+	)
+	tweenTo(column, 0.55, Enum.EasingStyle.Quart, {
+		Size = Vector3.new(1, 6 * CHAR, 1),
+		Transparency = 1,
+	})
+	Debris:AddItem(column, 0.62)
 
-	-- A short vortex column, three discs shrinking as they climb.
-	for index = 1, tier(level, 1, 2, 3) do
-		local column = disc(
-			CFrame.new(centre + Vector3.new(0, index * 2.4, 0)) * FLAT,
-			14 - index * 2.5,
-			0.4,
-			palette.glow,
-			0.4
+	-- Bands riding up the column and closing as they climb.
+	for index = 1, tier(level, 1, 2, 4) do
+		edgeRing(
+			CFrame.new(centre + Vector3.new(0, index * 2.2, 0)),
+			CFrame.new(centre + Vector3.new(0, index * 5 + 6, 0)) * CFrame.Angles(0, index * 2.2, 0),
+			1.5 * CHAR,
+			tier(level, 5, 7, 10),
+			0.55,
+			SHELL,
+			0.6,
+			0.15
 		)
-		tweenTo(column, 0.5, Enum.EasingStyle.Quart, {
-			CFrame = CFrame.new(centre + Vector3.new(0, index * 4.5 + 3, 0))
-				* CFrame.Angles(0, index * 2.2, 0)
-				* FLAT,
-			Size = Vector3.new(0.2, 2, 2),
-			Transparency = 1,
-		})
-		Debris:AddItem(column, 0.56)
 	end
 
 	-- Drawn up the column rather than thrown out of it, which is the only way a
-	-- particle burst can read as absorption instead of as an explosion.
-	spray(centre + Vector3.new(0, 1, 0), tier(level, 8, 18, 32), {
-		core = palette.core,
+	-- particle burst reads as absorption instead of as an explosion.
+	spray(centre + Vector3.new(0, 1, 0), tier(level, 8, 16, 28), {
+		core = SHELL,
 		glow = palette.glow,
 		sizeFrom = 1.6,
 		sizeTo = 0,
@@ -1773,71 +2239,70 @@ local function drawSiphon(shot: Shot, palette: Palette, _duration: number, level
 		drag = 1,
 	})
 
-	-- The swallow, timed to when the streaks arrive.
-	task.delay(0.34, function()
-		local swallow = ball(heart, 1, palette.core, 0)
-		bloom(swallow, 0.3, Vector3.one * 11, Enum.EasingStyle.Quint)
-		flare(heart, palette.glow, 9, 40)
-		shakeAt(heart, 0.3, 140)
-		spray(heart, tier(level, 6, 14, 24), {
-			core = palette.core,
-			glow = palette.glow,
-			sizeFrom = 1.2,
-			sizeTo = 0,
-			speed = NumberRange.new(16, 44),
-			life = NumberRange.new(0.25, 0.55),
-			spread = 40,
-			acceleration = Vector3.new(0, 30, 0),
-		})
+	--[[ The swallow, timed to when the streaks arrive. Terminated as a *ground*
+		event, not a body one: the technique is closing on the caster's own feet,
+		and whether it took anybody with it is Impact's broadcast to answer, once
+		per victim, wherever those victims are standing. ]]
+	task.delay(0.36, function()
+		terminate(cast, heart, Vector3.new(0, 1, 0), cast.weight, false)
 	end)
 end
 
 --[[ Tempest. The sky comes down.
 
-	The single most expensive technique in the game (85 madra, 20 second cooldown,
-	1.8 second windup) and the only one that draws from above the play space:
-	rising vortex bands, bolts landing in a stagger across the whole radius, and a
-	shock ring off the last one. If any one cast in this game should stop a fight
-	to be looked at, it is this one. ]]
-local function drawTempest(shot: Shot, palette: Palette, _duration: number, level: number)
+	The most expensive technique in the game and the only one that draws from
+	above the play space: a black storm ceiling, bolts landing in a stagger across
+	the whole radius, and a shock ring off the last one. If any single cast should
+	stop a fight to be looked at, it is this one. ]]
+local function drawTempest(cast: Cast)
+	local shot = cast.shot
+	local palette = cast.palette
+	local level = cast.level
 	local floor = groundY(shot.origin, shot.origin.Y - 3)
 	local centre = Vector3.new(shot.origin.X, floor, shot.origin.Z)
 
-	shakeAt(centre, 0.34, 200)
-	groundWave(centre, 4, RULER_RADIUS * 2, palette, 0.7)
+	shadowWave(centre, 5, RULER_RADIUS * 2, 0.7, level)
+	scar(centre, RULER_RADIUS, palette, 5, level)
 
-	-- Vortex bands: rising and widening, each turned further than the last, so
-	-- the whole column reads as one rotation.
+	--[[ The ceiling. A black slab overhead is what makes this read as weather
+		rather than as fireworks, and being dark it can cover the top of the frame
+		without costing any visibility at ground level. ]]
+	local ceiling =
+		disc(CFrame.new(centre + Vector3.new(0, 7 * CHAR, 0)) * FLAT, RULER_RADIUS, 2.5, VOID, 0.5)
+	tweenTo(ceiling, 1.5, Enum.EasingStyle.Quint, {
+		Size = Vector3.new(1, RULER_RADIUS * 2.3, RULER_RADIUS * 2.3),
+		Transparency = 1,
+	})
+	Debris:AddItem(ceiling, 1.6)
+
+	-- Bands rising into it, each turned further than the last so the column reads
+	-- as one rotation.
 	local bands = tier(level, 2, 3, 5)
 	for index = 1, bands do
-		local band = disc(
-			CFrame.new(centre + Vector3.new(0, index * 1.5, 0)) * FLAT,
+		edgeRing(
+			CFrame.new(centre + Vector3.new(0, index * 1.5, 0)),
+			CFrame.new(centre + Vector3.new(0, 6 + index * 5.5, 0))
+				* CFrame.Angles(0, index * 1.4, 0),
 			RULER_RADIUS * 0.5,
-			0.5,
-			palette.glow,
-			0.4
+			tier(level, 8, 12, 18),
+			0.8,
+			SHELL,
+			1,
+			1.9
 		)
-		tweenTo(band, 0.95, Enum.EasingStyle.Quart, {
-			CFrame = CFrame.new(centre + Vector3.new(0, 6 + index * 5.5, 0))
-				* CFrame.Angles(0, index * 1.4, 0)
-				* FLAT,
-			Size = Vector3.new(0.2, RULER_RADIUS * 1.9, RULER_RADIUS * 1.9),
-			Transparency = 1,
-			Color = palette.core,
-		})
-		Debris:AddItem(band, 1.02)
 	end
 
-	spray(centre + Vector3.new(0, 3, 0), tier(level, 14, 28, 50), {
-		core = palette.core,
-		glow = palette.glow,
-		sizeFrom = 1.4,
-		sizeTo = 5,
-		speed = NumberRange.new(20, 52),
-		life = NumberRange.new(0.5, 1),
+	spray(centre + Vector3.new(0, 3, 0), tier(level, 10, 22, 40), {
+		core = ASH,
+		glow = VOID,
+		sizeFrom = 3,
+		sizeTo = 10,
+		speed = NumberRange.new(18, 48),
+		life = NumberRange.new(0.7, 1.5),
 		spread = 180,
-		acceleration = Vector3.new(0, 10, 0),
+		acceleration = Vector3.new(0, 8, 0),
 		drag = 1.5,
+		dusty = true,
 	})
 
 	local strikes = tier(level, 2, 3, 5)
@@ -1846,13 +2311,14 @@ local function drawTempest(shot: Shot, palette: Palette, _duration: number, leve
 		local angle = RNG:NextNumber(0, math.pi * 2)
 		local radius = math.sqrt(RNG:NextNumber(0.02, 1)) * (RULER_RADIUS - 2)
 		local at = centre + Vector3.new(math.cos(angle) * radius, 0, math.sin(angle) * radius)
-		local delay = 0.1 + (index - 1) * (0.75 / strikes)
+		local delay = 0.18 + (index - 1) * (0.85 / strikes)
 		last = math.max(last, delay)
 
 		task.delay(delay, function()
 			-- A jagged polyline, because a straight line is a pole and a bent one
-			-- is lightning.
-			local top = at + Vector3.new(RNG:NextNumber(-8, 8), 62, RNG:NextNumber(-8, 8))
+			-- is lightning. White spine in a black sheath, so a bolt is readable
+			-- against a bright sky as well as against dark stone.
+			local top = at + Vector3.new(RNG:NextNumber(-8, 8), 7 * CHAR, RNG:NextNumber(-8, 8))
 			local segments = tier(level, 3, 5, 7)
 			local previous = top
 			for step = 1, segments do
@@ -1866,45 +2332,50 @@ local function drawTempest(shot: Shot, palette: Palette, _duration: number, leve
 						RNG:NextNumber(-spreadOut, spreadOut)
 					)
 				local length = (point - previous).Magnitude
-				local shard = block(
-					Vector3.new(1.1, 1.1, length),
-					look(previous:Lerp(point, 0.5), point),
-					palette.core,
-					0
-				)
-				tweenTo(shard, 0.16, Enum.EasingStyle.Quad, {
+				local frame = look(previous:Lerp(point, 0.5), point)
+
+				local sheath = volume(Vector3.new(2.4, 2.4, length), frame, 0.25)
+				tweenTo(sheath, 0.2, Enum.EasingStyle.Quad, {
+					Size = Vector3.new(0.4, 0.4, length),
+					Transparency = 1,
+				})
+				Debris:AddItem(sheath, 0.26)
+
+				local spine = shell(Vector3.new(1, 1, length), frame, 0)
+				tweenTo(spine, 0.16, Enum.EasingStyle.Quad, {
 					Size = Vector3.new(0.1, 0.1, length),
 					Transparency = 1,
-					Color = palette.glow,
 				})
-				Debris:AddItem(shard, 0.22)
+				Debris:AddItem(spine, 0.22)
 				previous = point
 			end
 
-			local strike = ball(at + Vector3.new(0, 1, 0), 2, palette.core, 0)
-			bloom(strike, 0.24, Vector3.one * 12, Enum.EasingStyle.Quint)
-			groundWave(at, 2, 24, palette, 0.35)
-			flare(at + Vector3.new(0, 2, 0), palette.glow, 9, 38)
-			spray(at, tier(level, 5, 12, 20), {
-				core = palette.core,
-				glow = palette.glow,
-				sizeFrom = 1,
-				sizeTo = 0,
-				speed = NumberRange.new(20, 50),
-				life = NumberRange.new(0.2, 0.5),
-				spread = 100,
-				acceleration = Vector3.new(0, -20, 0),
-			})
-			shakeAt(at, 0.26, 130)
+			-- A bolt lands on the ground; whether it also landed on somebody is
+			-- Impact's event to draw, at that person, not at this crater.
+			terminate(
+				cast,
+				at + Vector3.new(0, 1, 0),
+				Vector3.new(0, 1, 0),
+				cast.weight * 0.7,
+				false
+			)
+			flare(at + Vector3.new(0, 2, 0), palette.core, 9, 38)
 		end)
 	end
 
 	-- The last bolt lands and the storm blows outward: the cast has an ending,
 	-- not just a stop.
-	task.delay(last + 0.16, function()
-		segmentRing(centre, RULER_RADIUS * 0.25, tier(level, 8, 14, 24), 1.4, palette, 0.55, 4)
-		groundWave(centre, 8, RULER_RADIUS * 2.2, palette, 0.5)
-		shakeAt(centre, 0.5, 200)
+	task.delay(last + 0.18, function()
+		ringAt(
+			centre + Vector3.new(0, 0.4, 0),
+			RULER_RADIUS * 0.25,
+			tier(level, 8, 14, 24),
+			1.4,
+			SHELL,
+			0.55,
+			4
+		)
+		shadowWave(centre, 10, RULER_RADIUS * 2.2, 0.5, level)
 	end)
 end
 
@@ -1925,31 +2396,49 @@ local DRAW: { [string]: Draw } = {
 	tempest = drawTempest,
 }
 
---[[ Anything the table does not know still draws something.
-
-	A technique added to Config without a drawing here would otherwise be silent,
-	and a silent button is indistinguishable from a broken one. This keeps the
-	old placeholder behaviour as the floor: strikers get a bolt, everything else
-	gets a ring at the caster's feet. ]]
-local function drawFallback(shot: Shot, palette: Palette, _duration: number, level: number)
+--[[ Anything the table does not know still draws something. A technique added to
+	Config without a drawing here would otherwise be silent, and a silent button
+	is indistinguishable from a broken one. ]]
+local function drawFallback(cast: Cast)
+	local shot = cast.shot
 	local target = shot.target
 	if target then
 		local direction = aim(shot.origin, target)
-		bolt(shot.origin, target, palette, 0.5, 6, 0.1, level)
-		task.delay(0.1, function()
-			impact(target, direction, palette, 1, shot.hit, level)
+		local rig = spearRig(look(shot.origin, target), 3 * CHAR, 0.5 * CHAR, cast)
+		rigFly(rig, look(target, target + direction), 0.18, Enum.EasingStyle.Linear)
+		task.delay(0.18, function()
+			rigDismiss(rig, 0.1)
+			terminate(cast, target, direction, cast.weight, shot.hit)
 		end)
 		return
 	end
 	local floor = groundY(shot.origin, shot.origin.Y - 3)
-	groundWave(Vector3.new(shot.origin.X, floor, shot.origin.Z), 4, 20, palette, 0.4)
+	shadowWave(Vector3.new(shot.origin.X, floor, shot.origin.Z), 5, 24, 0.45, cast.level)
 end
+
+--[[ Local cooldown mirror, seeded only from *confirmed* casts.
+
+	This exists so the windup telegraph below does not fire on a press the server
+	is going to throw away. It follows the same rule the slot bar does: a refused
+	press never puts anything on a cooldown it did not pay for. ]]
+local confirmedUntil: { [string]: number } = {}
+local gcdUntil = 0
 
 function Vfx.play(shot: Shot)
 	-- Remote payloads are untyped at runtime, so the two fields every path below
 	-- dereferences are checked before anything is drawn.
 	if typeof(shot.techId) ~= "string" or typeof(shot.origin) ~= "Vector3" then
 		return
+	end
+
+	-- The windup is over the moment the server says the technique resolved.
+	clearCharge(shot.casterId, true)
+
+	local tech = Config.Techniques[shot.techId]
+	if tech and isLocalCaster(shot) then
+		local now = os.clock()
+		confirmedUntil[shot.techId] = now + tech.cooldown
+		gcdUntil = now + Config.Combat.globalCooldown
 	end
 
 	--[[ Detail is judged at whichever end of the technique is closer to the
@@ -1971,12 +2460,72 @@ function Vfx.play(shot: Shot)
 		return
 	end
 
-	local tech = Config.Techniques[shot.techId]
-	local palette = PALETTE[shot.techId] or FALLBACK
-	local duration = if tech then tech.buffDuration else 0
-	local draw = DRAW[shot.techId] or drawFallback
+	local cast: Cast = {
+		shot = shot,
+		palette = PALETTE[shot.techId] or FALLBACK,
+		duration = if tech then tech.buffDuration else 0,
+		-- Heft from configured damage, so retuning a technique retunes how hard
+		-- it looks without anybody editing this file.
+		weight = if tech then math.clamp(tech.damage / 70, 0.5, 2) else 1,
+		level = level,
+	}
 
-	draw(shot, palette, duration, level)
+	local draw = DRAW[shot.techId] or drawFallback
+	draw(cast)
 end
+
+--[[ The local caster's own windup.
+
+	The server broadcasts on resolve, never on cast, so this is the only windup
+	the client can currently know about. It starts from the keypress, is gated on
+	the same Config the server charges from, and if no broadcast confirms within
+	the windup then `clearCharge` collapses it inward instead of releasing it --
+	so a refused press reads as a refused press rather than as a technique that
+	fired and did nothing.
+
+	This listener sends nothing and decides nothing. Input authority stays exactly
+	where it was. ]]
+local function localWindup(slot: string)
+	local player = Players.LocalPlayer
+	if not player then
+		return
+	end
+	local techId = player:GetAttribute("Slot_" .. slot)
+	if typeof(techId) ~= "string" then
+		return
+	end
+	local tech = Config.Techniques[techId]
+	if not tech then
+		return
+	end
+
+	local now = os.clock()
+	if now < gcdUntil or now < (confirmedUntil[techId] or 0) then
+		return
+	end
+	local madra = player:GetAttribute("Madra")
+	if typeof(madra) == "number" and madra < tech.madraCost then
+		return
+	end
+
+	Vfx.charge(techId, player.UserId)
+end
+
+local SLOT_KEYS: { [Enum.KeyCode]: string } = {
+	[Enum.KeyCode.One] = Config.LoadoutSlots[1],
+	[Enum.KeyCode.Two] = Config.LoadoutSlots[2],
+	[Enum.KeyCode.Three] = Config.LoadoutSlots[3],
+	[Enum.KeyCode.Four] = Config.LoadoutSlots[4],
+}
+
+UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
+	if processed then
+		return
+	end
+	local slot = SLOT_KEYS[input.KeyCode]
+	if slot then
+		localWindup(slot)
+	end
+end)
 
 return Vfx

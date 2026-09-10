@@ -461,6 +461,11 @@ techniqueFired.OnClientEvent:Connect(function(shot: Vfx.Shot)
 	Vfx.play(shot)
 end)
 
+--[[ The impact grammar owns its own remote. Damage is broadcast separately from
+	the cast because the two are not the same event: a Ruler sweep is one cast
+	and four hits, and a construct ticks with no cast at all. ]]
+require(script.Impact).start()
+
 -- The cooldown sweep has to animate, so the slot bar is the one thing here that
 -- redraws every frame rather than only on a signal.
 RunService.RenderStepped:Connect(refreshSlots)
