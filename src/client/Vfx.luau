@@ -697,15 +697,21 @@ local function segmentRing(
 	for index = 1, segments do
 		local angle = (index / segments) * math.pi * 2
 		local offset = Vector3.new(math.cos(angle) * radius, 0, math.sin(angle) * radius)
+		-- The quarter turn is what makes each segment lie along the arc instead of
+		-- pointing out of it: a ring of tangents reads as a circle, a ring of
+		-- radial spokes reads as a starburst.
+		local facing = CFrame.Angles(0, -angle + math.pi / 2, 0)
 		local part = block(
 			Vector3.new(span * 0.82, thickness, thickness),
-			CFrame.new(centre + offset) * CFrame.Angles(0, -angle, 0),
+			CFrame.new(centre + offset) * facing,
 			palette.core,
 			0.1
 		)
+		-- Segments scale with the radius they travel to, so the ring stays closed
+		-- whether it is opening outward or closing inward.
 		local target = centre + offset.Unit * (radius * growTo)
 		tweenTo(part, seconds, Enum.EasingStyle.Quint, {
-			CFrame = CFrame.new(target) * CFrame.Angles(0, -angle, 0),
+			CFrame = CFrame.new(target) * facing,
 			Size = Vector3.new(span * growTo, thickness * 0.4, thickness * 0.4),
 			Transparency = 1,
 			Color = palette.glow,
@@ -1936,7 +1942,7 @@ local function drawFallback(shot: Shot, palette: Palette, _duration: number, lev
 		return
 	end
 	local floor = groundY(shot.origin, shot.origin.Y - 3)
-	groundWave(Vector3.new(shot.origin.X, floor + 0.2, shot.origin.Z), 4, 20, palette, 0.4)
+	groundWave(Vector3.new(shot.origin.X, floor, shot.origin.Z), 4, 20, palette, 0.4)
 end
 
 function Vfx.play(shot: Shot)
@@ -1946,11 +1952,21 @@ function Vfx.play(shot: Shot)
 		return
 	end
 
-	--[[ Detail is judged at the caster, not at the impact, because that is where
-		every kind but striker happens -- and your own casts are always drawn in
-		full, since a technique that degrades in your own hands feels broken
-		rather than optimised. ]]
-	local level = if isLocalCaster(shot) then DETAIL_FULL else detailAt(shot.origin)
+	--[[ Detail is judged at whichever end of the technique is closer to the
+		camera. A shot fired from across the arena still lands next to you, and the
+		frame where you are the one being hit is the last frame that should be
+		economised. Your own casts are always full: a technique that degrades in
+		your own hands reads as broken rather than as optimised. ]]
+	local level: number
+	if isLocalCaster(shot) then
+		level = DETAIL_FULL
+	else
+		level = detailAt(shot.origin)
+		local landing = shot.target
+		if landing then
+			level = math.max(level, detailAt(landing))
+		end
+	end
 	if level <= DETAIL_NONE then
 		return
 	end
