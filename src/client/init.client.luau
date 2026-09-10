@@ -646,6 +646,104 @@ noticeLabel.Size = UDim2.fromScale(1, 1)
 noticeLabel.TextXAlignment = Enum.TextXAlignment.Center
 
 -- ===================================================================
+-- Guidance: the one line that says what to do next.
+-- ===================================================================
+
+--[[ Every other piece of text in this file is a state *readout* -- stage, tier,
+	power, health, madra, a list of distant dots. None of it tells a player who
+	has never seen this game what to actually do, and a tier now rolls over in
+	two minutes, which is worth nothing at all if nobody knows to stand in the
+	node.
+
+	So: one quiet line, always on screen, answering "what should I be doing right
+	now" and changing as that answer changes. Not a popup, not a modal, nothing
+	to dismiss. It sits directly above the cluster in the dim weight, so it reads
+	as an aside rather than as an alert -- the loud registers are already spoken
+	for by notices and by the breakthrough prompt, and guidance that shouts
+	competes with the two things that have earned the right to.
+
+	The voice is the one `Config.RegionNames` and the announcement copy already
+	use: spare, declarative, present tense. This game says "surfaced in the Ember
+	Barrens", not "A rare node has spawned!". ]]
+local guidanceLabel = caption(screen, text(12), TEXT_DIM, false)
+guidanceLabel.AnchorPoint = Vector2.new(0.5, 1)
+guidanceLabel.Position = UDim2.new(0.5, 0, 1, -(px(SLOT.bottomMargin) + clusterHeight + px(10)))
+guidanceLabel.Size = UDim2.fromOffset(px(520), px(18))
+guidanceLabel.TextXAlignment = Enum.TextXAlignment.Center
+
+--[[ The first-run card.
+
+	Shown once, on spawn, and gone twelve seconds later or on the first input --
+	whichever comes first, because a player who has already started doing things
+	does not need to be told to start doing things.
+
+	Three lines, and the third is the one doing real work: four friends who are
+	not told they are rivals will very plausibly spend an hour cooperating
+	politely, and we will learn nothing about the PvP this entire game is built
+	on. Stage and the key range are read from live state rather than hardcoded,
+	so the card stays true if either changes. ]]
+local cardFrame = Instance.new("Frame")
+cardFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+cardFrame.Position = UDim2.fromScale(0.5, 0.34)
+cardFrame.Size = UDim2.fromOffset(px(460), px(96))
+cardFrame.BackgroundColor3 = PANEL
+cardFrame.BackgroundTransparency = 0.18
+cardFrame.BorderSizePixel = 0
+cardFrame.Visible = false
+cardFrame.Parent = screen
+corner(cardFrame, 4)
+local cardStroke = outline(cardFrame, EDGE, 1)
+cardStroke.Transparency = 0.4
+
+local cardLines: { TextLabel } = {}
+for index = 1, 3 do
+	local line = caption(cardFrame, text(if index == 1 then 15 else 13), TEXT, index == 1)
+	line.Size = UDim2.new(1, -px(24), 0, px(22))
+	line.Position = UDim2.fromOffset(px(12), px(14) + (index - 1) * px(24))
+	line.TextXAlignment = Enum.TextXAlignment.Center
+	line.TextColor3 = if index == 1 then TEXT else TEXT_DIM
+	cardLines[index] = line
+end
+
+local cardDismissed = false
+
+local function dismissCard()
+	if cardDismissed or not cardFrame.Visible then
+		return
+	end
+	cardDismissed = true
+	-- Faded rather than cut, so it reads as receding rather than as a glitch.
+	task.spawn(function()
+		local steps = 18
+		for step = 1, steps do
+			local t = step / steps
+			cardFrame.BackgroundTransparency = 0.18 + 0.82 * t
+			cardStroke.Transparency = 0.4 + 0.6 * t
+			for _, line in cardLines do
+				line.TextTransparency = t
+			end
+			task.wait(0.03)
+		end
+		cardFrame.Visible = false
+	end)
+end
+
+local function showCard()
+	if cardDismissed then
+		return
+	end
+	local stage = player:GetAttribute("Stage")
+	cardLines[1].Text = if typeof(stage) == "string"
+		then `You are a {stage} cultivator.`
+		else "You are a cultivator."
+	cardLines[2].Text =
+		`Stand inside an aura node to cycle. Keys 1-{slotCount} are your techniques.`
+	cardLines[3].Text = "Every cultivator at your stage is a rival. There is no safe ground."
+	cardFrame.Visible = true
+	task.delay(12, dismissCard)
+end
+
+-- ===================================================================
 -- State refresh.
 -- ===================================================================
 
@@ -669,14 +767,13 @@ local function refreshCultivation()
 	railFill.Size = UDim2.fromScale(InterfaceSpec.fraction(progress, goal), 1)
 	railFill.BackgroundColor3 = if atCeiling then CEILING else REFINEMENT
 
-	if atCeiling then
-		promptFrame.Visible = true
-		promptLabel.Text = if catalysts > 0
-			then "[B]  BREAK THROUGH"
-			else "refinement ceiling — a catalyst comes only from a Prime node"
-		promptLabel.TextColor3 = if catalysts > 0 then CEILING else TEXT_DIM
-	else
-		promptFrame.Visible = false
+	--[[ The prompt is now *only* the actionable case. The ceiling-without-a-
+		catalyst message moved to the guidance line below, because two surfaces
+		saying the same thing in different words is worse than either alone --
+		and because "you cannot act yet" is guidance, while "[B]" is a command. ]]
+	promptFrame.Visible = atCeiling and catalysts > 0
+	if promptFrame.Visible then
+		promptLabel.Text = "[B]  BREAK THROUGH"
 	end
 end
 
@@ -1083,8 +1180,78 @@ castStarted.OnClientEvent:Connect(function(event: any)
 	end
 end)
 
+--[[ The guidance state machine. First match wins, and the order is the order a
+	player's attention should follow: what is stopping you, then what you are
+	doing, then where to go.
+
+	`Sensed` already carries a distance per node, so "inside a node" is simply
+	within `Config.Field.captureRadius` -- the same 14 studs the server uses to
+	decide whether you are drawing from it. No new protocol, no server change,
+	and the line cannot disagree with the rule it is describing. ]]
+local NEARBY_STUDS = 120
+
+local function guidanceText(): string
+	local health = player:GetAttribute("Health")
+	if typeof(health) == "number" and health <= 0 then
+		-- The death feedback already speaks, and loudly. Nothing to add.
+		return ""
+	end
+
+	local atCeiling = player:GetAttribute("AtCeiling") == true
+	local catalysts = player:GetAttribute("Catalysts") or 0
+	if atCeiling then
+		if catalysts > 0 then
+			-- The breakthrough prompt has this. Do not say it twice.
+			return ""
+		end
+		return "At your ceiling. Only a Prime node yields a catalyst. Hold one until it drains."
+	end
+
+	local nearest = math.huge
+	for _, entry in latest do
+		local distance = tonumber(entry.distance)
+		if distance and distance < nearest then
+			nearest = distance
+		end
+	end
+
+	if nearest <= Config.Field.captureRadius then
+		-- Teaches capacity and the fight over it in one line: three can draw,
+		-- and the fourth has no option but to take a place by force.
+		return "Cycling. Three can draw from this node. A fourth has to take it."
+	end
+	if nearest <= NEARBY_STUDS then
+		return "A node is close. Stand in it to cycle."
+	end
+
+	local senseRange = player:GetAttribute("SenseRange") or 0
+	if #latest > 0 then
+		return "Refinement comes only from aura nodes. Follow your sense."
+	end
+	if senseRange <= 0 then
+		return "No aura sense at this stage. Search on foot."
+	end
+	return "No aura within reach. Move."
+end
+
+local function refreshGuidance()
+	guidanceLabel.Text = guidanceText()
+end
+
 require(script.Impact).start()
 Nameplates.start()
+
+--[[ The card waits for cultivation state rather than firing at load, so it can
+	name the stage the player actually spawned into. ]]
+task.spawn(function()
+	for _ = 1, 100 do
+		if typeof(player:GetAttribute("Stage")) == "string" then
+			break
+		end
+		task.wait(0.1)
+	end
+	showCard()
+end)
 
 RunService.RenderStepped:Connect(function()
 	refreshSlots()
@@ -1106,6 +1273,7 @@ task.spawn(function()
 		if #latest > 0 then
 			refreshSense(latest)
 		end
+		refreshGuidance()
 	end
 end)
 
@@ -1128,11 +1296,17 @@ end
 
 for _, widget in slotWidgets do
 	widget.root.Activated:Connect(function()
+		dismissCard()
 		fireSlot(widget.slot)
 	end)
 end
 
 UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
+	--[[ Any input at all retires the card, ahead of the `processed` guard and
+		ahead of every other check. A player who has started doing things does
+		not need to be told to start doing things, and the card outstaying its
+		welcome is the one way a non-interactive overlay can still annoy. ]]
+	dismissCard()
 	if processed then
 		return
 	end
