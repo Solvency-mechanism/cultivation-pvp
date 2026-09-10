@@ -146,7 +146,15 @@ local function buildPlate(target: Player, character: Model, head: BasePart): Pla
 	local healthHeight = math.round(PLATE.healthHeight * scale)
 	local castHeight = math.round(PLATE.castHeight * scale)
 	local gap = math.round(PLATE.rowGap * scale)
-	local total = nameHeight + gap + healthHeight + gap + castHeight
+	--[[ The stage text and the cast bar share the third row and swap between
+		them, so the row has to be tall enough for the *taller* of the two. Sized
+		to the cast bar alone, the stage caption would spill out of the billboard
+		-- which a BillboardGui will happily render, since it does not clip, so
+		the bug would show up as text drifting under the plate rather than as
+		anything that announces itself. ]]
+	local thirdRow = math.max(castHeight, math.round(PLATE.stageTextSize * scale) + 4)
+	local castTop = nameHeight + gap + healthHeight + gap
+	local total = castTop + thirdRow
 
 	local gui = Instance.new("BillboardGui")
 	gui.Name = PLATE_NAME
@@ -171,12 +179,14 @@ local function buildPlate(target: Player, character: Model, head: BasePart): Pla
 	nameLabel.Parent = gui
 	stroked(nameLabel)
 
-	--[[ Stage rides *inside* the name row, right-aligned, rather than taking a
-		row of its own. Two facts, one line: the plate is 158px wide and every
-		row it spends is a row of screen it takes from the fight behind it. ]]
+	--[[ Stage sits under the health bar and *shares* its row with the cast bar,
+		the two swapping rather than stacking. While a technique is winding up,
+		what this person is about to do outranks what stage they are -- and
+		reusing the row keeps the plate from growing at exactly the moment a
+		fight gets busy and screen space is scarcest. ]]
 	local stageLabel = Instance.new("TextLabel")
-	stageLabel.Size = UDim2.new(1, 0, 0, nameHeight)
-	stageLabel.Position = UDim2.fromOffset(0, nameHeight + gap + healthHeight + gap)
+	stageLabel.Size = UDim2.new(1, 0, 0, thirdRow)
+	stageLabel.Position = UDim2.fromOffset(0, castTop)
 	stageLabel.BackgroundTransparency = 1
 	stageLabel.Font = Enum.Font.GothamMedium
 	stageLabel.TextSize = math.round(PLATE.stageTextSize * scale)
@@ -212,7 +222,9 @@ local function buildPlate(target: Player, character: Model, head: BasePart): Pla
 		keeps the plate from growing at the exact moment a fight gets busy. ]]
 	local castRow = Instance.new("Frame")
 	castRow.Size = UDim2.new(1, 0, 0, castHeight)
-	castRow.Position = UDim2.fromOffset(0, nameHeight + gap + healthHeight + gap)
+	-- Vertically centred in the shared row, so swapping to it does not make the
+	-- plate appear to jump.
+	castRow.Position = UDim2.fromOffset(0, castTop + math.floor((thirdRow - castHeight) / 2))
 	castRow.BackgroundColor3 = TROUGH
 	castRow.BackgroundTransparency = 0.1
 	castRow.BorderSizePixel = 0

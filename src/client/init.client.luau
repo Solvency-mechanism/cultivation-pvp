@@ -42,7 +42,11 @@ local player = Players.LocalPlayer
 local screen = Instance.new("ScreenGui")
 screen.Name = "CultivationHud"
 screen.ResetOnSpawn = false
-screen.IgnoreGuiInset = true
+--[[ The inset is respected rather than ignored. Roblox owns the top strip --
+	its menu button and the player list live there -- and a notice or a target
+	frame drawn underneath that chrome is unreadable in exactly the way that is
+	hardest to notice from a developer's own machine. ]]
+screen.IgnoreGuiInset = false
 screen.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 screen.Parent = player:WaitForChild("PlayerGui")
 
