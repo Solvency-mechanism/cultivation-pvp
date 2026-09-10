@@ -44,24 +44,58 @@ end
 
 local ORIGIN = { x = 0, y = 0, z = 0 }
 
--- Weighted tier roll: weights are 70 / 25 / 5 out of 100.
-eq("low roll picks common", AuraNodes.rollTier(Config, scripted({ 0.0 })), "common")
-eq("0.69 still common", AuraNodes.rollTier(Config, scripted({ 0.69 })), "common")
-eq("0.71 picks rare", AuraNodes.rollTier(Config, scripted({ 0.71 })), "rare")
-eq("0.96 picks prime", AuraNodes.rollTier(Config, scripted({ 0.96 })), "prime")
-eq("top of range stays valid", AuraNodes.rollTier(Config, scripted({ 0.999999 })), "prime")
+--[[ Weighted tier roll. Expectations are DERIVED from Config rather than
+	written as literals: what is being tested is that rollTier reads the
+	configured weights faithfully, not that the weights hold any particular
+	value. Baking today's numbers in here made a legitimate retune look like a
+	regression, which is a test bug rather than a tuning one. ]]
+local totalWeight = 0
+for _, entry in Config.Field.spawnWeights do
+	totalWeight += entry.weight
+end
 
--- Distribution should track the configured weights.
-local counts = { common = 0, rare = 0, prime = 0 }
+-- Cumulative band edges, in the same order rollTier walks them.
+local bands: { { tier: string, lo: number, hi: number } } = {}
+local cursor = 0
+for _, entry in Config.Field.spawnWeights do
+	local lo = cursor / totalWeight
+	cursor += entry.weight
+	table.insert(bands, { tier = entry.tier, lo = lo, hi = cursor / totalWeight })
+end
+
+eq("low roll picks the first weighted tier", AuraNodes.rollTier(Config, scripted({ 0.0 })), bands[1].tier)
+eq("top of range stays valid", AuraNodes.rollTier(Config, scripted({ 0.999999 })), bands[#bands].tier)
+
+-- Each band's interior resolves to its own tier, on both sides of every edge.
+for _, band in bands do
+	local inside = (band.lo + band.hi) / 2
+	eq(`mid-band roll picks {band.tier}`, AuraNodes.rollTier(Config, scripted({ inside })), band.tier)
+	eq(
+		`just inside {band.tier}'s lower edge`,
+		AuraNodes.rollTier(Config, scripted({ band.lo + 1e-6 })),
+		band.tier
+	)
+	eq(
+		`just inside {band.tier}'s upper edge`,
+		AuraNodes.rollTier(Config, scripted({ band.hi - 1e-6 })),
+		band.tier
+	)
+end
+
+-- Distribution should track the configured weights, whatever they are.
+local counts: { [string]: number } = {}
+for _, entry in Config.Field.spawnWeights do
+	counts[entry.tier] = 0
+end
 local rng = lcg(20260909)
 local N = 20000
 for _ = 1, N do
 	local t = AuraNodes.rollTier(Config, rng)
 	counts[t] += 1
 end
-near("common ~70%", counts.common / N, 0.70, 0.02)
-near("rare ~25%", counts.rare / N, 0.25, 0.02)
-near("prime ~5%", counts.prime / N, 0.05, 0.01)
+for _, entry in Config.Field.spawnWeights do
+	near(`{entry.tier} tracks its configured weight`, counts[entry.tier] / N, entry.weight / totalWeight, 0.02)
+end
 
 -- Lifetime and expiry
 local node = AuraNodes.create(Config, "n1", "common", ORIGIN, "open", 100)
