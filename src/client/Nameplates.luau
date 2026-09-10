@@ -120,6 +120,7 @@ type Plate = {
 	castLabel: TextLabel,
 	character: Model,
 	head: BasePart,
+	humanoid: Humanoid?,
 }
 
 local plates: { [number]: Plate } = {}
@@ -256,24 +257,6 @@ local function buildPlate(target: Player, character: Model, head: BasePart): Pla
 	castLabel.Parent = castRow
 	stroked(castLabel)
 
-	--[[ Roblox's own overhead name tag steps aside too.
-
-		It is on by default -- `Humanoid.DisplayDistanceType` starts at `Viewer`
-		-- and nothing in this project has ever turned it off, so every player
-		was carrying two names at two different anchors: Roblox's in white, and
-		this plate's in the stage colour. `None` also retires the default health
-		display, which is correct rather than incidental: this plate draws a
-		health bar of its own, and the built-in one appears only when damaged, so
-		the two would have disagreed about where a health bar lives exactly when
-		one mattered.
-
-		Client-side and local-view only. Nothing is replicated, and the humanoid
-		itself is untouched as far as the server is concerned. ]]
-	local humanoid = character:FindFirstChildOfClass("Humanoid")
-	if humanoid then
-		humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
-	end
-
 	return {
 		gui = gui,
 		name = nameLabel,
@@ -284,6 +267,8 @@ local function buildPlate(target: Player, character: Model, head: BasePart): Pla
 		castLabel = castLabel,
 		character = character,
 		head = head,
+		-- May legitimately be nil here; see `standDownEngineTag`.
+		humanoid = character:FindFirstChildOfClass("Humanoid"),
 	}
 end
 
@@ -350,8 +335,52 @@ local function ensurePlate(target: Player)
 	end
 end
 
+--[[ Retire Roblox's own overhead name tag, every frame rather than once.
+
+	It is on by default -- `Humanoid.DisplayDistanceType` starts at `Viewer` --
+	and nothing in this project ever turned it off, so every player carried two
+	names at two anchors: the engine's in white, and this plate's in the stage
+	colour. `None` also retires the default health display, which is correct
+	rather than incidental: this plate draws its own health bar, the built-in one
+	appears only once damaged, and the two would have disagreed about where a
+	health bar lives at exactly the moment one mattered.
+
+	**Why this cannot be a one-shot set, which is how it was first written and
+	why it did not work.** `ensurePlate` gates on the *Head* existing, not the
+	Humanoid. A character replicates progressively, so the Head can arrive first;
+	the lookup then returns nil, the set silently does nothing, and because
+	`ensurePlate` short-circuits once a plate exists it is never retried. That is
+	the identical shape to the `PresenceService` bug directly above -- a one-shot
+	write losing a race it cannot detect, against state that comes back.
+
+	Re-asserted here instead, and the humanoid is re-looked-up while it is still
+	missing, so a late arrival is picked up on whatever frame it lands. The write
+	only happens when the value actually differs, so the steady state is one
+	property comparison per player per frame.
+
+	Honest about what this is: the timing above is a *plausible* mechanism, not a
+	proven one -- it was not reproduced, only derived from the code. The change is
+	worth making either way, because if the cause is timing this fixes it, and if
+	the cause is something else this costs a comparison and changes nothing. It
+	cannot make the failure worse, which is the only reason it is safe to land
+	past freeze.
+
+	Client-side and local-view only. Nothing replicates, and the humanoid is
+	untouched as far as the server is concerned. ]]
+local function standDownEngineTag(plate: Plate)
+	local humanoid = plate.humanoid
+	if not humanoid or not humanoid.Parent then
+		humanoid = plate.character:FindFirstChildOfClass("Humanoid")
+		plate.humanoid = humanoid
+	end
+	if humanoid and humanoid.DisplayDistanceType ~= Enum.HumanoidDisplayDistanceType.None then
+		humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+	end
+end
+
 local function refresh(target: Player, plate: Plate)
 	standDownServerPlate(plate)
+	standDownEngineTag(plate)
 
 	local health = target:GetAttribute("Health")
 	local maxHealth = target:GetAttribute("MaxHealth")
