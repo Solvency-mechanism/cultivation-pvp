@@ -344,6 +344,44 @@ InterfaceSpec.Notice = {
 	seconds = 6,
 }
 
+--[[ Not every notice is the same size of event, and until now the channel
+	treated them as though they were: one line, one weight, first-come
+	first-served, six seconds each.
+
+	That is fine for telegraphs and refusals. It is wrong for a kill and badly
+	wrong for a death. A death costs 35% of a refinement tier -- the single most
+	consequential thing that happens to a player -- and it currently arrives, if
+	it arrives at all, in the same grey as "your cultivation resumes where you
+	left it". Meanwhile the *killer* is already well served: `ImpactSpec` gives a
+	killing blow a gold oversized number, a gold marker and a glassbreak. The
+	asymmetry is the bug. The victim's side of the most dramatic moment in the
+	loop is the empty one.
+
+	So a notice kind now carries three things beyond its colour:
+
+	`scale`    -- glyph size against the base, because weight is read as size
+	             before it is read as hue, and the impact grammar already makes
+	             exactly this argument about damage numbers.
+	`seconds`  -- how long it holds. A death should outlast a node telegraph.
+	`priority` -- and this is the one that matters. The channel has a single
+	             slot, so without a priority a Prime-node announcement landing
+	             half a second after a kill simply erases it. A notice cannot be
+	             replaced by one of *lower* priority until its `floor` has
+	             elapsed. Equal or higher always replaces, so nothing is ever
+	             stuck and no queue has to exist. ]]
+InterfaceSpec.NoticeKind = {
+	death = { scale = 1.34, seconds = 7.0, priority = 3, floor = 3.0 },
+	kill = { scale = 1.22, seconds = 5.5, priority = 3, floor = 2.5 },
+	server = { scale = 1.0, seconds = 6.0, priority = 2, floor = 1.5 },
+	refused = { scale = 1.0, seconds = 4.0, priority = 1, floor = 0.0 },
+	regional = { scale = 1.0, seconds = 6.0, priority = 1, floor = 0.0 },
+	["local"] = { scale = 1.0, seconds = 6.0, priority = 0, floor = 0.0 },
+}
+
+function InterfaceSpec.noticeKind(kind: string)
+	return InterfaceSpec.NoticeKind[kind] or InterfaceSpec.NoticeKind["local"]
+end
+
 --[[ Fraction of a bar, guarded. Every bar in the HUD goes through this rather
 	than dividing inline, because a zero maximum arrives routinely -- a client
 	renders before the server has published anything at all. ]]

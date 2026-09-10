@@ -80,6 +80,11 @@ local NOTICE_COLOR: { [string]: Color3 } = {
 	regional = color(InterfaceSpec.KindColor.ruler),
 	["local"] = TEXT_DIM,
 	refused = DANGER,
+	-- A kill reads as a threshold crossed, which is the one thing gold is for
+	-- outside ImpactSpec's killing blow. A death is the only red the HUD shows
+	-- that is not a health bar, and it means what the vignette means.
+	kill = CEILING,
+	death = DANGER,
 }
 
 local TIER_COLOR: { [string]: Color3 } = {
@@ -1200,16 +1205,34 @@ local function refreshSense(nodes: { any })
 end
 
 local noticeToken = 0
+--[[ What is currently on the line, so a lower-priority notice cannot erase a
+	kill or a death that has only just landed. The channel has one slot; this is
+	what stops a Prime-node announcement arriving half a second after a death
+	from simply deleting it. ]]
+local noticePriority = -1
+local noticeFloorUntil = 0
 
 local function showNotice(kind: string, message: string)
+	local weight = InterfaceSpec.noticeKind(kind)
+	local now = os.clock()
+	if weight.priority < noticePriority and now < noticeFloorUntil then
+		return
+	end
+
 	noticeToken += 1
 	local token = noticeToken
+	noticePriority = weight.priority
+	noticeFloorUntil = now + weight.floor
+
 	noticeLabel.TextColor3 = NOTICE_COLOR[kind] or CEILING
+	noticeLabel.TextSize = text(NOTICE.textSize * weight.scale)
 	noticeLabel.Text = message
 	noticeFrame.Visible = true
-	task.delay(NOTICE.seconds, function()
+
+	task.delay(weight.seconds, function()
 		if noticeToken == token then
 			noticeFrame.Visible = false
+			noticePriority = -1
 		end
 	end)
 end
