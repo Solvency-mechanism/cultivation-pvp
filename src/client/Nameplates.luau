@@ -256,6 +256,24 @@ local function buildPlate(target: Player, character: Model, head: BasePart): Pla
 	castLabel.Parent = castRow
 	stroked(castLabel)
 
+	--[[ Roblox's own overhead name tag steps aside too.
+
+		It is on by default -- `Humanoid.DisplayDistanceType` starts at `Viewer`
+		-- and nothing in this project has ever turned it off, so every player
+		was carrying two names at two different anchors: Roblox's in white, and
+		this plate's in the stage colour. `None` also retires the default health
+		display, which is correct rather than incidental: this plate draws a
+		health bar of its own, and the built-in one appears only when damaged, so
+		the two would have disagreed about where a health bar lives exactly when
+		one mattered.
+
+		Client-side and local-view only. Nothing is replicated, and the humanoid
+		itself is untouched as far as the server is concerned. ]]
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if humanoid then
+		humanoid.DisplayDistanceType = Enum.HumanoidDisplayDistanceType.None
+	end
+
 	return {
 		gui = gui,
 		name = nameLabel,
@@ -271,12 +289,15 @@ end
 
 --[[ Stand PresenceService's plate down, every frame rather than once at build.
 
-	Doing it once did not work, and the reason is a race this could not have been
-	reasoned out of without two clients on screen: PresenceService *polls*, so its
-	plate is frequently created after ours, and a one-shot disable at build time
-	finds nothing to disable. Worse, `PresenceService.apply` destroys and rebuilds
-	the plate whenever stage or tier changes, so even a correctly-timed disable
-	would come undone at the next breakthrough.
+	Doing it once does not work, for two reasons, and the second needs no race at
+	all. PresenceService *polls*, so its plate is often created after ours and a
+	one-shot disable at build time finds nothing to disable -- that much is a
+	race. The load-bearing half is not: `PresenceService.tick` compares
+	`stageIndex * 1000 + tier`, so `apply` fires on every *tier* roll rather than
+	only at a breakthrough, and it calls `clearPresence`, which **destroys** the
+	plate, before building a fresh one with `Enabled` defaulting to true. At
+	tonight's pacing a tier rolls over roughly every two minutes, so a one-shot
+	disable would have been undone all evening, deterministically.
 
 	Disabled rather than destroyed, still: its own tick rebuilds a plate it cannot
 	find, so destroying it would start a fight that runs every tick for the rest
