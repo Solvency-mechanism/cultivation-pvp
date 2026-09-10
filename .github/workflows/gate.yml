@@ -30,6 +30,7 @@ jobs:
           lune run tests/progression.test
           lune run tests/auranodes.test
           lune run tests/combat.test
+          lune run tests/interface.test
 
       # The shared modules must contain zero internal requires. Roblox requires
       # by instance and Lune requires by relative path, and the two are
