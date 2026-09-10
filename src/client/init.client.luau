@@ -49,6 +49,27 @@ local function panel(size: UDim2, position: UDim2): Frame
 	return frame
 end
 
+--[[ HUD primitives.
+
+	Sized against the reference rather than against a desktop editor. The critic
+	measured our combat-critical text at roughly half Blox Fruits' glyph height
+	in an equivalently sized frame, with no stroke, and with every number living
+	in a separate row from the bar it describes. All three are readability
+	failures on a phone, which is where most of this platform plays.
+
+	The rules here: nothing below 22px, combat-critical text 30px+, a 2px black
+	stroke on everything, and every bar carries its own number inside it so one
+	glance gets both. ]]
+local function stroked(text: TextLabel): TextLabel
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = Color3.fromRGB(0, 0, 0)
+	stroke.Thickness = 2
+	stroke.Transparency = 0.12
+	stroke.ApplyStrokeMode = Enum.ApplyStrokeMode.Contextual
+	stroke.Parent = text
+	return text
+end
+
 local function label(
 	parent: Instance,
 	y: number,
@@ -58,57 +79,87 @@ local function label(
 	bold: boolean
 ): TextLabel
 	local text = Instance.new("TextLabel")
-	text.Size = UDim2.new(1, -20, 0, height)
-	text.Position = UDim2.fromOffset(10, y)
+	text.Size = UDim2.new(1, -24, 0, height)
+	text.Position = UDim2.fromOffset(12, y)
 	text.BackgroundTransparency = 1
 	text.TextXAlignment = Enum.TextXAlignment.Left
-	text.TextYAlignment = Enum.TextYAlignment.Top
-	text.Font = if bold then Enum.Font.GothamBold else Enum.Font.Gotham
+	text.TextYAlignment = Enum.TextYAlignment.Center
+	text.Font = if bold then Enum.Font.GothamBold else Enum.Font.GothamMedium
 	text.TextSize = size
 	text.TextColor3 = color
 	text.Text = ""
 	text.Parent = parent
-	return text
+	return stroked(text)
 end
 
-local function bar(parent: Instance, y: number, fillColor: Color3): Frame
+--[[ A bar that carries its own reading.
+
+	Returns the fill and the caption, where the caption sits *on* the bar. The
+	reference prints `Health 12845/12845` inside the green pill; the number and
+	the fill are one widget, so one glance gets both. ]]
+local function bar(
+	parent: Instance,
+	y: number,
+	height: number,
+	fillColor: Color3
+): (Frame, TextLabel)
 	local back = Instance.new("Frame")
-	back.Size = UDim2.new(1, -20, 0, 10)
-	back.Position = UDim2.fromOffset(10, y)
-	back.BackgroundColor3 = Color3.fromRGB(40, 42, 55)
+	back.Size = UDim2.new(1, -24, 0, height)
+	back.Position = UDim2.fromOffset(12, y)
+	back.BackgroundColor3 = Color3.fromRGB(24, 26, 36)
 	back.BorderSizePixel = 0
 	back.Parent = parent
+
+	local backCorner = Instance.new("UICorner")
+	backCorner.CornerRadius = UDim.new(0, 4)
+	backCorner.Parent = back
 
 	local fill = Instance.new("Frame")
 	fill.Size = UDim2.fromScale(0, 1)
 	fill.BackgroundColor3 = fillColor
 	fill.BorderSizePixel = 0
 	fill.Parent = back
-	return fill
+
+	local fillCorner = Instance.new("UICorner")
+	fillCorner.CornerRadius = UDim.new(0, 4)
+	fillCorner.Parent = fill
+
+	local caption = Instance.new("TextLabel")
+	caption.Size = UDim2.fromScale(1, 1)
+	caption.BackgroundTransparency = 1
+	caption.Font = Enum.Font.GothamBold
+	caption.TextSize = math.max(math.floor(height * 0.72), 22)
+	caption.TextColor3 = Color3.fromRGB(255, 255, 255)
+	caption.TextXAlignment = Enum.TextXAlignment.Center
+	caption.ZIndex = 3
+	caption.Text = ""
+	caption.Parent = back
+	stroked(caption)
+
+	return fill, caption
 end
 
--- Status panel, bottom left.
-local status = panel(UDim2.fromOffset(260, 176), UDim2.new(0, 16, 1, -192))
-local stageLabel = label(status, 8, 26, 20, Color3.fromRGB(255, 205, 110), true)
+local status = panel(UDim2.fromOffset(360, 250), UDim2.new(0, 20, 1, -272))
+local stageLabel = label(status, 8, 38, 32, Color3.fromRGB(255, 205, 110), true)
 stageLabel.Text = "--"
-local detailLabel = label(status, 34, 18, 13, Color3.fromRGB(200, 205, 220), false)
-local refinementFill = bar(status, 56, Color3.fromRGB(120, 190, 255))
-local footLabel = label(status, 68, 16, 12, Color3.fromRGB(150, 155, 175), false)
-local healthFill = bar(status, 90, Color3.fromRGB(225, 90, 90))
-local madraFill = bar(status, 104, Color3.fromRGB(130, 150, 255))
-local vitalsLabel = label(status, 116, 16, 12, Color3.fromRGB(150, 155, 175), false)
-local promptLabel = label(status, 138, 30, 12, Color3.fromRGB(255, 205, 110), false)
+local detailLabel = label(status, 46, 26, 22, Color3.fromRGB(206, 212, 230), false)
+-- Health is the largest element on screen after the slot bar, per the reference.
+local healthFill, healthCaption = bar(status, 78, 34, Color3.fromRGB(216, 66, 66))
+local madraFill, madraCaption = bar(status, 118, 28, Color3.fromRGB(104, 128, 255))
+local refinementFill, refinementCaption = bar(status, 152, 24, Color3.fromRGB(120, 190, 255))
+local promptLabel = label(status, 186, 52, 22, Color3.fromRGB(255, 205, 110), true)
 promptLabel.TextWrapped = true
+promptLabel.TextYAlignment = Enum.TextYAlignment.Top
 
 -- Sense panel, right side. Empty until the server says something is in range.
-local sense = panel(UDim2.fromOffset(230, 168), UDim2.new(1, -246, 0.5, -84))
-local senseHeader = label(sense, 8, 18, 12, Color3.fromRGB(255, 205, 110), true)
+local sense = panel(UDim2.fromOffset(310, 250), UDim2.new(1, -330, 0.5, -125))
+local senseHeader = label(sense, 8, 26, 22, Color3.fromRGB(255, 205, 110), true)
 senseHeader.Text = "AURA SENSE"
 local senseRows: { TextLabel } = {}
 for index = 1, 6 do
-	senseRows[index] = label(sense, 8 + index * 20, 18, 12, Color3.fromRGB(200, 205, 220), false)
+	senseRows[index] = label(sense, 12 + index * 30, 28, 24, Color3.fromRGB(206, 212, 230), false)
 end
-local senseFoot = label(sense, 148, 16, 11, Color3.fromRGB(150, 155, 175), false)
+local senseFoot = label(sense, 214, 24, 20, Color3.fromRGB(154, 160, 182), false)
 
 -- Notice line, top centre.
 local noticeFrame = panel(UDim2.fromOffset(420, 34), UDim2.new(0.5, -210, 0, 18))
@@ -138,8 +189,9 @@ local function refreshCultivation()
 	refinementFill.BackgroundColor3 = if atCeiling
 		then Color3.fromRGB(255, 195, 90)
 		else Color3.fromRGB(120, 190, 255)
-
-	footLabel.Text = if atCeiling then "refinement ceiling" else `{progress} / {goal}`
+	refinementCaption.Text = if atCeiling
+		then "REFINEMENT CEILING"
+		else `refinement {progress} / {goal}`
 
 	promptLabel.Text = if atCeiling and catalysts > 0
 		then "[B] break through"
@@ -155,7 +207,8 @@ local function refreshVitals()
 
 	healthFill.Size = UDim2.fromScale(ratio(health, maxHealth), 1)
 	madraFill.Size = UDim2.fromScale(ratio(madra, maxMadra), 1)
-	vitalsLabel.Text = `hp {health}/{maxHealth}     madra {madra}/{maxMadra}`
+	healthCaption.Text = `{health} / {maxHealth}`
+	madraCaption.Text = `madra {madra} / {maxMadra}`
 end
 
 --[[ The slot bar.

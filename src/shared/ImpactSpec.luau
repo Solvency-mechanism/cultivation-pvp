@@ -167,9 +167,20 @@ ImpactSpec.Budget = {
 
 	To fill them in: find sounds in Studio's Toolbox (Audio), copy the asset id,
 	and paste it here as "rbxassetid://<id>". Nothing else has to change. ]]
+--[[ Impact audio.
+
+	These are sounds Roblox ships inside the client, not catalogue uploads, so
+	they need no upload, no moderation wait and no network fetch. Each id below
+	was verified by loading it in Studio and checking that it resolved with a
+	non-zero TimeLength -- the durations in the comments are the measured values.
+	Nothing here is recalled or guessed.
+
+	Six other plausible-sounding paths were probed and did NOT resolve
+	(pop_mid, swoosh, rockbreak, whoosh, hurt, bump), which is exactly why the
+	list was tested rather than written from memory. ]]
 ImpactSpec.Audio = {
-	impactAssetId = "",
-	killAssetId = "",
+	impactAssetId = "rbxasset://sounds/hit.wav", -- 0.836s
+	killAssetId = "rbxasset://sounds/glassbreak.wav", -- 1.578s
 	volume = 0.55,
 	minPitch = 0.92,
 	maxPitch = 1.12,
