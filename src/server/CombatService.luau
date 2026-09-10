@@ -16,6 +16,7 @@ local Workspace = game:GetService("Workspace")
 local Combat = require(ReplicatedStorage.Shared.Combat)
 local Config = require(ReplicatedStorage.Shared.Config)
 local Progression = require(ReplicatedStorage.Shared.Progression)
+local ArenaService = require(script.Parent.ArenaService)
 local AwarenessService = require(script.Parent.AwarenessService)
 local CultivationService = require(script.Parent.CultivationService)
 local NodeService = require(script.Parent.NodeService)
@@ -104,16 +105,38 @@ local function powerOf(player: Player): number
 end
 
 --[[ The caster's terrain richness, which is what Ruler techniques scale on.
-	Static aura geography currently only exists underneath nodes, so standing in
-	one is the only way to be anywhere but "open" -- which conveniently means the
-	terrain-scaled techniques peak exactly where the fights are. ]]
+
+	The intent was always that terrain-scaled techniques peak exactly where the
+	fights are, and that intent is still right. It was unreachable until now: a
+	node's region is rolled from a flat, position-blind table in
+	`NodeService.placer`, so "peaks where the fights are" had silently become
+	"peaks where a coin flip says," and standing off a node -- true of a caster
+	almost everywhere on a 440-stud map -- always read "open" regardless of the
+	ground underfoot. Measured live, two clients, before this change: a
+	wellspring-floor Siphon landed for 55, the exact open-ground number, because
+	nobody was standing inside a node. Simulated against the full kit: Upheaval
+	took 56 seconds to kill, Tempest 40, against Lance's 11.5 -- not a weak
+	kind, a switched-off one, sitting in every player's default loadout.
+
+	This closes the gap between "open" and the real ground: off a node, the
+	static aura geography the terrain is actually painted with now answers
+	instead of a blanket fallback. It does not fully deliver the original
+	intent by itself -- nodes still roll their region blind, so a node can
+	still sit on Barrens ground and read `wellspring`, or vice versa -- that is
+	tomorrow's fix, landscape's weighted-anchor work deriving node placement
+	from this same geography. Once nodes sit where the ground says they do,
+	Ruler peaks both on rich ground and at nodes, because the nodes will be on
+	it. This is a step toward that, not a replacement for it. ]]
 local function regionOf(player: Player): string
 	local root = rootOf(player)
 	if not root then
 		return "open"
 	end
 	local node = NodeService.nodeAt(root.Position)
-	return if node then node.region else "open"
+	if node then
+		return node.region
+	end
+	return ArenaService.regionAt(root.Position)
 end
 
 --[[ Tell every client that a technique resolved, so they can draw it.
