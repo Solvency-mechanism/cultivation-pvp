@@ -1,0 +1,17 @@
+# Wally
+/Packages
+/ServerPackages
+/DevPackages
+wally.lock
+
+# Rojo / Studio build output
+*.rbxl
+*.rbxlx
+*.rbxl.lock
+*.rbxlx.lock
+*.rbxm
+*.rbxmx
+
+# luau-lsp generated definitions
+globalTypes.d.luau
+sourcemap.json
