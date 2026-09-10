@@ -333,22 +333,40 @@ local function buildPart(node: AuraNodes.Node): BasePart
 
 	--[[ Prime is a server-wide event, so it has to be legible as one from two
 		hundred studs away. The shaft is that promise kept: it is why you walk
-		somewhere, and it is visible before the announcement has finished. ]]
+		somewhere, and it is visible before the announcement has finished.
+
+		The numbers are sized for the worst case rather than the average one. The
+		spawn terrace sits 150 studs south of the origin and the field runs to
+		220, so the furthest a Prime can be from a player who has just respawned
+		is 370 studs. An 18-stud-wide column 300 studs tall, seen from 370 studs,
+		still covers 36 degrees of vertical arc -- half the height of a default
+		70-degree frame -- at 55 pixels wide in a 1920 frame, and nothing on the
+		field can occlude it: the tallest thing inside the crag wall is the
+		118-stud Wellspring spire. ]]
 	if spec.shaft > 0 then
-		local shaft = newDisc(5, spec.shaft, Vector3.new(centre.X, spec.shaft / 2, centre.Z))
+		local shaft = newDisc(9, spec.shaft, Vector3.new(centre.X, spec.shaft / 2, centre.Z))
 		shaft.Name = "PrimeShaft"
 		shaft.Color = spec.color
 		shaft.Material = Enum.Material.Neon
-		shaft.Transparency = 0.68
+		shaft.Transparency = 0.55
 		makeVisual(shaft, part)
 
 		local flare =
-			newDisc(13, spec.shaft * 0.72, Vector3.new(centre.X, spec.shaft * 0.36, centre.Z))
+			newDisc(22, spec.shaft * 0.72, Vector3.new(centre.X, spec.shaft * 0.36, centre.Z))
 		flare.Name = "PrimeFlare"
 		flare.Color = spec.color
 		flare.Material = Enum.Material.Neon
-		flare.Transparency = 0.9
+		flare.Transparency = 0.84
 		makeVisual(flare, part)
+
+		-- A pool of light at the foot of the shaft, so a Prime reads as a
+		-- *place* from the terrace and from above, not only as a line in the sky.
+		local pool = newDisc(34, 0.5, Vector3.new(centre.X, 0.18, centre.Z))
+		pool.Name = "PrimeHalo"
+		pool.Color = spec.color
+		pool.Material = Enum.Material.Neon
+		pool.Transparency = 0.62
+		makeVisual(pool, part)
 	end
 
 	addColumn(part, spec, groundOffset)

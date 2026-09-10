@@ -47,23 +47,52 @@ ImpactSpec.Palette = {
 }
 
 --[[ Damage numbers. Sized in pixels rather than studs, so a hit reads the same
-	whether it landed at your feet or across a Ruler radius. ]]
+	whether it landed at your feet or across a Ruler radius.
+
+	**Sized against the reference, not against a desktop editor.** The critic
+	measured our combat-critical text at roughly half Blox Fruits' glyph height:
+	their HUD digits are ~30 px tall in a 1920-wide frame. A damage number is
+	the loudest transient text in the game, so it has to beat that number, not
+	match it. Gotham's digits render at roughly 0.72 of TextSize, which makes
+	44 px a ~32 px glyph -- already past the reference at the floor -- and 76 px
+	a ~55 px one on a heavy hit. A killing blow goes half again above that. ]]
 ImpactSpec.Number = {
-	riseStuds = 4.0,
-	seconds = 0.6,
+	minTextSize = 44,
+	maxTextSize = 76,
+	-- A killing blow is the one number in the game worth reading twice.
+	killTextScale = 1.25,
+
+	--[[ The stroke has to track the glyph. A fixed 3 px outline is right at
+		36 px text and invisible at 76 px, and the outline is most of why white
+		digits stay legible over a bright effect. ]]
+	strokeFraction = 0.09,
+	minStroke = 3,
+
+	--[[ Spawned above the nameplate, not on the body. PresenceService floats
+		the stage plate 2.6 studs over the head, so a number starting at chest
+		height would climb straight through it. This starts clear of the plate
+		and leaves upward. ]]
+	anchorStuds = 4.6,
+	riseStuds = 5.0,
+	-- A hair longer than the 0.6 s it used to run: the number is bigger, it
+	-- travels further, and it now spends its first 0.12 s settling.
+	seconds = 0.7,
+
 	-- Tilt off vertical, thrown along the camera's right. Two hits inside the
 	-- same second have to separate *on screen*, which drifting in depth would
 	-- not do.
 	driftDegrees = 15,
-	minTextSize = 32,
-	maxTextSize = 54,
-	-- A killing blow is the one number in the game worth reading twice.
-	killTextScale = 1.25,
-	strokeThickness = 3,
-	maxDistance = 260,
+
 	-- Fraction of its life the number holds at full opacity before fading. It
 	-- has to be readable before it is pretty.
-	holdFraction = 0.35,
+	holdFraction = 0.4,
+
+	-- Born oversized and settling, which is what makes it read as struck rather
+	-- than as printed.
+	popFrom = 1.35,
+	popSeconds = 0.12,
+
+	maxDistance = 300,
 }
 
 --[[ Hitstop. Client-visual only: the local camera stops writing new CFrames for
@@ -158,15 +187,6 @@ ImpactSpec.Budget = {
 	reducedStuds = 150,
 }
 
---[[ UNVERIFIED -- these must be filled in before audio ships.
-
-	No asset id here has been confirmed to exist on the Roblox catalogue, and
-	guessing one is worse than shipping silence: a bad id costs a network round
-	trip per hit and produces nothing anyway. An empty string means "play
-	nothing", and Impact skips sound creation entirely.
-
-	To fill them in: find sounds in Studio's Toolbox (Audio), copy the asset id,
-	and paste it here as "rbxassetid://<id>". Nothing else has to change. ]]
 --[[ Impact audio.
 
 	These are sounds Roblox ships inside the client, not catalogue uploads, so
@@ -185,6 +205,72 @@ ImpactSpec.Audio = {
 	minPitch = 0.92,
 	maxPitch = 1.12,
 	rollOffMaxStuds = 220,
+	--[[ A hit you were part of plays flat and full rather than positionally.
+		Hit confirmation is information, not scenery, and information should not
+		get quieter because the camera happened to be facing the wrong way. Hits
+		between other people stay positional -- those *are* scenery. ]]
+	ownVolumeBoost = 1.3,
+}
+
+--[[ Cast audio.
+
+	The striker is the most-pressed button in the game and until now it made no
+	sound at all, which meant the atom of the combat loop was inaudible. This is
+	routed off the same TechniqueFired broadcast the vfx layer draws from, so
+	casting stays a thing that happens once, in one place, whether it connects
+	or not -- and the silence of a whiff is then a real signal rather than an
+	absence of work.
+
+	One sound per kind, chosen for silhouette rather than realism, so the four
+	are told apart with the eyes shut. All four are rbxasset paths verified to
+	resolve with a non-zero TimeLength in a real Studio run:
+
+		striker   snap.wav     0.418s   a crack -- something left, fast
+		enforcer  metal.ogg    0.601s   a ring on the body -- armour going on
+		forger    switch3.wav  0.366s   a mechanism latching -- something placed
+		ruler     bass.wav     1.008s   a low swell -- the ground answering
+
+	Twelve techniques out of four files: pitch tracks madra cost, so Lance,
+	Volley and Pierce share a crack and are told apart by weight -- which is
+	also how they are told apart in the fight. ]]
+ImpactSpec.Cast = {
+	byKind = {
+		striker = "rbxasset://sounds/snap.wav",
+		enforcer = "rbxasset://sounds/metal.ogg",
+		forger = "rbxasset://sounds/switch3.wav",
+		ruler = "rbxasset://sounds/bass.wav",
+	} :: { [string]: string },
+	--[[ Cheapest technique speaks highest, dearest speaks lowest. The range is
+		set by the narrowest case rather than the widest: the three strikers sit
+		at costs 18/30/44 and have to be told apart, which needs the steps
+		between them to clear roughly a semitone. ]]
+	lightPitch = 1.22,
+	heavyPitch = 0.74,
+	minVolume = 0.34,
+	maxVolume = 0.62,
+	rollOffMaxStuds = 260,
+	ownVolumeBoost = 1.25,
+}
+
+--[[ FOV punch: the other half of camera shake. Shake says the world moved; the
+	field of view says how you met it.
+
+	Landing a hit *narrows* the view for a moment -- the camera flinches into
+	the blow, and paired with hitstop the frozen frame is already a push-in.
+	Taking one *widens* it, so the world shoves away from you. Opposite signs on
+	purpose: the two can land in the same frame and must never be confusable. ]]
+ImpactSpec.Fov = {
+	dealtDegrees = -3.4,
+	takenDegrees = 5.2,
+	-- Floor on the severity scaling, so even a construct tick is felt.
+	minScale = 0.45,
+	decayPerSecond = 9.0,
+	maxOffsetDegrees = 9.0,
+	--[[ Absolute guards. Whatever happens above, the camera is handed back a
+		field of view a person can play with -- this is the one channel in the
+		file that could leave the game unplayable if it ever ran away. ]]
+	minFov = 30.0,
+	maxFov = 110.0,
 }
 
 --[[ Above this fraction of a health bar, a hit is already as loud as impacts
@@ -248,6 +334,61 @@ function ImpactSpec.textSize(severity: number, killing: boolean): number
 		size *= ImpactSpec.Number.killTextScale
 	end
 	return math.round(size)
+end
+
+--[[ Stroke thickness for a given glyph size, so the outline never thins out
+	from under a heavy hit. ]]
+function ImpactSpec.strokeThickness(textSize: number): number
+	local scaled = textSize * ImpactSpec.Number.strokeFraction
+	return math.max(ImpactSpec.Number.minStroke, math.round(scaled))
+end
+
+--[[ Billboard width and height in pixels for a given glyph size. Returned as
+	two numbers rather than a UDim2, because this module holds no Roblox
+	datatypes. Wide enough for five digits, tall enough that the outline is
+	never clipped by the box -- which the old fixed 76 px height did as soon as
+	the text grew past it. ]]
+function ImpactSpec.numberBounds(textSize: number): (number, number)
+	return math.round(textSize * 5), math.round(textSize * 1.9)
+end
+
+--[[ Degrees to add to the camera's field of view. Negative when you landed the
+	hit, positive when you took it. ]]
+function ImpactSpec.fovDegrees(severity: number, taken: boolean): number
+	local spec = ImpactSpec.Fov
+	local base = if taken then spec.takenDegrees else spec.dealtDegrees
+	local scaled = base * lerp(spec.minScale, 1, severity)
+	return math.clamp(scaled, -spec.maxOffsetDegrees, spec.maxOffsetDegrees)
+end
+
+-- Where a technique sits between the cheapest and the dearest in the pool.
+local function costWeight(config: any, techId: string): number
+	local tech = config.Techniques[techId]
+	if not tech then
+		return 0.5
+	end
+	local cheapest, dearest = math.huge, 0
+	for _, entry in config.Techniques do
+		cheapest = math.min(cheapest, entry.madraCost)
+		dearest = math.max(dearest, entry.madraCost)
+	end
+	if dearest <= cheapest then
+		return 0.5
+	end
+	return clamp01((tech.madraCost - cheapest) / (dearest - cheapest))
+end
+
+function ImpactSpec.castSound(kind: string): string
+	return ImpactSpec.Cast.byKind[kind] or ""
+end
+
+-- Heavier techniques speak lower.
+function ImpactSpec.castPitch(config: any, techId: string): number
+	return lerp(ImpactSpec.Cast.lightPitch, ImpactSpec.Cast.heavyPitch, costWeight(config, techId))
+end
+
+function ImpactSpec.castVolume(config: any, techId: string): number
+	return lerp(ImpactSpec.Cast.minVolume, ImpactSpec.Cast.maxVolume, costWeight(config, techId))
 end
 
 function ImpactSpec.markerScale(severity: number): number

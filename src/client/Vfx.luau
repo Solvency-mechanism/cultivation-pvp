@@ -31,11 +31,19 @@
 	   sheet flattens the frame, and in a PvP game that means you cannot see the
 	   person you are fighting.
 
-	2. MASS. The heavy techniques are sized in character-heights, not studs.
-	   Pierce spans up to fourteen; a Ruler field is fifteen across. Lance is
-	   deliberately under the reference ratio: it fires every 1.2 seconds, and a
-	   frame-filling effect on the spam button is noise rather than power. Weight
-	   is spent where the cooldown says it should be.
+	2. MASS, AND THE CHEAP MOVE GETS THE MOST OF IT.
+	   Everything is sized in character-heights, not studs: Pierce spans up to
+	   fourteen, a Ruler field is fifteen across, Lance is five plus half a second
+	   of rings that outlive it. The earlier instinct here was backwards --
+	   "cheap technique, cheap effect" -- and it was the single worst call in the
+	   file. Lance is pressed more often than every other input combined, so the
+	   game's *texture* is whatever Lance looks like. It gets the most craft, not
+	   the least.
+
+	   The corollary, learned the same way: **no technique may occlude the person
+	   casting it.** Muzzles fire from in front of the caster and charges gather
+	   at arm's length, because a frame that is less readable with the effect in
+	   it than without has failed no matter how big it is.
 
 	3. IMPACT IS THREE ELEMENTS WITH THREE LIFETIMES.
 	   A white flash core (~0.15s), white spark shards (~0.4s), and a dark dust
@@ -382,6 +390,93 @@ local function flare(position: Vector3, color: Color3, brightness: number, range
 	Debris:AddItem(host, 0.3)
 end
 
+-- ------------------------------------------------------------------- direction
+
+local function aim(from: Vector3, to: Vector3): Vector3
+	local delta = to - from
+	if delta.Magnitude < 1e-3 then
+		return Vector3.new(0, 0, -1)
+	end
+	return delta.Unit
+end
+
+local function sideways(direction: Vector3): Vector3
+	local flat = Vector3.new(direction.Z, 0, -direction.X)
+	if flat.Magnitude < 1e-3 then
+		return Vector3.new(1, 0, 0)
+	end
+	return flat.Unit
+end
+
+--[[ `CFrame.lookAt` produces NaN when the direction it is given is parallel to
+	its up vector, and a part assigned a NaN CFrame does not draw at all. Tempest
+	drops bolts almost straight down, so every oriented part in this file is built
+	through here and picks a different up when the direction is near vertical. ]]
+local function look(from: Vector3, to: Vector3): CFrame
+	local direction = aim(from, to)
+	local up = if math.abs(direction.Y) > 0.995 then Vector3.new(0, 0, 1) else Vector3.new(0, 1, 0)
+	return CFrame.lookAt(from, to, up)
+end
+
+-- ----------------------------------------------------------------------- rigs
+
+--[[ A composite that moves as one piece.
+
+	Parts are anchored -- rule one -- so a projectile is a set of parts each
+	placed at `frame * offset`. Cheaper than welding, and nothing can knock it
+	out of alignment. ]]
+type Rig = {
+	parts: { BasePart },
+	offsets: { CFrame },
+}
+
+local function rigPlace(rig: Rig, frame: CFrame)
+	for index, part in rig.parts do
+		part.CFrame = frame * rig.offsets[index]
+	end
+end
+
+local function rigFly(rig: Rig, destination: CFrame, seconds: number, style: Enum.EasingStyle)
+	for index, part in rig.parts do
+		tweenTo(part, seconds, style, { CFrame = destination * rig.offsets[index] })
+	end
+end
+
+local function rigDismiss(rig: Rig, seconds: number)
+	for _, part in rig.parts do
+		tweenTo(part, seconds, Enum.EasingStyle.Quad, { Transparency = 1 })
+		Debris:AddItem(part, seconds + 0.06)
+	end
+end
+
+--[[ A dart: the striker silhouette shrunk to two parts.
+
+	Anywhere a technique throws something small and fast -- Siphon's inrush,
+	scuff off a miss -- it throws one of these rather than a bare white box. A
+	flat untextured rectangle reads as a bug; a black body with a white nose
+	reads as an object with a front and a back, and it carries its own value
+	anchor with it. ]]
+local function dartRig(nose: CFrame, length: number, girth: number): Rig
+	local rig: Rig = { parts = {}, offsets = {} }
+
+	local function segment(part: Part, offset: CFrame)
+		part.Shape = Enum.PartType.Cylinder
+		part.CFrame = nose * offset
+		table.insert(rig.parts, part)
+		table.insert(rig.offsets, offset)
+	end
+
+	segment(
+		shell(Vector3.new(length * 0.26, girth * 0.78, girth * 0.78), nose, 0),
+		CFrame.new(0, 0, length * 0.13) * ALONG
+	)
+	segment(
+		volume(Vector3.new(length * 0.76, girth, girth), nose, 0),
+		CFrame.new(0, 0, length * 0.62) * ALONG
+	)
+	return rig
+end
+
 -- --------------------------------------------------------------------- sprays
 
 type SprayConfig = {
@@ -493,8 +588,54 @@ type Follower = {
 	expiresAt: number,
 }
 
+--[[ A projectile in the air.
+
+	Anchored parts cannot be thrown, and a CFrame tween can only travel in a
+	straight line, so an arc has to be evaluated. A quadratic Bezier, sampled
+	every Heartbeat, with the rig oriented along its own tangent -- which is what
+	makes a bolt bank into its path instead of sliding sideways through it.
+
+	The arc matters more than it sounds: a straight line between two points that
+	are both roughly at chest height reads as a static rod in a frozen frame. A
+	curve gives the eye a direction even with no motion blur to help it. ]]
+type Flight = {
+	rig: Rig,
+	from: Vector3,
+	control: Vector3,
+	to: Vector3,
+	born: number,
+	seconds: number,
+	onArrive: () -> (),
+}
+
 local followers: { Follower } = {}
+local flights: { Flight } = {}
 local heartbeat: RBXScriptConnection? = nil
+
+local function bezier(from: Vector3, control: Vector3, to: Vector3, t: number): Vector3
+	local inv = 1 - t
+	return from * (inv * inv) + control * (2 * inv * t) + to * (t * t)
+end
+
+local function stepFlights(now: number)
+	for index = #flights, 1, -1 do
+		local flight = flights[index]
+		local span = math.max(flight.seconds, 1e-3)
+		local t = math.clamp((now - flight.born) / span, 0, 1)
+		local point = bezier(flight.from, flight.control, flight.to, t)
+		-- Sampled slightly ahead for the tangent; at the very end, sampled
+		-- slightly behind and mirrored, so the last frame does not snap flat.
+		local ahead = if t < 1
+			then bezier(flight.from, flight.control, flight.to, math.min(t + 0.04, 1))
+			else point + (point - bezier(flight.from, flight.control, flight.to, 0.96))
+		rigPlace(flight.rig, look(point, ahead))
+
+		if t >= 1 then
+			table.remove(flights, index)
+			flight.onArrive()
+		end
+	end
+end
 
 local function stepFollowers()
 	local now = os.clock()
@@ -523,11 +664,58 @@ local function stepFollowers()
 			* CFrame.Angles(0, age * follower.spin, 0)
 			* seat
 	end
+end
 
-	if #followers == 0 and heartbeat then
+--[[ One Heartbeat drives every anchored thing that has to move, and disconnects
+	itself the moment nothing does, so an idle client pays nothing at all. ]]
+local function stepDrivers()
+	local now = os.clock()
+	stepFlights(now)
+	stepFollowers()
+	if #followers == 0 and #flights == 0 and heartbeat then
 		heartbeat:Disconnect()
 		heartbeat = nil
 	end
+end
+
+local function ensureDriver()
+	if not heartbeat then
+		heartbeat = RunService.Heartbeat:Connect(stepDrivers)
+	end
+end
+
+--[[ Throw a rig along an arc.
+
+	`lift` is how far the control point rises off the straight line, as a
+	fraction of the distance covered, and `drift` the same sideways. Both are
+	kept small on purpose: the server raycast a straight line, the endpoints here
+	are the server's own, and a curve that bowed far off that line would be
+	drawing a shot that was never taken. A few studs of bow at maximum range is
+	enough for the eye to read direction and not enough to lie. ]]
+local function launch(
+	rig: Rig,
+	from: Vector3,
+	to: Vector3,
+	lift: number,
+	drift: number,
+	seconds: number,
+	onArrive: () -> ()
+)
+	local straight = to - from
+	local across = sideways(aim(from, to))
+	local control = from:Lerp(to, 0.5)
+		+ Vector3.new(0, straight.Magnitude * lift, 0)
+		+ across * (straight.Magnitude * drift)
+	table.insert(flights, {
+		rig = rig,
+		from = from,
+		control = control,
+		to = to,
+		born = os.clock(),
+		seconds = seconds,
+		onArrive = onArrive,
+	})
+	ensureDriver()
 end
 
 local function followMorph(
@@ -553,9 +741,7 @@ local function followMorph(
 		born = os.clock(),
 		expiresAt = os.clock() + duration,
 	})
-	if not heartbeat then
-		heartbeat = RunService.Heartbeat:Connect(stepFollowers)
-	end
+	ensureDriver()
 end
 
 local function follow(
@@ -616,32 +802,6 @@ local function groundY(position: Vector3, fallback: number): number
 	return if result then result.Position.Y else fallback
 end
 
-local function aim(from: Vector3, to: Vector3): Vector3
-	local delta = to - from
-	if delta.Magnitude < 1e-3 then
-		return Vector3.new(0, 0, -1)
-	end
-	return delta.Unit
-end
-
-local function sideways(direction: Vector3): Vector3
-	local flat = Vector3.new(direction.Z, 0, -direction.X)
-	if flat.Magnitude < 1e-3 then
-		return Vector3.new(1, 0, 0)
-	end
-	return flat.Unit
-end
-
---[[ `CFrame.lookAt` produces NaN when the direction it is given is parallel to
-	its up vector, and a part assigned a NaN CFrame does not draw at all. Tempest
-	drops bolts almost straight down, so every oriented part in this file is built
-	through here and picks a different up when the direction is near vertical. ]]
-local function look(from: Vector3, to: Vector3): CFrame
-	local direction = aim(from, to)
-	local up = if math.abs(direction.Y) > 0.995 then Vector3.new(0, 0, 1) else Vector3.new(0, 1, 0)
-	return CFrame.lookAt(from, to, up)
-end
-
 -- --------------------------------------------------------------------- motifs
 
 --[[ A ring of tangent bars.
@@ -650,9 +810,20 @@ end
 	this file is segments. The quarter turn is what makes each bar lie along the
 	arc instead of pointing out of it: a ring of tangents reads as a circle, a
 	ring of spokes reads as a starburst. ]]
-local function ringSeat(angle: number, radius: number): CFrame
-	return CFrame.Angles(0, angle, 0) * CFrame.new(radius, 0, 0) * ALONG
+local function ringSeat(angle: number, radius: number, lift: number): CFrame
+	return CFrame.Angles(0, angle, 0) * CFrame.new(radius, lift, 0) * ALONG
 end
+
+--[[ How far under a white bar its black backing sits.
+
+	This is law one's missing half. Pairing black and white *somewhere in the
+	effect* is not enough -- a white bar on mid-grey stone is still mid-contrast
+	at its own edge. The backing puts near-black immediately behind every white
+	element, so the contrast is local to the silhouette and survives any ground,
+	any light, any distance. It is also what keeps bloom from clipping: the
+	downsample that produces the glow averages the white against the black beside
+	it instead of against a bright neon floor. ]]
+local BACKING = -0.09
 
 --[[ A ring that travels: it lies in `frame`'s XZ plane, ends in `frameTo`'s, and
 	scales its radius by `growTo` on the way. That covers opening, closing and
@@ -665,25 +836,41 @@ local function edgeRing(
 	thickness: number,
 	color: Color3,
 	seconds: number,
-	growTo: number
+	growTo: number,
+	backed: boolean
 )
 	if segments <= 0 or radius <= 0 then
 		return
 	end
 	local span = (2 * math.pi * radius) / segments
+	local backing = color ~= VOID and backed
 	for index = 1, segments do
 		local angle = (index / segments) * math.pi * 2
 		local size = Vector3.new(span * 0.84, thickness, thickness * 1.6)
-		local start = frame * ringSeat(angle, radius)
+		local start = frame * ringSeat(angle, radius, 0)
 		local part = if color == VOID then volume(size, start, 0) else shell(size, start, 0)
 		-- Bars scale with the radius they travel to, so the ring stays closed
 		-- whether it is opening outward or closing inward.
 		tweenTo(part, seconds, Enum.EasingStyle.Quint, {
-			CFrame = frameTo * ringSeat(angle, radius * growTo),
+			CFrame = frameTo * ringSeat(angle, radius * growTo, 0),
 			Size = Vector3.new(span * growTo, thickness * 0.35, thickness * 0.6),
 			Transparency = 1,
 		})
 		Debris:AddItem(part, seconds + 0.05)
+
+		if backing then
+			local slab = volume(
+				Vector3.new(span * 0.92, thickness * 1.9, thickness * 2.4),
+				frame * ringSeat(angle, radius, BACKING),
+				0
+			)
+			tweenTo(slab, seconds * 1.15, Enum.EasingStyle.Quint, {
+				CFrame = frameTo * ringSeat(angle, radius * growTo, BACKING),
+				Size = Vector3.new(span * growTo * 1.05, thickness * 0.7, thickness * 0.9),
+				Transparency = 1,
+			})
+			Debris:AddItem(slab, seconds * 1.15 + 0.05)
+		end
 	end
 end
 
@@ -695,10 +882,11 @@ local function ringAt(
 	thickness: number,
 	color: Color3,
 	seconds: number,
-	growTo: number
+	growTo: number,
+	backed: boolean
 )
 	local frame = CFrame.new(centre)
-	edgeRing(frame, frame, radius, segments, thickness, color, seconds, growTo)
+	edgeRing(frame, frame, radius, segments, thickness, color, seconds, growTo, backed)
 end
 
 --[[ A ring worn by a body, made of followers so it tracks the caster.
@@ -714,14 +902,15 @@ local function barRing(
 	thickness: number,
 	seat: CFrame,
 	spin: number,
-	duration: number
+	duration: number,
+	backed: boolean
 ): { BasePart }
 	local bars: { BasePart } = {}
 	local span = (2 * math.pi * radius) / segments
 	local base = if anchor then anchor.Position else position
 	for index = 1, segments do
 		local angle = (index / segments) * math.pi * 2
-		local offset = seat * ringSeat(angle, radius)
+		local offset = seat * ringSeat(angle, radius, 0)
 		local bar = shell(
 			Vector3.new(span * 0.8, thickness, thickness * 1.5),
 			CFrame.new(base) * offset,
@@ -729,6 +918,24 @@ local function barRing(
 		)
 		follow(bar, anchor, position, offset, spin, 0, duration)
 		table.insert(bars, bar)
+
+		if backed then
+			local slab = volume(
+				Vector3.new(span * 0.9, thickness * 1.9, thickness * 2.3),
+				CFrame.new(base) * seat * ringSeat(angle, radius, BACKING),
+				0
+			)
+			follow(
+				slab,
+				anchor,
+				position,
+				seat * ringSeat(angle, radius, BACKING),
+				spin,
+				0,
+				duration
+			)
+			table.insert(bars, slab)
+		end
 	end
 	return bars
 end
@@ -762,7 +969,8 @@ local function shadowWave(
 		0.6,
 		SHELL,
 		seconds,
-		toDiameter / math.max(fromDiameter, 0.1)
+		toDiameter / math.max(fromDiameter, 0.1),
+		true
 	)
 end
 
@@ -824,12 +1032,45 @@ local function terminate(
 	local palette = if bodyHit then cast.palette else MISS
 	local facing = look(position, position + direction)
 
-	--[[ The collar, facing back down the path the shot travelled. Bars rather
-		than a plate -- a fifteen-stud white disc is a blob however briefly it
-		exists -- and identical for a hit and a miss, because this is the
-		projectile dying, not a statement about what it struck. ]]
+	--[[ Two rings facing back down the path the shot travelled, and they are the
+		part that matters: **they outlive the projectile.** A bolt that vanishes on
+		contact leaves a frozen frame with nothing in it, which is exactly why the
+		old 0.24s collar failed the test. The white ring runs 0.55s and the dark
+		one behind it 0.8s, so for half a second after the bolt is gone the frame
+		still says "something landed here, and it came from over there".
+
+		Bars rather than a plate -- a thirty-stud white disc is a blob however
+		briefly it exists -- and identical for a hit and a miss, because this is
+		the projectile dying, not a statement about what it struck. ]]
 	local plane = facing * CFrame.Angles(-math.pi / 2, 0, 0)
-	edgeRing(plane, plane, 1.4 * weight, tier(level, 5, 8, 12), 0.5 * weight, SHELL, 0.24, 5)
+	local ringRadius = 1.3 + 1.9 * weight
+	-- Segment count follows the weight as well as the detail tier, so the five
+	-- small landings of a Volley cost about what one Lance does.
+	local function fit(count: number): number
+		return math.max(5, math.floor(count * math.clamp(weight * 1.1, 0.35, 1)))
+	end
+	edgeRing(
+		plane,
+		plane,
+		ringRadius,
+		fit(tier(level, 6, 9, 14)),
+		0.55 * weight,
+		SHELL,
+		0.55,
+		6,
+		true
+	)
+	edgeRing(
+		plane,
+		plane,
+		ringRadius * 0.55,
+		fit(tier(level, 5, 7, 10)),
+		0.9 * weight,
+		VOID,
+		0.8,
+		9,
+		false
+	)
 
 	spray(position, tier(level, 3, 6, 10), {
 		core = SHELL,
@@ -846,25 +1087,17 @@ local function terminate(
 		return
 	end
 
-	-- Scuff: white slivers skidding off the surface it hit instead.
+	-- Scuff: darts skidding off the surface it struck instead of a body.
 	for _ = 1, tier(level, 0, 2, 4) do
 		local scatter =
 			Vector3.new(RNG:NextNumber(-1, 1), RNG:NextNumber(-0.2, 1), RNG:NextNumber(-1, 1))
 		local away = -direction * 1.5 + scatter
 		away = if away.Magnitude < 0.15 then -direction else away.Unit
-		local length = RNG:NextNumber(1.8, 4) * weight
-		local sliver = shell(
-			Vector3.new(0.26 * weight, 0.26 * weight, length),
-			look(position, position + away),
-			0.15
-		)
+		local length = RNG:NextNumber(2.4, 5) * weight
+		local rig = dartRig(look(position, position + away), length, 0.34 * weight)
 		local landing = position + away * RNG:NextNumber(6, 13) * weight
-		tweenTo(sliver, 0.4, Enum.EasingStyle.Quad, {
-			CFrame = look(landing, landing + away),
-			Size = Vector3.new(0.05, 0.05, length * 0.3),
-			Transparency = 1,
-		})
-		Debris:AddItem(sliver, 0.46)
+		rigFly(rig, look(landing, landing + away), 0.4, Enum.EasingStyle.Quad)
+		rigDismiss(rig, 0.4)
 	end
 
 	-- Dust: dark, slow, and the element that outlives everything else, which is
@@ -903,7 +1136,7 @@ end
 local function muzzle(position: Vector3, direction: Vector3, palette: Palette, weight: number)
 	local kick = ball(position, 1.2 * weight, VOID, 0.3)
 	bloom(kick, 0.24, Vector3.one * 5 * weight, Enum.EasingStyle.Quad)
-	ringAt(position, 1.4 * weight, 8, 0.5 * weight, SHELL, 0.22, 3.4)
+	ringAt(position, 1.4 * weight, 8, 0.5 * weight, SHELL, 0.28, 3.8, true)
 
 	spray(position, math.floor(7 * weight), {
 		core = SHELL,
@@ -916,31 +1149,6 @@ local function muzzle(position: Vector3, direction: Vector3, palette: Palette, w
 		acceleration = direction * 34,
 		drag = 6,
 	})
-end
-
--- ----------------------------------------------------------------------- rigs
-
---[[ A composite that moves as one piece.
-
-	Parts are anchored -- rule one -- so a projectile is a set of parts each
-	tweened from `frame * offset` to `destination * offset`. Cheaper than welding
-	and nothing can knock it out of alignment. ]]
-type Rig = {
-	parts: { BasePart },
-	offsets: { CFrame },
-}
-
-local function rigFly(rig: Rig, destination: CFrame, seconds: number, style: Enum.EasingStyle)
-	for index, part in rig.parts do
-		tweenTo(part, seconds, style, { CFrame = destination * rig.offsets[index] })
-	end
-end
-
-local function rigDismiss(rig: Rig, seconds: number)
-	for _, part in rig.parts do
-		tweenTo(part, seconds, Enum.EasingStyle.Quad, { Transparency = 1 })
-		Debris:AddItem(part, seconds + 0.06)
-	end
 end
 
 --[[ The striker silhouette: a black shaft with a white head and white bands.
@@ -1005,13 +1213,16 @@ local function spearRig(nose: CFrame, length: number, girth: number, cast: Cast)
 		local trail = Instance.new("Trail")
 		trail.Attachment0 = back
 		trail.Attachment1 = front
-		trail.Lifetime = 0.2
+		-- Long enough to be a *streak* rather than a smear. At the reference bar
+		-- the ribbon is half the read on a projectile: it is what tells a frozen
+		-- frame which way the thing came from.
+		trail.Lifetime = 0.38
 		trail.MinLength = 0
 		trail.FaceCamera = true
 		trail.LightEmission = 1
 		trail.LightInfluence = 0
 		trail.Color = ColorSequence.new(SHELL, palette.glow)
-		trail.Transparency = NumberSequence.new(0.1, 1)
+		trail.Transparency = NumberSequence.new(0.08, 1)
 		trail.WidthScale = NumberSequence.new(1, 0)
 		trail.Parent = tail
 	end
@@ -1111,16 +1322,23 @@ function Vfx.charge(techId: string, casterId: number)
 	-- decision; Swiftstep at 0.05s should barely register.
 	local heft = math.clamp(tech.madraCost / 45, 0.55, 1.9)
 	local hold = seconds + 0.45
-	local chest = CFrame.new(0, 0.4, -0.9)
+	--[[ Held out in FRONT of the caster and off to one side -- never on the
+		torso. A gathering orb centred on the root is a white disc over the
+		caster's own head, which is the same failure the striker had: a frame that
+		is less readable with the technique in it than without. The reach scales
+		with heft, so a Tempest orb never grows back into the body. ]]
+	local hand = CFrame.new(1.7, -0.5, -1.9 - heft * 1.2)
 
 	local mass = ball(root.Position, 0.5 * heft, VOID, 0.15)
 	tweenTo(mass, seconds, Enum.EasingStyle.Quad, { Size = Vector3.one * 3.4 * heft })
-	follow(mass, root, root.Position, chest, 0, 0.18, hold)
+	follow(mass, root, root.Position, hand, 0, 0.18, hold)
 	table.insert(charge.pieces, mass)
 
-	local husk = ball(root.Position, 1.1 * heft, SHELL, 0.45)
-	tweenTo(husk, seconds, Enum.EasingStyle.Quad, { Size = Vector3.one * 4.6 * heft })
-	follow(husk, root, root.Position, chest, 0, 0.18, hold)
+	-- The shell around the mass, held well back from opaque: this reads as a
+	-- husk with something dark inside it, not as a white ball.
+	local husk = ball(root.Position, 1.1 * heft, SHELL, 0.6)
+	tweenTo(husk, seconds, Enum.EasingStyle.Quad, { Size = Vector3.one * 4.4 * heft })
+	follow(husk, root, root.Position, hand, 0, 0.18, hold)
 	table.insert(charge.pieces, husk)
 
 	--[[ The closing ring: a timer readable from across the arena. Its offset
@@ -1131,8 +1349,8 @@ function Vfx.charge(techId: string, casterId: number)
 	local lift = CFrame.new(0, 0.4, 0)
 	for index = 1, segments do
 		local angle = (index / segments) * math.pi * 2
-		local outer = lift * ringSeat(angle, 7 * heft)
-		local inner = lift * ringSeat(angle, 1.9 * heft)
+		local outer = lift * ringSeat(angle, 7 * heft, 0)
+		local inner = lift * ringSeat(angle, 1.9 * heft, 0)
 		local bar =
 			shell(Vector3.new(span * 0.7, 0.45, 0.7), CFrame.new(root.Position) * outer, 0.1)
 		followMorph(bar, root, root.Position, outer, inner, seconds, 0, 0, hold)
@@ -1161,7 +1379,7 @@ function Vfx.charge(techId: string, casterId: number)
 
 	table.insert(
 		charge.pieces,
-		stream(root, Vector3.new(0, 0.4, -0.9), {
+		stream(root, hand.Position, {
 			core = SHELL,
 			glow = palette.glow,
 			sizeFrom = 1.2,
@@ -1188,12 +1406,30 @@ end
 
 -- ---------------------------------------------------------------- striker: 3
 
---[[ Lance. One spear, and now it is actually a spear.
+--[[ Lance.
 
-	Deliberately the smallest of the three: it fires every 1.2 seconds, and a
-	frame-filling effect on the spam button is noise rather than power. Four
-	character-lengths of black shaft with a white head owns the middle of the
-	frame without erasing it. ]]
+	This is the button a player presses more often than every other input
+	combined, so it gets the most craft in the file rather than the least. The
+	earlier instinct -- cheap technique, cheap effect, "gone in a tenth of a
+	second" -- had it exactly backwards: the cheap move is where the game's
+	texture lives, precisely because it is the one being pressed.
+
+	Five things, in the order the eye picks them up:
+
+	  1. launched from in FRONT of the caster, never on them. The first pass put
+	     the muzzle a stud to the side of the root, and the flash covered the
+	     caster's own head -- which made the frame *less* readable with the
+	     technique than without it. Nothing about a technique may occlude the
+	     person casting it.
+	  2. an arc, not a line. Two points at chest height joined by a straight rod
+	     read as static furniture in a frozen frame; a curve carries direction
+	     with no motion blur to help it.
+	  3. a third to half a second of visible travel, so it is a thing that
+	     *crossed* the distance rather than a thing that was already there.
+	  4. a ribbon behind it long enough to be a streak.
+	  5. rings at the far end that OUTLIVE the bolt by half a second, so the
+	     frame still says "something landed, from over there" after the
+	     projectile itself is gone. ]]
 local function drawLance(cast: Cast)
 	local shot = cast.shot
 	local target = shot.target
@@ -1202,19 +1438,19 @@ local function drawLance(cast: Cast)
 	end
 
 	local direction = aim(shot.origin, target)
-	local from = shot.origin + sideways(direction) * 1.3 - Vector3.new(0, 0.2, 0)
+	local across = sideways(direction)
+	local from = shot.origin + direction * 2.6 + across * 1.2 - Vector3.new(0, 0.5, 0)
 	local distance = (target - from).Magnitude
-	local length = math.min(4 * CHAR, math.max(distance * 0.55, CHAR))
-	-- Law four: visible travel. The first pass crossed the arena in 0.04s, which
-	-- is one frame -- there was nothing to see and nothing to react to.
-	local travel = math.clamp(distance / 260, 0.16, 0.4)
+	-- Capped against the distance as well as the floor: a spear longer than the
+	-- gap it is crossing puts its own tail back through the caster, which is the
+	-- exact occlusion this pass exists to remove.
+	local length = math.min(math.clamp(distance * 0.42, 2.4 * CHAR, 5 * CHAR), distance * 0.85)
+	local travel = math.clamp(distance / 190, 0.3, 0.55)
 
-	muzzle(from, direction, cast.palette, 1)
-	local rig = spearRig(look(from, target), length, 0.55 * CHAR, cast)
-	rigFly(rig, look(target, target + direction), travel, Enum.EasingStyle.Linear)
-
-	task.delay(travel, function()
-		rigDismiss(rig, 0.12)
+	muzzle(from, direction, cast.palette, 1.2)
+	local rig = spearRig(look(from, target), length, 0.62 * CHAR, cast)
+	launch(rig, from, target, 0.07, 0.03, travel, function()
+		rigDismiss(rig, 0.14)
 		terminate(cast, target, direction, cast.weight, shot.hit)
 	end)
 end
@@ -1234,34 +1470,32 @@ local function drawVolley(cast: Cast)
 	local direction = aim(shot.origin, target)
 	local right = sideways(direction)
 	local up = right:Cross(direction)
-	local from = shot.origin + right * 1.1
+	local from = shot.origin + direction * 2.4 + right * 1
 	local count = tier(cast.level, 2, 3, 5)
 	local distance = (target - from).Magnitude
-	local length = math.min(2.4 * CHAR, math.max(distance * 0.4, CHAR * 0.8))
-	local travel = math.clamp(distance / 300, 0.14, 0.34)
+	local length = math.min(math.clamp(distance * 0.3, 1.6 * CHAR, 3 * CHAR), distance * 0.8)
+	local travel = math.clamp(distance / 230, 0.24, 0.45)
 
-	muzzle(from, direction, cast.palette, 1.3)
+	muzzle(from, direction, cast.palette, 1.4)
 
+	--[[ Spread at the launch, converged at the landing. The reference barrage is
+		eight copies of one mesh all arriving at a single point, and convergence is
+		what makes a group of projectiles read as one attack rather than as a
+		shotgun spray -- every bolt in the frame points at the same place, so the
+		eye is told where to look before the first one lands. ]]
 	for index = 1, count do
 		local lateral = ((index - 1) / math.max(1, count - 1)) * 2 - 1
-		local launch = from + right * (lateral * 3.4) + up * RNG:NextNumber(-1.2, 1.6)
-		local landing = target + right * (lateral * 2.2) + up * RNG:NextNumber(-1.8, 1.8)
+		local start = from + right * (lateral * 4.4) + up * RNG:NextNumber(-1.4, 2.4)
+		local weight = if index == count then cast.weight else cast.weight * 0.4
 
-		task.delay((index - 1) * 0.06, function()
-			local rig = spearRig(look(launch, landing), length, 0.34 * CHAR, cast)
-			rigFly(rig, look(landing, landing + direction), travel, Enum.EasingStyle.Linear)
-			task.delay(travel, function()
-				rigDismiss(rig, 0.1)
-				terminate(cast, landing, direction, cast.weight * 0.5, shot.hit)
+		task.delay((index - 1) * 0.07, function()
+			local rig = spearRig(look(start, target), length, 0.38 * CHAR, cast)
+			launch(rig, start, target, 0.1, lateral * -0.06, travel, function()
+				rigDismiss(rig, 0.12)
+				terminate(cast, target, direction, weight, shot.hit)
 			end)
 		end)
 	end
-
-	-- One full-weight landing under the scatter, so the volley resolves as a
-	-- single event rather than as five small ones.
-	task.delay(travel + (count - 1) * 0.06, function()
-		terminate(cast, target, direction, cast.weight, shot.hit)
-	end)
 end
 
 --[[ Pierce. The one that gets the whole frame.
@@ -1279,7 +1513,8 @@ local function drawPierce(cast: Cast)
 
 	local level = cast.level
 	local direction = aim(shot.origin, target)
-	local from = shot.origin + sideways(direction) * 0.9
+	-- In front of the caster, for the same reason Lance is.
+	local from = shot.origin + direction * 2.2 + sideways(direction) * 0.9 - Vector3.new(0, 0.4, 0)
 	local length = (target - from).Magnitude
 	local midpoint = from:Lerp(target, 0.5)
 	local axis = look(midpoint, target)
@@ -1461,11 +1696,11 @@ local function auraOnset(centre: Vector3, palette: Palette, level: number, tall:
 	local floor = groundY(centre, centre.Y - 3)
 	local base = Vector3.new(centre.X, floor + 0.2, centre.Z)
 
-	shadowWave(base, 5, 30, 0.45, level)
+	shadowWave(base, 6, 46, 0.5, level)
 
 	local column =
-		volume(Vector3.new(3.4, tall, 3.4), CFrame.new(base + Vector3.new(0, tall * 0.5, 0)), 0.25)
-	bloom(column, 0.38, Vector3.new(0.6, tall * 1.35, 0.6), Enum.EasingStyle.Quint)
+		volume(Vector3.new(4.6, tall, 4.6), CFrame.new(base + Vector3.new(0, tall * 0.5, 0)), 0.25)
+	bloom(column, 0.42, Vector3.new(0.7, tall * 1.4, 0.7), Enum.EasingStyle.Quint)
 
 	-- Four white staves up the dark column rather than a white slab around it.
 	-- Same read, a twentieth of the lit area.
@@ -1475,13 +1710,13 @@ local function auraOnset(centre: Vector3, palette: Palette, level: number, tall:
 			Vector3.new(0.4, tall * 0.9, 0.4),
 			CFrame.new(base + Vector3.new(0, tall * 0.45, 0))
 				* CFrame.Angles(0, angle, 0)
-				* CFrame.new(1.9, 0, 0),
+				* CFrame.new(2.6, 0, 0),
 			0.05
 		)
-		tweenTo(stave, 0.34, Enum.EasingStyle.Quint, {
+		tweenTo(stave, 0.38, Enum.EasingStyle.Quint, {
 			CFrame = CFrame.new(base + Vector3.new(0, tall * 0.62, 0))
 				* CFrame.Angles(0, angle, 0)
-				* CFrame.new(3.4, 0, 0),
+				* CFrame.new(5, 0, 0),
 			Size = Vector3.new(0.15, tall * 1.2, 0.15),
 			Transparency = 1,
 		})
@@ -1510,7 +1745,7 @@ end
 local function drawSurge(cast: Cast)
 	local shot = cast.shot
 	local palette = cast.palette
-	auraOnset(shot.origin, palette, cast.level, 2 * CHAR)
+	auraOnset(shot.origin, palette, cast.level, 2.9 * CHAR)
 
 	local root = rootOf(shot.casterId)
 	if not root then
@@ -1564,12 +1799,13 @@ local function drawSurge(cast: Cast)
 		local bars = barRing(
 			root,
 			root.Position,
-			CHAR - index * 0.9,
-			tier(cast.level, 5, 7, 10),
-			0.4,
-			CFrame.new(0, -2.4 + index * 2.1, 0),
+			1.6 * CHAR - index * 0.5 * CHAR,
+			tier(cast.level, 5, 7, 9),
+			0.45,
+			CFrame.new(0, -2.7 + index * 2.6, 0),
 			if index == 1 then 5.5 else -4.2,
-			cast.duration + 0.4
+			cast.duration + 0.4,
+			index == 1
 		)
 		for _, bar in bars do
 			table.insert(aura.pieces, bar)
@@ -1585,7 +1821,7 @@ end
 local function drawBulwark(cast: Cast)
 	local shot = cast.shot
 	local palette = cast.palette
-	auraOnset(shot.origin, palette, cast.level, 1.6 * CHAR)
+	auraOnset(shot.origin, palette, cast.level, 2.3 * CHAR)
 
 	local root = rootOf(shot.casterId)
 	if not root then
@@ -1597,22 +1833,22 @@ local function drawBulwark(cast: Cast)
 	local plates = tier(cast.level, 2, 3, 4)
 	for index = 1, plates do
 		local angle = (index / plates) * math.pi * 2
-		local seat = CFrame.Angles(0, angle, 0) * CFrame.new(0, 0.2, -4.1)
+		local seat = CFrame.Angles(0, angle, 0) * CFrame.new(0, 0.2, -5.3)
 
-		local plate = volume(Vector3.new(6.3, 7.8, 0.42), root.CFrame * seat, 0)
+		local plate = volume(Vector3.new(8.4, 10.2, 0.5), root.CFrame * seat, 0)
 		-- Slammed in from outside, so the guard *closes* rather than appearing.
-		tweenTo(plate, 0.28, Enum.EasingStyle.Back, { Size = Vector3.new(4.2, 5.2, 0.42) })
+		tweenTo(plate, 0.28, Enum.EasingStyle.Back, { Size = Vector3.new(5.6, 6.8, 0.5) })
 		follow(plate, root, root.Position, seat, 1.5, 0.25, cast.duration + 0.4)
 		table.insert(aura.pieces, plate)
 
 		-- The white edge. One thin strip is all the value contrast a black plate
 		-- needs to be legible against dark stone.
-		local edge = shell(Vector3.new(4.4, 0.34, 0.5), root.CFrame * seat, 0)
+		local edge = shell(Vector3.new(5.8, 0.4, 0.6), root.CFrame * seat, 0)
 		follow(
 			edge,
 			root,
 			root.Position,
-			seat * CFrame.new(0, 2.7, -0.08),
+			seat * CFrame.new(0, 3.5, -0.1),
 			1.5,
 			0.25,
 			cast.duration + 0.4
@@ -1624,12 +1860,13 @@ local function drawBulwark(cast: Cast)
 		barRing(
 			root,
 			root.Position,
-			CHAR,
-			tier(cast.level, 6, 8, 12),
-			0.45,
-			CFrame.new(0, -2.7, 0),
+			1.55 * CHAR,
+			tier(cast.level, 6, 8, 11),
+			0.5,
+			CFrame.new(0, -2.9, 0),
 			1.1,
-			cast.duration + 0.4
+			cast.duration + 0.4,
+			true
 		)
 	do
 		table.insert(aura.pieces, bar)
@@ -1644,7 +1881,7 @@ end
 local function drawSwiftstep(cast: Cast)
 	local shot = cast.shot
 	local palette = cast.palette
-	auraOnset(shot.origin, palette, cast.level, 1.2 * CHAR)
+	auraOnset(shot.origin, palette, cast.level, 1.9 * CHAR)
 
 	local root = rootOf(shot.casterId)
 	if not root then
@@ -1681,12 +1918,13 @@ local function drawSwiftstep(cast: Cast)
 		barRing(
 			root,
 			root.Position,
-			0.85 * CHAR,
+			1.3 * CHAR,
 			tier(cast.level, 5, 7, 10),
-			0.35,
-			CFrame.new(0, -2.8, 0),
+			0.4,
+			CFrame.new(0, -3, 0),
 			9,
-			cast.duration + 0.4
+			cast.duration + 0.4,
+			true
 		)
 	do
 		table.insert(aura.pieces, bar)
@@ -1746,22 +1984,22 @@ local function drawBarrier(cast: Cast)
 	local root = rootOf(shot.casterId)
 	local seat = if root then root.Position else shot.origin
 	local duration = cast.duration
-	local radius = 1.05 * CHAR
+	local radius = 1.35 * CHAR
 	local slabs = tier(level, 5, 8, 12)
 
 	for index = 1, slabs do
 		local angle = (index / slabs) * math.pi * 2
 		local span = (2 * math.pi * radius) / slabs
-		local stand = CFrame.Angles(0, angle, 0) * CFrame.new(0, -1.4, -radius) * ALONG
+		local stand = CFrame.Angles(0, angle, 0) * CFrame.new(0, -1, -radius) * ALONG
 
 		-- Dropped in from above rather than faded in: a placement should land.
-		local high = CFrame.new(seat + Vector3.new(0, 9, 0)) * stand
-		local slab = volume(Vector3.new(0.45, 2.6, span * 0.92), high, 0)
+		local high = CFrame.new(seat + Vector3.new(0, 11, 0)) * stand
+		local slab = volume(Vector3.new(0.55, 3.6, span * 0.92), high, 0)
 		followMorph(
 			slab,
 			root,
 			seat,
-			stand * CFrame.new(0, 9, 0),
+			stand * CFrame.new(0, 11, 0),
 			stand,
 			0.22,
 			0.25,
@@ -1769,13 +2007,13 @@ local function drawBarrier(cast: Cast)
 			duration + 0.4
 		)
 
-		local cap = shell(Vector3.new(0.55, 0.28, span * 0.92), high, 0)
+		local cap = shell(Vector3.new(0.68, 0.34, span * 0.92), high, 0)
 		followMorph(
 			cap,
 			root,
 			seat,
-			stand * CFrame.new(0, 10.4, 0),
-			stand * CFrame.new(0, 1.4, 0),
+			stand * CFrame.new(0, 12.9, 0),
+			stand * CFrame.new(0, 1.9, 0),
 			0.22,
 			0.25,
 			0,
@@ -1806,7 +2044,7 @@ local function drawBarrier(cast: Cast)
 	-- The hue lives here and nowhere else in this technique: a film thin enough
 	-- to read the world straight through.
 	if level >= DETAIL_MID then
-		local film = ball(seat, 2.3 * CHAR, palette.glow, 0.9)
+		local film = ball(seat, 2.95 * CHAR, palette.glow, 0.9)
 		film.Material = Enum.Material.ForceField
 		follow(film, root, seat, CFrame.new(0, 0.6, 0), 0.35, 0, duration + 0.4)
 		task.delay(duration, function()
@@ -1839,7 +2077,7 @@ local function drawCaltrops(cast: Cast)
 		-- clustering at the middle.
 		local radius = math.sqrt(RNG:NextNumber(0.08, 1)) * (FORGER_RADIUS - 1.5)
 		local at = centre + Vector3.new(math.cos(angle) * radius, 0, math.sin(angle) * radius)
-		local height = RNG:NextNumber(3.4, 5.4)
+		local height = RNG:NextNumber(4.6, 7.2)
 		local tilt = CFrame.Angles(
 			RNG:NextNumber(-0.22, 0.22),
 			RNG:NextNumber(0, math.pi * 2),
@@ -1848,8 +2086,8 @@ local function drawCaltrops(cast: Cast)
 
 		local high = CFrame.new(at + Vector3.new(0, height * 1.8, 0)) * tilt
 		local planted = CFrame.new(at + Vector3.new(0, height * 0.44, 0)) * tilt
-		local spike = wedgeVolume(Vector3.new(0.8, height, 1.5), high)
-		local tip = shell(Vector3.new(0.34, 0.9, 0.34), high, 0)
+		local spike = wedgeVolume(Vector3.new(1.15, height, 2.1), high)
+		local tip = shell(Vector3.new(0.45, 1.3, 0.45), high, 0)
 		local tipSeat = planted * CFrame.new(0, height * 0.44, 0.35)
 
 		task.delay(index * 0.024, function()
@@ -1914,7 +2152,7 @@ local function drawSentry(cast: Cast)
 	local duration = cast.duration
 	local floor = groundY(shot.origin, shot.origin.Y - 3)
 	local centre = Vector3.new(shot.origin.X, floor, shot.origin.Z)
-	local eye = centre + Vector3.new(0, 1.4 * CHAR, 0)
+	local eye = centre + Vector3.new(0, 2 * CHAR, 0)
 
 	shadowWave(centre, 4, FORGER_RADIUS * 1.7, 0.5, level)
 	scar(centre, FORGER_RADIUS, palette, duration, level)
@@ -1923,9 +2161,9 @@ local function drawSentry(cast: Cast)
 	local plates = tier(level, 3, 4, 6)
 	for index = 1, plates do
 		local angle = (index / plates) * math.pi * 2
-		local away = Vector3.new(math.cos(angle) * 13, RNG:NextNumber(1, 6), math.sin(angle) * 13)
+		local away = Vector3.new(math.cos(angle) * 16, RNG:NextNumber(1, 7), math.sin(angle) * 16)
 		local plate = volume(
-			Vector3.new(2.8, 0.45, 2.8),
+			Vector3.new(3.6, 0.55, 3.6),
 			CFrame.new(eye + away) * CFrame.Angles(RNG:NextNumber(0, 3), angle, 0),
 			0
 		)
@@ -1953,28 +2191,30 @@ local function drawSentry(cast: Cast)
 		-- Black body, white equator: the device reads at any distance and in any
 		-- light without depending on its colour.
 		local body = ball(eye, 0.6, VOID, 0)
-		tweenTo(body, 0.18, Enum.EasingStyle.Back, { Size = Vector3.one * 3.4 })
+		tweenTo(body, 0.18, Enum.EasingStyle.Back, { Size = Vector3.one * 4.8 })
 		follow(body, nil, eye, CFrame.identity, 2.4, 0.5, duration - 0.3)
 
 		local equator = barRing(
 			nil,
 			eye,
-			2.5,
+			3.6,
 			tier(level, 6, 8, 10),
-			0.34,
+			0.42,
 			CFrame.identity,
 			2.4,
-			duration - 0.3
+			duration - 0.3,
+			false
 		)
 		local orbit = barRing(
 			nil,
 			eye,
-			4.2,
+			6.2,
 			tier(level, 6, 9, 12),
-			0.3,
+			0.38,
 			CFrame.Angles(0.5, 0, 0),
 			3.2,
-			duration - 0.3
+			duration - 0.3,
+			false
 		)
 
 		local light = Instance.new("PointLight")
@@ -1986,8 +2226,8 @@ local function drawSentry(cast: Cast)
 
 		-- The mast ties the floating core to the ground it is guarding.
 		local mast = volume(
-			Vector3.new(0.9, 1.4 * CHAR, 0.9),
-			CFrame.new(centre + Vector3.new(0, 0.7 * CHAR, 0)),
+			Vector3.new(1.3, 2 * CHAR, 1.3),
+			CFrame.new(centre + Vector3.new(0, CHAR, 0)),
 			0.25
 		)
 
@@ -2013,11 +2253,11 @@ local function drawSentry(cast: Cast)
 			end
 			shadowWave(centre, 3, FORGER_RADIUS * 2, 0.5, level)
 			local drop = shell(
-				Vector3.new(0.8, 0.8, 1.2 * CHAR),
-				CFrame.new(eye - Vector3.new(0, 3, 0)) * CFrame.Angles(math.pi / 2, 0, 0),
+				Vector3.new(1, 1, 1.7 * CHAR),
+				CFrame.new(eye - Vector3.new(0, 4, 0)) * CFrame.Angles(math.pi / 2, 0, 0),
 				0.1
 			)
-			bloom(drop, 0.24, Vector3.new(0.1, 0.1, 1.4 * CHAR), Enum.EasingStyle.Quad)
+			bloom(drop, 0.26, Vector3.new(0.12, 0.12, 2 * CHAR), Enum.EasingStyle.Quad)
 		end
 	end)
 end
@@ -2169,32 +2409,26 @@ local function drawSiphon(cast: Cast)
 		1,
 		SHELL,
 		0.45,
-		0.1
+		0.1,
+		true
 	)
 
-	-- Streaks from the rim. The hue lives here.
-	local streaks = tier(level, 6, 12, 20)
+	--[[ The inrush. Darts rather than bare bars: a flat untextured rectangle
+		flying at an arbitrary angle reads as a bug, while a black body with a
+		white nose reads as an object with a front, and brings its own value
+		anchor with it instead of relying on the hue to be seen. ]]
+	local streaks = tier(level, 5, 10, 16)
 	for index = 1, streaks do
 		local angle = (index / streaks) * math.pi * 2 + RNG:NextNumber(-0.25, 0.25)
 		local edge = centre
 			+ Vector3.new(math.cos(angle), 0, math.sin(angle)) * RULER_RADIUS
 			+ Vector3.new(0, RNG:NextNumber(0.5, 2.4 * CHAR), 0)
-		local streak = shell(
-			Vector3.new(0.55, 0.55, RNG:NextNumber(1.2 * CHAR, 2.2 * CHAR)),
-			look(edge, heart),
-			0
-		)
-		task.delay(index * 0.012, function()
-			if not streak.Parent then
-				return
-			end
-			tweenTo(streak, 0.36, Enum.EasingStyle.Quart, {
-				CFrame = look(heart, heart + aim(edge, heart)),
-				Size = Vector3.new(0.15, 0.15, 2),
-				Transparency = 1,
-			})
+		local rig = dartRig(look(edge, heart), RNG:NextNumber(1.4 * CHAR, 2.4 * CHAR), 0.75)
+
+		task.delay(index * 0.014, function()
+			rigFly(rig, look(heart, heart + aim(edge, heart)), 0.36, Enum.EasingStyle.Quart)
+			rigDismiss(rig, 0.36)
 		end)
-		Debris:AddItem(streak, 0.5)
 	end
 
 	--[[ The column. Vertical mass is what stops a Ruler cast from being a rug --
@@ -2221,7 +2455,8 @@ local function drawSiphon(cast: Cast)
 			0.55,
 			SHELL,
 			0.6,
-			0.15
+			0.15,
+			false
 		)
 	end
 
@@ -2288,7 +2523,8 @@ local function drawTempest(cast: Cast)
 			0.8,
 			SHELL,
 			1,
-			1.9
+			1.9,
+			false
 		)
 	end
 
@@ -2373,7 +2609,8 @@ local function drawTempest(cast: Cast)
 			1.4,
 			SHELL,
 			0.55,
-			4
+			4,
+			true
 		)
 		shadowWave(centre, 10, RULER_RADIUS * 2.2, 0.5, level)
 	end)

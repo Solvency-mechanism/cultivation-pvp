@@ -52,6 +52,7 @@ local Debris = game:GetService("Debris")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
+local SoundService = game:GetService("SoundService")
 local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
@@ -163,8 +164,9 @@ end
 
 -- ---------------------------------------------------------------- camera
 
---[[ Hitstop and shake share one render-step binding, because they are the same
-	resource: the camera's CFrame after the camera scripts have written it.
+--[[ Hitstop, shake and the FOV punch share one render-step binding, because
+	they are all the same resource: the camera, after the camera scripts have
+	finished writing it for the frame.
 
 	Bound one priority above ClientVfx's cast shake, so a hitstop freeze
 	overrides a cast rumble for the frames it lasts instead of fighting it, and
@@ -177,6 +179,17 @@ local holdUntil = 0
 local trauma = 0
 local lastHitstopAt = 0
 
+--[[ The field of view the camera had before any of this started touching it.
+
+	Captured when a punch begins from rest and restored exactly when the punch
+	is spent, rather than assumed to be 70. A player who has changed their FOV,
+	or any other system that owns it between punches, gets it back untouched --
+	and `fovOwner` makes sure a camera swap re-reads the baseline instead of
+	restoring the old camera's value onto the new one. ]]
+local baseFov = 0
+local fovOwner: Camera? = nil
+local fovOffset = 0
+
 local function releaseCamera()
 	if cameraBound then
 		RunService:UnbindFromRenderStep(CAMERA_BIND)
@@ -184,20 +197,44 @@ local function releaseCamera()
 	end
 end
 
+-- Hand the field of view back exactly as it was found.
+local function restoreFov()
+	local owner = fovOwner
+	if owner and baseFov > 0 then
+		owner.FieldOfView = baseFov
+	end
+	fovOwner = nil
+	fovOffset = 0
+end
+
 local function stepCamera(deltaSeconds: number)
 	local camera = Workspace.CurrentCamera
 	if not camera then
 		heldCFrame = nil
 		trauma = 0
+		restoreFov()
 		releaseCamera()
 		return
 	end
 
+	--[[ The punch is written whether or not the frame is frozen: a held frame
+		that is already pushed in is the entire point of pairing the two. It is
+		not *decayed* during a freeze, though, for the same reason trauma is
+		not -- during hitstop, no time has passed. ]]
+	local frozen = heldCFrame ~= nil and os.clock() < holdUntil
+	if fovOwner == camera and math.abs(fovOffset) > 0.02 then
+		camera.FieldOfView =
+			math.clamp(baseFov + fovOffset, ImpactSpec.Fov.minFov, ImpactSpec.Fov.maxFov)
+		if not frozen then
+			fovOffset *= math.exp(-deltaSeconds * ImpactSpec.Fov.decayPerSecond)
+		end
+	elseif fovOwner then
+		restoreFov()
+	end
+
 	local held = heldCFrame
 	if held then
-		if os.clock() < holdUntil then
-			-- The freeze. Trauma is deliberately not decayed while it holds:
-			-- during hitstop, no time has passed.
+		if frozen then
 			camera.CFrame = held
 			return
 		end
@@ -206,7 +243,10 @@ local function stepCamera(deltaSeconds: number)
 
 	if trauma <= 0.004 then
 		trauma = 0
-		releaseCamera()
+		-- Nothing left to write on either channel, so stop costing a frame.
+		if fovOwner == nil then
+			releaseCamera()
+		end
 		return
 	end
 
@@ -239,6 +279,27 @@ local function shake(amount: number)
 		return
 	end
 	trauma = math.min(1, math.max(trauma, amount))
+	bindCamera()
+end
+
+--[[ Kick the field of view by `degrees` and let it spring back.
+
+	The baseline is only re-read when no punch is currently running, so a second
+	hit mid-recovery adds to the kick rather than rebasing onto the pushed-in
+	value and walking the FOV away a few degrees at a time. ]]
+local function fovPunch(degrees: number)
+	local camera = Workspace.CurrentCamera
+	if not camera or degrees == 0 then
+		return
+	end
+	if fovOwner ~= camera or math.abs(fovOffset) <= 0.02 then
+		fovOwner = camera
+		baseFov = camera.FieldOfView
+		fovOffset = 0
+	end
+	local combined = fovOffset + degrees
+	fovOffset =
+		math.clamp(combined, -ImpactSpec.Fov.maxOffsetDegrees, ImpactSpec.Fov.maxOffsetDegrees)
 	bindCamera()
 end
 
@@ -410,24 +471,33 @@ end
 
 --[[ World-space, pixel-sized, and readable before it is pretty.
 
-	BillboardGui offsets are pixels regardless of distance, so 36-56 px stays 36
-	-56 px whether the hit landed at your feet or across a Ruler radius. That is
-	the whole reason this is not a stud-sized part with a decal on it. ]]
+	BillboardGui offsets are pixels regardless of distance, so a 44-76 px glyph
+	stays that size whether the hit landed at your feet or across a Ruler
+	radius. That is the whole reason this is not a stud-sized part with a decal
+	on it, and it is what lets the size be chosen against the reference rather
+	than against whatever range the test happened to be fought at.
+
+	Four things carry the legibility, in order of how much they do: the size
+	(measured, see ImpactSpec.Number), the black stroke that scales with it, the
+	anchor above the nameplate so nothing overlaps, and AlwaysOnTop so a number
+	is never lost behind the body it came out of. ]]
 local function damageNumber(event: Event, severity: number, taken: boolean)
 	local camera = Workspace.CurrentCamera
 	if not camera then
 		return
 	end
 	local spec = ImpactSpec.Number
+	local textSize = ImpactSpec.textSize(severity, event.died)
+	local width, height = ImpactSpec.numberBounds(textSize)
 
 	local host = Instance.new("Part")
 	host.Size = Vector3.one * 0.2
 	host.Transparency = 1
-	host.CFrame = CFrame.new(event.position + Vector3.new(0, 3, 0))
+	host.CFrame = CFrame.new(event.position + Vector3.new(0, spec.anchorStuds, 0))
 	decorate(host)
 
 	local gui = Instance.new("BillboardGui")
-	gui.Size = UDim2.fromOffset(280, 76)
+	gui.Size = UDim2.fromOffset(width, height)
 	gui.AlwaysOnTop = true
 	gui.LightInfluence = 0
 	gui.MaxDistance = spec.maxDistance
@@ -437,17 +507,27 @@ local function damageNumber(event: Event, severity: number, taken: boolean)
 	text.Size = UDim2.fromScale(1, 1)
 	text.BackgroundTransparency = 1
 	text.Font = Enum.Font.GothamBlack
-	text.TextSize = ImpactSpec.textSize(severity, event.died)
+	text.TextSize = textSize
 	text.TextColor3 = if event.died then KILL_TEXT elseif taken then TAKEN_TEXT else DEALT_TEXT
 	-- Floored to at least 1: a hit the server bothered to apply should never
 	-- render as a zero.
 	text.Text = tostring(math.max(1, math.round(event.damage)))
 	text.Parent = gui
 
+	--[[ The outline is most of why a white number stays readable over a bright
+		effect or a pale floor, so it is sized off the glyph rather than fixed:
+		a 3 px stroke that is right at 36 px text has all but vanished at 76. ]]
 	local stroke = Instance.new("UIStroke")
-	stroke.Thickness = spec.strokeThickness
+	stroke.Thickness = ImpactSpec.strokeThickness(textSize)
 	stroke.Color = BLACK
 	stroke.Parent = text
+
+	-- Born oversized and settling. A number that simply appears reads as
+	-- printed; one that lands reads as struck.
+	local pop = Instance.new("UIScale")
+	pop.Scale = spec.popFrom
+	pop.Parent = text
+	tweenTo(pop, spec.popSeconds, { Scale = 1 })
 
 	--[[ Rise, with a lateral tilt of up to +/-15 degrees taken along the
 		camera's own right vector. Drifting in world space would let two numbers
@@ -476,28 +556,78 @@ end
 
 -- ---------------------------------------------------------------- world burst
 
---[[ The impact sound.
+--[[ Audio, in two modes, and which mode a sound gets is a design decision
+	rather than a technical one.
 
-	Skipped entirely while the asset ids in ImpactSpec.Audio are empty, which
-	they are, because no id in this feature is guessed. See the comment there
-	for what filling them in takes. ]]
-local function playSound(host: BasePart, killing: boolean)
-	local audio = ImpactSpec.Audio
-	local assetId = if killing and audio.killAssetId ~= ""
-		then audio.killAssetId
-		else audio.impactAssetId
+	**Flat** -- parented to SoundService, so no attenuation and no panning. For
+	the two events that are *information*: your own cast, and a hit you were
+	part of. A confirmation that gets quieter because the camera happened to be
+	facing the wrong way is not a confirmation.
+
+	**Positional** -- parented to a host part in the world. For everything that
+	is *scenery*: somebody else's cast, somebody else's hit. Those should tell
+	you where to look, which is exactly what attenuation is for.
+
+	Every id comes from ImpactSpec, and an empty id means play nothing, so a
+	path that was never verified degrades to silence rather than to a failed
+	fetch per hit. ]]
+local function playFlat(assetId: string, volume: number, pitch: number)
 	if assetId == "" then
 		return
 	end
 	local sound = Instance.new("Sound")
 	sound.SoundId = assetId
-	sound.Volume = audio.volume
-	sound.PlaybackSpeed = RNG:NextNumber(audio.minPitch, audio.maxPitch)
+	sound.Volume = volume
+	sound.PlaybackSpeed = pitch
+	sound.Parent = SoundService
+	sound:Play()
+	Debris:AddItem(sound, 6)
+end
+
+local function playAt(
+	host: BasePart,
+	assetId: string,
+	volume: number,
+	pitch: number,
+	rollOff: number
+)
+	if assetId == "" then
+		return
+	end
+	local sound = Instance.new("Sound")
+	sound.SoundId = assetId
+	sound.Volume = volume
+	sound.PlaybackSpeed = pitch
 	sound.RollOffMode = Enum.RollOffMode.InverseTapered
-	sound.RollOffMaxDistance = audio.rollOffMaxStuds
+	sound.RollOffMaxDistance = rollOff
 	sound.Parent = host
 	sound:Play()
-	Debris:AddItem(sound, 4)
+	Debris:AddItem(sound, 6)
+end
+
+-- An invisible anchor to hang a positional sound on, for the cases where there
+-- is no effect part already sitting at the right place.
+local function soundHost(position: Vector3, life: number): BasePart
+	local part = Instance.new("Part")
+	part.Size = Vector3.one * 0.2
+	part.Transparency = 1
+	part.CFrame = CFrame.new(position)
+	decorate(part)
+	Debris:AddItem(part, life)
+	return part
+end
+
+local function impactSound(host: BasePart, killing: boolean, involved: boolean)
+	local audio = ImpactSpec.Audio
+	local assetId = if killing and audio.killAssetId ~= ""
+		then audio.killAssetId
+		else audio.impactAssetId
+	local pitch = RNG:NextNumber(audio.minPitch, audio.maxPitch)
+	if involved then
+		playFlat(assetId, audio.volume * audio.ownVolumeBoost, pitch)
+	else
+		playAt(host, assetId, audio.volume, pitch, audio.rollOffMaxStuds)
+	end
 end
 
 local function sparks(position: Vector3, severity: number, count: number)
@@ -557,7 +687,7 @@ end
 --[[ Flash, shards, dust -- three elements, three lifetimes, one point in space.
 	`reduced` halves the two countable ones for a hit that is far away or that
 	arrived while the scene was already crowded. ]]
-local function burst(event: Event, severity: number, reduced: boolean)
+local function burst(event: Event, severity: number, reduced: boolean, involved: boolean)
 	local position = event.position + Vector3.new(0, 2, 0)
 
 	local diameter = ImpactSpec.flashDiameter(severity)
@@ -567,7 +697,11 @@ local function burst(event: Event, severity: number, reduced: boolean)
 		Transparency = 1,
 	})
 	Debris:AddItem(flash, ImpactSpec.Flash.seconds + 0.05)
-	playSound(flash, event.died)
+
+	-- The sound gets its own host rather than riding the flash. The flash is
+	-- gone in 0.19 s and glassbreak runs 1.578 s; hanging audio off a visual
+	-- means the visual's lifetime silently truncates it.
+	impactSound(soundHost(position, 3), event.died, involved)
 
 	local count = ImpactSpec.sparkCount(severity)
 	sparks(position, severity, if reduced then math.max(3, count // 2) else count)
@@ -613,13 +747,16 @@ function Impact.play(event: Event)
 
 	if distance < ImpactSpec.Budget.cullStuds then
 		local crowded = #scene():GetChildren() > ImpactSpec.Budget.maxLiveParts
-		burst(event, severity, crowded or distance > ImpactSpec.Budget.reducedStuds)
+		local reduced = crowded or distance > ImpactSpec.Budget.reducedStuds
+		burst(event, severity, reduced, taken or dealt)
 	end
 
 	if taken or dealt then
 		damageNumber(event, severity, taken)
 		hitstop(ImpactSpec.hitstopSeconds(severity))
 		shake(ImpactSpec.shakeTrauma(severity, taken))
+		-- Signed by role: in when you landed it, out when you took it.
+		fovPunch(ImpactSpec.fovDegrees(severity, taken))
 	end
 	if dealt then
 		markHit(severity, event.died)
@@ -629,10 +766,61 @@ function Impact.play(event: Event)
 	end
 end
 
+--[[ Cast audio: a technique is audible when it fires, not only when it lands.
+
+	The striker is the most-pressed button in the game and until now it made no
+	sound at all, which meant the atom of the combat loop had no audible
+	existence. This hangs off the same TechniqueFired broadcast ClientVfx draws
+	from, so casting stays one event in one place and the vfx layer never has to
+	think about audio at all.
+
+	Fires on every cast including a miss, which is deliberate: the cast is a
+	thing that happened. What a miss does not get is the impact sound, and that
+	difference -- crack, then nothing, versus crack, then hit -- is the whole
+	audible skill signal.
+
+	Untyped on purpose. This is somebody else's payload shape; the three fields
+	read here are checked, and nothing else is touched. ]]
+function Impact.cast(shot: { [string]: any })
+	if typeof(shot) ~= "table" or typeof(shot.origin) ~= "Vector3" then
+		return
+	end
+	if type(shot.techId) ~= "string" or type(shot.kind) ~= "string" then
+		return
+	end
+
+	local assetId = ImpactSpec.castSound(shot.kind)
+	if assetId == "" then
+		return
+	end
+
+	local player = Players.LocalPlayer
+	local own = player ~= nil and shot.casterId == player.UserId
+	local pitch = ImpactSpec.castPitch(Config, shot.techId)
+	local volume = ImpactSpec.castVolume(Config, shot.techId)
+
+	if own then
+		playFlat(assetId, volume * ImpactSpec.Cast.ownVolumeBoost, pitch)
+		return
+	end
+
+	local camera = Workspace.CurrentCamera
+	if camera then
+		local away = (camera.CFrame.Position - shot.origin).Magnitude
+		if away > ImpactSpec.Cast.rollOffMaxStuds then
+			return
+		end
+	end
+	playAt(soundHost(shot.origin, 3), assetId, volume, pitch, ImpactSpec.Cast.rollOffMaxStuds)
+end
+
 local started = false
 
---[[ Bind to the Impact remote. Idempotent, so calling it twice is a no-op
-	rather than two impacts per hit. ]]
+--[[ Bind to the two remotes this layer listens on. Idempotent, so calling it
+	twice is a no-op rather than two impacts per hit.
+
+	TechniqueFired is read-only here and shared with ClientVfx -- two listeners
+	on one RemoteEvent, neither aware of the other. ]]
 function Impact.start()
 	if started then
 		return
@@ -640,6 +828,14 @@ function Impact.start()
 	started = true
 
 	local remotes = ReplicatedStorage:WaitForChild("Remotes")
+
+	local fired = remotes:WaitForChild("TechniqueFired")
+	if fired:IsA("RemoteEvent") then
+		fired.OnClientEvent:Connect(function(shot: { [string]: any })
+			Impact.cast(shot)
+		end)
+	end
+
 	local remote = remotes:WaitForChild("Impact")
 	if not remote:IsA("RemoteEvent") then
 		return

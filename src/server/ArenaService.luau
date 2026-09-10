@@ -10,8 +10,8 @@
 	what the layout below is for, and it is worth saying which piece does which:
 
 	- *Silhouette.* Waymarks at 36 studs, corridor landmarks at 48-84, region
-	  landmarks at 60-118, crags at 140-250, and sky islands overhead. Any
-	  bearing from the spawn pad crosses at least four of those bands.
+	  landmarks at 60-118, crags at 55-250, and sky islands overhead. Any
+	  bearing from the terrace crosses at least four of those bands.
 	- *Material.* Warm earth underfoot, cobbled roads, sandstone plaza, grass in
 	  the Reach, glacier at the Wellspring, basalt in the Barrens, rock and
 	  marble and painted timber on the landmarks.
@@ -38,6 +38,34 @@
 	distance comparisons. The rim discs sit a hair below the floor discs, so
 	where two lobes overlap the internal rim is buried and only the true outer
 	boundary is drawn.
+
+	*The establishing shot.* None of the above counted for anything while spawn
+	sat at the origin inside a ring of eight fifteen-stud posts: the captured
+	frames contained the posts, the plaza and nothing else -- no landmark, no
+	region, no node, no sky. Spawn is now a deck on the southern rim at
+	(0, 22, -150), facing north across the whole map, and the posts are gone.
+
+	Worked from the default follow camera -- eye about 13 studs back and 2 up,
+	pitched 8.7 degrees down, 70-degree FOV, so the frame spans -43.7 to +26.3
+	degrees vertically and +-51 horizontally -- the first frame of the game
+	contains, measured:
+
+	    crossroads monument    149 studs   dead ahead, +5.0 deg
+	    Verdant Reach edge     107 studs   32.9 deg left
+	    Ember Barrens edge     105 studs   27.8 deg right
+	    torii                   76 studs   30.7 deg left, +18.8 deg
+	    watchtower             244 studs   28.0 deg right, +12.7 deg
+	    Wellspring floor       287 studs   dead ahead
+	    Wellspring spire       321 studs   dead ahead, +17.3 deg
+	    Wellspring beacon      321 studs   dead ahead, +53 deg, out the top
+	    horizon (crag saddle)  ~500 studs  +4.1 deg centre, +18.1 at the edges
+
+	which leaves 16 to 22 degrees of open sky across the middle of the frame --
+	the top quarter of the image -- and puts two region edges, five landmarks and
+	the sky in the player's first second. The saddle in the crag ring is what
+	buys the sky; the deck height is what stops the ground plane eating the
+	frame; and the pad sitting at the deck's *northern* edge is what keeps the
+	terrace's own furniture behind the camera instead of in it.
 
 	The layout is seeded, not rolled per server: static aura geography is
 	supposed to be learnable, so one seed builds the same arena every run.
@@ -73,8 +101,35 @@ local REGION_FOLDER_NAME = "AuraRegions"
 local NODE_FIELD_RADIUS = 220
 local ARENA_RADIUS = NODE_FIELD_RADIUS + 130
 local WALL_RADIUS = 330
-local APRON_RADIUS = 430
+local APRON_RADIUS = 540
 local PLAZA_RADIUS = 40
+
+--[[ The spawn terrace, and the reason it is not the middle of the map.
+
+	A world was built and then hidden: spawn sat at the origin inside a ring of
+	eight fifteen-stud posts, and from the one position every player starts and
+	returns to, not a single landmark, region, beacon, node or piece of sky was
+	in frame. The posts are gone, and spawn now stands on a deck on the southern
+	rim, twenty-two studs up, facing in.
+
+	Every number here is a sightline. The deck is high enough that the ground
+	plane falls away instead of filling the screen, the pad sits at the deck's
+	*northern* edge so the terrace furniture is all behind the camera, and there
+	is deliberately nothing tall on the axis between the pad and the Wellspring
+	three hundred studs out -- which is what leaves the top of the frame for the
+	sky the Atmosphere was built for. ]]
+local TERRACE_CENTER = Vector3.new(0, 0, -150)
+local DECK_RADIUS = 26
+local DECK_TOP = 22
+local SPAWN_POINT = Vector3.new(0, DECK_TOP + 0.5, -136)
+local RAMP_HIGH_Z = -124
+local RAMP_LOW_Z = -78
+
+--[[ The torii used to stand at 270 degrees, dead on the spawn axis, where it
+	would have filled the middle of the establishing shot with a crossbeam. It
+	now stands thirty degrees off to the left, close enough to frame the view
+	and nowhere near blocking it. ]]
+local TORII_POINT = Vector3.new(-38.9, 0, -83.4)
 
 -- Heights of the inlaid surfaces, top faces, ground at y = 0.
 local RIM_TOP = 0.05
@@ -204,8 +259,11 @@ local function buildSpawn()
 	local spawn = Instance.new("SpawnLocation")
 	spawn.Name = "ArenaSpawn"
 	spawn.Anchored = true
-	spawn.Size = Vector3.new(24, 1, 24)
-	spawn.Position = Vector3.new(0, 0.5, 0)
+	spawn.Size = Vector3.new(26, 1, 20)
+	--[[ Facing matters as much as position. A character spawns looking along its
+		SpawnLocation's LookVector, so pointing this north is what decides whether
+		the first second of the game is the arena or the back of a wall. ]]
+	spawn.CFrame = CFrame.lookAt(SPAWN_POINT, SPAWN_POINT + Vector3.zAxis)
 	spawn.Material = Enum.Material.Neon
 	spawn.Color = Color3.fromRGB(255, 205, 110)
 	spawn.Neutral = true
@@ -319,7 +377,7 @@ local function buildBeacon(region: Region, height: number, decor: Folder)
 	local shaft =
 		newDisc(11, height, anchor + Vector3.new(0, height / 2, 0), region.glow, Enum.Material.Neon)
 	shaft.Name = `{region.id}Beacon`
-	shaft.Transparency = 0.82
+	shaft.Transparency = 0.74
 	makeInert(shaft)
 	shaft.Parent = decor
 end
@@ -572,16 +630,17 @@ local function bezier(p0: Vector3, p1: Vector3, p2: Vector3, t: number): Vector3
 	return p0:Lerp(p1, t):Lerp(p1:Lerp(p2, t), t)
 end
 
---[[ A road from the plaza to each region gate, bowed out through the open
-	corridor so it passes a landmark on the way. The bow is the point: a
+--[[ A road, laid as a bezier so it arrives curved. The bow is the point: a
 	straight line is a measurement, a curve is an invitation. Lanterns every few
 	segments carry the road after dark and add another silhouette band. ]]
-local function buildRoad(region: Region, bow: number, decor: Folder)
-	local segments = 17
-	local start = onBearing(region.bearing, PLAZA_RADIUS + 6)
-	local finish = region.blobs[1].center
-	local control = onBearing(region.bearing + bow, 130)
-
+local function buildRoad(
+	name: string,
+	start: Vector3,
+	control: Vector3,
+	finish: Vector3,
+	segments: number,
+	decor: Folder
+)
 	local previous = start
 	for step = 0, segments do
 		local t = step / segments
@@ -600,7 +659,7 @@ local function buildRoad(region: Region, bow: number, decor: Folder)
 			ROAD_COLOR:Lerp(Color3.fromRGB(150, 134, 106), rng:NextNumber(0, 0.5)),
 			Enum.Material.Cobblestone
 		)
-		slab.Name = `Road_{region.id}_{step}`
+		slab.Name = `Road_{name}_{step}`
 		makeInert(slab)
 		slab.Parent = decor
 
@@ -614,7 +673,7 @@ local function buildRoad(region: Region, bow: number, decor: Folder)
 					DARK_STONE,
 					Enum.Material.Rock
 				)
-				post.Name = `RoadLamp_{region.id}_{step}_{lamp}`
+				post.Name = `RoadLamp_{name}_{step}_{lamp}`
 				post.Parent = decor
 
 				local flame = newBlock(
@@ -623,7 +682,7 @@ local function buildRoad(region: Region, bow: number, decor: Folder)
 					BRAZIER_COLOR,
 					Enum.Material.Neon
 				)
-				flame.Name = `RoadFlame_{region.id}_{step}_{lamp}`
+				flame.Name = `RoadFlame_{name}_{step}_{lamp}`
 				flame.CastShadow = false
 				flame.Parent = decor
 			end
@@ -835,10 +894,15 @@ end
 
 --[[ Spawn ring plus one waymarker per region, each tipped in that region's own
 	colour, standing on its bearing, and captioned with the name the
-	announcements use. From the pad you can see which way the Reach is and which
-	way the Barrens are, and the sign tells you what to call it when a Prime
-	surfaces there. ]]
-local function buildSpawnRing(decor: Folder)
+	announcements use. From the terrace this is the first structure on the axis,
+	and walking into it tells you which way the Reach is, which way the Barrens
+	are, and what to call them when a Prime surfaces there.
+
+	It used to be the spawn, ringed by eight fifteen-stud posts at eye height.
+	Nothing here is taller than the waymarks now, and the waymarks stand outside
+	the ring rather than around it, because the whole job of this place is to be
+	looked *through*. ]]
+local function buildCrossroads(decor: Folder)
 	local names = Config.RegionNames :: { [string]: string }
 
 	local plaza = newDisc(
@@ -863,31 +927,55 @@ local function buildSpawnRing(decor: Folder)
 	makeInert(inlay)
 	inlay.Parent = decor
 
-	for index = 1, 8 do
-		local angle = (index / 8) * math.pi * 2 + math.pi / 8
-		local offset = onBearing(angle, PLAZA_RADIUS - 5)
-		local post = newBlock(
-			Vector3.new(6, 15, 6),
-			CFrame.new(offset + Vector3.new(0, 7.5, 0)) * yawAt(angle),
-			STONE_COLOR,
-			Enum.Material.Sandstone
-		)
-		post.Name = `SpawnPost{index}`
-		post.Parent = decor
-
-		local cap = newBlock(
-			Vector3.new(7.5, 2.4, 7.5),
-			CFrame.new(offset + Vector3.new(0, 16.2, 0)) * yawAt(angle),
-			Color3.fromRGB(255, 205, 110),
-			Enum.Material.Neon
-		)
-		cap.Name = `SpawnPostCap{index}`
-		cap.CastShadow = false
-		cap.Parent = decor
+	--[[ A compass rose inlaid in the floor instead of a picket of posts. It
+		carries the same information -- which bearing goes where -- at zero cost
+		to the sightline, because it is painted on the ground the player is
+		standing on rather than standing between them and the map. ]]
+	for _, region in REGIONS do
+		for step = 1, 4 do
+			local reach = PLAZA_RADIUS - 6
+			local length = reach * (0.34 + step * 0.16)
+			local spoke = newBlock(
+				Vector3.new(length, 1, 3.4 - step * 0.5),
+				CFrame.new(
+					onBearing(region.bearing, length / 2 + 3) + Vector3.new(0, PATCH_TOP - 0.88, 0)
+				) * yawAt(region.bearing),
+				region.glow,
+				Enum.Material.Neon
+			)
+			spoke.Name = `CompassSpoke_{region.id}_{step}`
+			spoke.Transparency = 0.2 + step * 0.12
+			makeInert(spoke)
+			spoke.Parent = decor
+		end
 	end
 
+	--[[ One vertical at the crossroads, and only one: forty studs of stone at a
+		hundred and thirty from the terrace, which is five degrees of the frame.
+		Enough to be the thing you say "meet me at" and far too small to hide the
+		map behind. ]]
+	local shaftHeight = 34
+	local monument = newBlock(
+		Vector3.new(9, shaftHeight, 9),
+		CFrame.new(0, shaftHeight / 2, 0) * yawAt(0.4),
+		STONE_COLOR,
+		Enum.Material.Marble
+	)
+	monument.Name = "CrossroadsMonument"
+	monument.Parent = decor
+
+	local crown = newBlock(
+		Vector3.new(6, 8, 6),
+		CFrame.new(0, shaftHeight + 3, 0) * yawAt(0.9),
+		Color3.fromRGB(255, 205, 110),
+		Enum.Material.Neon
+	)
+	crown.Name = "CrossroadsCrown"
+	crown.CastShadow = false
+	crown.Parent = decor
+
 	for _, region in REGIONS do
-		local offset = onBearing(region.bearing, PLAZA_RADIUS + 24)
+		local offset = onBearing(region.bearing, PLAZA_RADIUS + 30)
 		local pillar = newBlock(
 			Vector3.new(7, 36, 7),
 			CFrame.new(offset + Vector3.new(0, 18, 0)) * yawAt(region.bearing),
@@ -944,6 +1032,145 @@ local function buildSpawnRing(decor: Folder)
 	end
 end
 
+--[[ The spawn terrace: a deck on piers at the southern rim, a ramp down into
+	the field, and nothing at all in front of it.
+
+	Three things about it are load-bearing rather than decorative.
+
+	*It is high.* Twenty-two studs puts the eye above the ground plane, so the
+	field recedes instead of filling the screen and the horizon sits low enough
+	that the top of the frame is sky.
+
+	*It is open to the north.* The parapet stops at the halfway line and the pad
+	sits at the deck's front edge, so every piece of furniture -- piers, banner
+	pylons, back wall -- is behind the camera rather than in it.
+
+	*It stands on piers.* The node field runs to 220 studs and this sits inside
+	it, so the ground underneath stays flat and walkable and a node that spawns
+	below the deck is still a node you can walk to and stand in. The deck is
+	shade and cover, not a lid.
+
+	It is also the one piece of architecture visible from the whole map, which
+	makes "home" a thing you can navigate back to by eye. ]]
+local function buildTerrace(decor: Folder)
+	local deck = newDisc(
+		DECK_RADIUS,
+		4,
+		TERRACE_CENTER + Vector3.new(0, DECK_TOP - 2, 0),
+		PLAZA_COLOR,
+		Enum.Material.Sandstone
+	)
+	deck.Name = "TerraceDeck"
+	deck.CanQuery = false
+	deck.Parent = decor
+
+	local inlay = newDisc(
+		DECK_RADIUS - 7,
+		1,
+		TERRACE_CENTER + Vector3.new(0, DECK_TOP + 0.1, 0),
+		Color3.fromRGB(226, 198, 148),
+		Enum.Material.Marble
+	)
+	inlay.Name = "TerraceInlay"
+	makeInert(inlay)
+	inlay.Parent = decor
+
+	for index = 1, 6 do
+		local angle = (index / 6) * math.pi * 2
+		local pier = newBlock(
+			Vector3.new(7, DECK_TOP, 7),
+			CFrame.new(
+				TERRACE_CENTER + onBearing(angle, DECK_RADIUS - 8) + Vector3.new(0, DECK_TOP / 2, 0)
+			) * yawAt(angle),
+			STONE_COLOR:Lerp(DARK_STONE, 0.35),
+			Enum.Material.Rock
+		)
+		pier.Name = `TerracePier{index}`
+		pier.Parent = decor
+	end
+
+	--[[ Parapet on the southern half only. A waist-high wall in front of the
+		player would cut off exactly the near-to-middle ground the terrace exists
+		to show them. ]]
+	for index = 1, 7 do
+		local angle = math.pi + (index / 8) * math.pi
+		local wall = newBlock(
+			Vector3.new(15, 5, 4),
+			CFrame.new(
+				TERRACE_CENTER
+					+ onBearing(angle, DECK_RADIUS - 2)
+					+ Vector3.new(0, DECK_TOP + 2.5, 0)
+			) * yawAt(angle + math.pi / 2),
+			STONE_COLOR,
+			Enum.Material.Sandstone
+		)
+		wall.Name = `TerraceParapet{index}`
+		wall.Parent = decor
+	end
+
+	-- Banner pylons at the back corners: the terrace's silhouette from the
+	-- field, and out of frame from on top of it.
+	for lamp = -1, 1, 2 do
+		local base = TERRACE_CENTER + Vector3.new(19 * lamp, 0, -16)
+		local pylon = newBlock(
+			Vector3.new(5, DECK_TOP + 30, 5),
+			CFrame.new(base + Vector3.new(0, (DECK_TOP + 30) / 2, 0)),
+			DARK_STONE,
+			Enum.Material.Rock
+		)
+		pylon.Name = `TerracePylon{if lamp < 0 then "L" else "R"}`
+		pylon.Parent = decor
+
+		local banner = newBlock(
+			Vector3.new(1.2, 22, 11),
+			CFrame.new(base + Vector3.new(3 * lamp, DECK_TOP + 18, 0)),
+			TIMBER_COLOR,
+			Enum.Material.Fabric
+		)
+		banner.Name = `TerraceBanner{if lamp < 0 then "L" else "R"}`
+		banner.CanQuery = false
+		banner.Parent = decor
+
+		local flame = newBlock(
+			Vector3.new(5, 5, 5),
+			CFrame.new(base + Vector3.new(0, DECK_TOP + 32, 0)) * CFrame.Angles(0.6, 0.6, 0),
+			BRAZIER_COLOR,
+			Enum.Material.Neon
+		)
+		flame.Name = `TerraceFlame{if lamp < 0 then "L" else "R"}`
+		flame.CastShadow = false
+		flame.Parent = decor
+	end
+
+	-- The ramp down into the field. It is also the establishing shot's leading
+	-- line: it points at the crossroads, which points at the Wellspring.
+	local run = RAMP_LOW_Z - RAMP_HIGH_Z
+	local drop = DECK_TOP
+	local length = math.sqrt(run * run + drop * drop)
+	local ramp = newBlock(
+		Vector3.new(26, 2, length),
+		CFrame.new(0, DECK_TOP / 2 - 1, (RAMP_HIGH_Z + RAMP_LOW_Z) / 2)
+			* CFrame.Angles(math.atan2(drop, run), 0, 0),
+		ROAD_COLOR,
+		Enum.Material.Cobblestone
+	)
+	ramp.Name = "TerraceRamp"
+	ramp.CanQuery = false
+	ramp.Parent = decor
+
+	for kerb = -1, 1, 2 do
+		local rail = newBlock(
+			Vector3.new(2, 2.5, length),
+			CFrame.new(14 * kerb, DECK_TOP / 2 + 0.6, (RAMP_HIGH_Z + RAMP_LOW_Z) / 2)
+				* CFrame.Angles(math.atan2(drop, run), 0, 0),
+			DARK_STONE,
+			Enum.Material.Rock
+		)
+		rail.Name = `TerraceRail{if kerb < 0 then "L" else "R"}`
+		rail.Parent = decor
+	end
+end
+
 --[[ The horizon. Three stacked, shrinking, differently yawed blocks read as a
 	crag once they are three hundred studs out and sitting in haze, and twenty
 	of them close the skyline in every direction -- which is the whole point. A
@@ -966,6 +1193,21 @@ local function buildWall(decor: Folder)
 		local dist = WALL_RADIUS + rng:NextNumber(-28, 42)
 		local height = rng:NextNumber(140, 250)
 		local width = rng:NextNumber(120, 190)
+
+		--[[ The pass. A wall of 250-stud crags at 330 studs subtends 25 degrees
+			from the terrace, and a camera that pitches down at all then has no
+			sky left in frame -- which is exactly what the round-2 captures
+			showed. So the ring is a saddle rather than a fence: it sinks to
+			about a quarter height and steps back on the bearing the player
+			spawns facing, and climbs to full height around the sides. The centre
+			of the establishing shot gets twenty degrees of open sky above a low
+			horizon, and the frame still has tall rock closing both edges. ]]
+		local offAxis =
+			math.abs(math.atan2(math.sin(angle - math.pi / 2), math.cos(angle - math.pi / 2)))
+		local rise = math.clamp(offAxis / 1.2, 0, 1)
+		height *= 0.28 + 0.72 * rise * rise
+		dist += 70 * (1 - rise)
+
 		local root = onBearing(angle, dist)
 		local yaw = angle + rng:NextNumber(-0.5, 0.5)
 
@@ -1137,7 +1379,7 @@ function ArenaService.landmarkAnchors(): { Anchor }
 	})
 	table.insert(anchors, {
 		name = "torii",
-		position = onBearing(math.pi * 3 / 2, 118),
+		position = TORII_POINT,
 		region = "open",
 		radius = 38,
 	})
@@ -1192,16 +1434,40 @@ function ArenaService.start()
 			corridor, so all three corridors carry one and each road passes a
 			landmark on the way out: the Wellspring road runs by the aqueduct,
 			the Reach road by the torii, the Barrens road by the watchtower. ]]
-		buildRoad(REGIONS[1], 0.62, decor)
-		buildRoad(REGIONS[2], 0.7, decor)
-		buildRoad(REGIONS[3], 0.66, decor)
+		for _, region in REGIONS do
+			local bow = if region.id == "wellspring"
+				then 0.62
+				elseif region.id == "rich" then 0.7
+				else 0.66
+			buildRoad(
+				region.id,
+				onBearing(region.bearing, PLAZA_RADIUS + 6),
+				onBearing(region.bearing + bow, 130),
+				region.blobs[1].center,
+				17,
+				decor
+			)
+		end
+
+		buildTerrace(decor)
+		-- The short road off the ramp into the crossroads. Barely a curve, but
+		-- it is what makes the terrace part of the map rather than a platform
+		-- parked next to it.
+		buildRoad(
+			"terrace",
+			Vector3.new(0, 0, RAMP_LOW_Z),
+			Vector3.new(9, 0, (RAMP_LOW_Z - PLAZA_RADIUS) / 2),
+			Vector3.new(0, 0, -PLAZA_RADIUS - 4),
+			5,
+			decor
+		)
 
 		buildWatchtower(onBearing(math.pi / 6, 132), decor)
 		buildAqueduct(onBearing(math.pi * 5 / 6, 144), math.pi * 5 / 6, decor)
 		buildStandingStones(onBearing(math.pi / 6, 198), decor)
-		buildTorii(onBearing(math.pi * 3 / 2, 118), math.pi * 3 / 2, decor)
+		buildTorii(TORII_POINT, math.pi * 5 / 4, decor)
 		buildSkyIslands(decor)
-		buildSpawnRing(decor)
+		buildCrossroads(decor)
 
 		decor.Parent = Workspace
 	end
