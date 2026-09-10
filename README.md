@@ -41,8 +41,11 @@ restricted, empowered subset rather than a rewrite.
 ## Layout
 
 ```
-src/shared/    Config, Progression, AuraNodes  -- pure, no requires, Lune-testable
-src/server/    NodeService, CultivationService -- thin bindings to Roblox APIs
+src/shared/    Config, Progression, AuraNodes, Combat  -- pure, no requires,
+                                                        Lune-testable
+src/server/    Arena, Node, Cultivation, Combat,        -- thin bindings to
+               Awareness, Persistence                      Roblox APIs
+src/client/    HUD panels and input
 tests/         Lune test suites
 ```
 
@@ -53,8 +56,8 @@ so the same files load in Roblox (`require(script.Parent.X)`) and under Lune
 ## Commands
 
 ```sh
-lune run tests/progression.test     # 31 assertions
-lune run tests/auranodes.test       # 43 assertions
+lune run tests/progression.test     # 58 assertions
+lune run tests/auranodes.test       # 56 assertions
 lune run tests/combat.test          # 119 assertions
 selene src tests                    # lint
 stylua src tests                    # format
@@ -83,6 +86,10 @@ Keys **1-4** fire the four loadout slots (striker, enforcer, forger, ruler). The
 client sends only the slot name; the server resolves it against the loadout it
 holds and owns every cost, cooldown and damage decision.
 
-The project tree defines no ground and no spawn, so connect Rojo to a Studio
-place that already has a Baseplate and a SpawnLocation. Nodes spawn within 220
-studs of the origin.
+`ArenaService` builds ground and a spawn pad when the place lacks them, so any
+Studio place works and a Baseplate place will not end up with two floors. Nodes
+spawn within 220 studs of the origin.
+
+Press **B** at the refinement ceiling to break through. Progress saves on leave,
+on shutdown and every 90 seconds — but DataStores are unavailable in an
+unpublished place, where the server warns once and runs in memory.

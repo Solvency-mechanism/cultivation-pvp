@@ -185,6 +185,16 @@ Config.StaticRegionMultipliers = {
 	wellspring = 2.6,
 }
 
+--[[ Persistence. Bump storeName rather than migrating when the shape of a
+	saved state changes incompatibly; Progression.sanitizeState absorbs the
+	compatible drift. ]]
+Config.Persistence = {
+	storeName = "Cultivation_v1",
+	-- A stage is hours of play, so a lost autosave window is cheap; the request
+	-- budget is not. Saves also happen on leave and on server shutdown.
+	autosaveSeconds = 90,
+}
+
 -- Combat resources.
 --
 -- Health scales with stage but is FLAT inside a stage, while damage scales

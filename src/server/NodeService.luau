@@ -114,9 +114,17 @@ end
 	the ones eligible for its catalyst -- which is what turns a Prime spawn
 	into a timed defence fight rather than a tap-and-leave. ]]
 local onDrained: ((AuraNodes.Node) -> ())? = nil
+local onSpawned: ((AuraNodes.Node) -> ())? = nil
 
 function NodeService.setDrainedHandler(handler: (AuraNodes.Node) -> ())
 	onDrained = handler
+end
+
+--[[ Fired once per node, when it first appears. Telegraphs hang off this: the
+	tier decides who is told, and Prime telling everyone is what makes the
+	economy contested. ]]
+function NodeService.setSpawnedHandler(handler: (AuraNodes.Node) -> ())
+	onSpawned = handler
 end
 
 function NodeService.step(now: number)
@@ -128,7 +136,21 @@ function NodeService.step(now: number)
 
 	if now - lastSpawn >= Config.Field.spawnIntervalSeconds then
 		lastSpawn = now
+		-- step() culls expired nodes before it appends, so the list can be
+		-- shorter afterwards even though something spawned. Comparing ids is the
+		-- only reading of "new" that survives that.
+		local before: { [string]: boolean } = {}
+		for _, node in field do
+			before[node.id] = true
+		end
 		AuraNodes.step(Config, field, now, math.random, nextId, placer)
+		if onSpawned then
+			for _, node in field do
+				if not before[node.id] then
+					onSpawned(node)
+				end
+			end
+		end
 	else
 		for i = #field, 1, -1 do
 			if AuraNodes.isExpired(field[i], now) then

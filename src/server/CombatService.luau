@@ -162,15 +162,22 @@ local function ensureActor(player: Player): Combat.Actor?
 	return actor
 end
 
-local function handleDeath(player: Player, stageIndex: number)
+local function handleDeath(player: Player)
 	if dying[player.UserId] then
 		return
 	end
 	dying[player.UserId] = true
 
-	-- Amount comes from Combat, the ratchet lives in Progression, and the write
-	-- is routed through CultivationService so player state has one owner.
-	CultivationService.applyDeathLoss(player, Combat.deathLoss(Config, stageIndex))
+	-- Resolved at death rather than captured at spawn, so a player who dies
+	-- before their state has loaded is charged nothing instead of being charged
+	-- at the wrong stage.
+	local actor = actors[player.UserId]
+	local stageIndex = if actor then actor.stageIndex else stageIndexOf(player)
+	if stageIndex then
+		-- Amount comes from Combat, the ratchet lives in Progression, and the
+		-- write is routed through CultivationService so state has one owner.
+		CultivationService.applyDeathLoss(player, Combat.deathLoss(Config, stageIndex))
+	end
 	actors[player.UserId] = nil
 
 	local humanoid = humanoidOf(player)
@@ -199,7 +206,7 @@ local function damagePlayer(source: Combat.Actor, target: Player, raw: number, n
 	publish(target)
 
 	if result.died then
-		handleDeath(target, targetActor.stageIndex)
+		handleDeath(target)
 	end
 end
 
@@ -398,19 +405,19 @@ local function onCharacterAdded(player: Player)
 	dying[player.UserId] = nil
 	actors[player.UserId] = nil
 
-	local actor = ensureActor(player)
-	if not actor then
-		return
-	end
-
+	-- Connected before the actor is built, and independently of whether it can
+	-- be: cultivation state may still be loading when the character spawns, and
+	-- a character with no death handler never respawns cleanly.
 	local humanoid = humanoidOf(player)
 	if humanoid then
 		humanoid.Died:Connect(function()
 			-- Covers deaths this service did not cause, so falling off the map
 			-- costs the same refinement that losing a fight does.
-			handleDeath(player, actor.stageIndex)
+			handleDeath(player)
 		end)
 	end
+
+	ensureActor(player)
 end
 
 function CombatService.onPlayerAdded(player: Player)

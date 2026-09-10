@@ -40,6 +40,43 @@ function Progression.newState(): State
 	return { stageIndex = 1, tier = 1, progress = 0, catalysts = 0 }
 end
 
+--[[ Rebuild a state table from untrusted stored data.
+
+	Saved data outlives the config that wrote it. A stage removed from the
+	ladder, a lowered refinement cap, a partial write, or a number that came back
+	as NaN would otherwise put a player into a state the rest of this module
+	asserts against. Anything unreadable falls back to a fresh value rather than
+	failing the load, because refusing to load is worse than losing a tier. ]]
+function Progression.sanitizeState(config: any, raw: any): State
+	local state = Progression.newState()
+	if type(raw) ~= "table" then
+		return state
+	end
+
+	local stageIndex = tonumber(raw.stageIndex)
+	if stageIndex and stageIndex == stageIndex then
+		state.stageIndex = math.clamp(math.floor(stageIndex), 1, #config.Stages)
+	end
+
+	local tier = tonumber(raw.tier)
+	if tier and tier == tier then
+		state.tier = math.clamp(math.floor(tier), 1, config.RefinementTiers)
+	end
+
+	local stage = config.Stages[state.stageIndex]
+	local progress = tonumber(raw.progress)
+	if progress and progress == progress and progress > 0 then
+		state.progress = math.min(progress, stage.perTierProgress)
+	end
+
+	local catalysts = tonumber(raw.catalysts)
+	if catalysts and catalysts == catalysts and catalysts > 0 then
+		state.catalysts = math.floor(catalysts)
+	end
+
+	return state
+end
+
 function Progression.getStage(config: any, state: State)
 	local stage = config.Stages[state.stageIndex]
 	assert(stage ~= nil, `invalid stageIndex {state.stageIndex}`)

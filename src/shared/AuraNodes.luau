@@ -21,6 +21,11 @@ export type Node = {
 	drained: boolean,
 }
 
+export type Sensed = {
+	node: Node,
+	distance: number,
+}
+
 export type Rng = () -> number
 
 local AuraNodes = {}
@@ -142,6 +147,63 @@ end
 
 function AuraNodes.telegraphOf(config: any, node: Node): string
 	return tierData(config, node.tier).telegraph
+end
+
+--[[ Straight-line distance from a point to a node. ]]
+function AuraNodes.distanceTo(node: Node, position: Vec3): number
+	local dx = node.position.x - position.x
+	local dy = node.position.y - position.y
+	local dz = node.position.z - position.z
+	return math.sqrt(dx * dx + dy * dy + dz * dz)
+end
+
+--[[ The nodes a cultivator can feel from where they stand, nearest first.
+
+	This is what makes sense range a mechanic rather than a number on a HUD.
+	Range scales faster than power with refinement, so a veteran's real edge is
+	finding nodes before anyone else can. Expired nodes are never sensed. ]]
+function AuraNodes.sensed(
+	nodes: { Node },
+	position: Vec3,
+	senseRange: number,
+	now: number
+): { Sensed }
+	local found: { Sensed } = {}
+	for _, node in nodes do
+		if not AuraNodes.isExpired(node, now) then
+			local distance = AuraNodes.distanceTo(node, position)
+			if distance <= senseRange then
+				table.insert(found, { node = node, distance = distance })
+			end
+		end
+	end
+	table.sort(found, function(left, right)
+		return left.distance < right.distance
+	end)
+	return found
+end
+
+--[[ Whether a spawn is announced to one player.
+
+	Local nodes are never announced -- you find those by sensing. Regional ones
+	reach whoever could already sense them, so the announcement is a convenience
+	rather than new information. Server scope, which only Prime carries, reaches
+	everyone regardless of range: that is what turns a Prime spawn into a
+	server-wide event, and it is the reason there is no safe grind. ]]
+function AuraNodes.shouldAnnounce(
+	config: any,
+	node: Node,
+	distance: number,
+	senseRange: number
+): boolean
+	local scope = AuraNodes.telegraphOf(config, node)
+	if scope == "server" then
+		return true
+	end
+	if scope == "regional" then
+		return distance <= senseRange
+	end
+	return false
 end
 
 --[[ Presence-based contest: a node is contested while more than one faction

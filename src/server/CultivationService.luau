@@ -40,12 +40,18 @@ function CultivationService.getState(player: Player): Progression.State?
 	return states[player.UserId]
 end
 
-function CultivationService.onPlayerAdded(player: Player)
-	-- Testers start in the Gold game rather than the proving ground; the
-	-- bracket we actually need to validate is Lowgold.
+--[[ A brand new cultivator. Testers start in the Gold game rather than the
+	proving ground, because the bracket that needs validating is Lowgold. ]]
+function CultivationService.newPlayerState(): Progression.State
 	local state = Progression.newState()
 	state.stageIndex = 5
-	states[player.UserId] = state
+	return state
+end
+
+--[[ `restored` comes from PersistenceService when a save was found. It has
+	already been through Progression.sanitizeState, so this trusts it. ]]
+function CultivationService.onPlayerAdded(player: Player, restored: Progression.State?)
+	states[player.UserId] = restored or CultivationService.newPlayerState()
 	publish(player)
 end
 

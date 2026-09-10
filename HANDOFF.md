@@ -1,6 +1,6 @@
 # Handoff
 
-State as of the CombatService commit. All names are placeholders.
+State as of the "playable loop" commit. All names are placeholders.
 
 ## Machine setup
 
@@ -15,6 +15,19 @@ Everything needed is installed and on the persistent user PATH.
 > If `rojo` reports "not found", the terminal predates the PATH change. Open a
 > new one. This is not a broken install.
 
+## How to run it
+
+```sh
+rojo serve      # then Connect from the Rojo plugin in Studio, and press Play
+```
+
+Any Studio place works — `ArenaService` builds ground and a spawn if the place
+does not already have them, and skips both if it does, so connecting to a
+Baseplate place will not produce two floors.
+
+**Controls:** `1-4` fire the four loadout slots (striker, enforcer, forger,
+ruler). `B` attempts a breakthrough. Walk into a glowing sphere to cycle.
+
 ## The architectural rule that matters
 
 Everything in `src/shared/` is **pure and contains zero internal requires**, and
@@ -26,108 +39,122 @@ incompatible. Dependency-free modules load unchanged under both, which is the
 only reason the game rules are unit-testable outside Studio.
 
 **Adding a require between two shared modules breaks every test.** If a shared
-module needs something from another, pass it in as an argument. `Combat` takes
-effective power as a number rather than requiring `Progression`, and
-`Combat.deathLoss` returns an amount for the caller to hand to
-`Progression.applyLoss`, precisely to hold this line.
+module needs something from another, pass it in as an argument.
 
-Server modules are free to require each other and the shared ones. The
-dependency runs one way: `CombatService` reads cultivation state and routes
-death loss back through `CultivationService`, and `CultivationService` does not
-know `CombatService` exists.
+Server modules require each other freely, one way only. `CombatService`,
+`AwarenessService` and `PersistenceService` all read from `CultivationService`;
+`CultivationService` knows about none of them. Anything that needs to react to a
+cultivation change polls for it rather than being called back — which is why
+`CombatService` rebuilds its actor by comparing stage index each tick.
+
+## The loop, end to end
+
+Every step below now exists in code. **None of it has been played.**
+
+1. Spawn at Lowgold (testers skip the proving ground; Lowgold is the bracket
+   that needs validating).
+2. Sense nodes within your range — the right-hand panel lists them nearest
+   first with distance, occupancy and a bearing arrow.
+3. Stand in one to cycle. Refinement fills; tiers roll over.
+4. At the refinement ceiling, the bar turns gold and the bar stops.
+5. A Prime node spawns and **every player on the server is told**, regardless of
+   range. Hold it until it drains to earn a catalyst.
+6. Press `B` to break through. Refusals explain themselves rather than doing
+   nothing.
+7. Fight with `1-4`. Same-bracket only. Dying costs 35% of a tier and never a
+   stage.
+8. Progress saves on leave, on shutdown, and every 90 seconds.
 
 ## What exists and is verified
 
 | Module | What it owns |
 |---|---|
-| `shared/Config` | All tuning: stages, refinement, node tiers, spawn weights, techniques, combat constants |
-| `shared/Progression` | Stage and refinement math, catalyst gate, the ratchet |
-| `shared/AuraNodes` | Spawn rolls, occupancy, capacity, decay, cycle rates, contest detection |
+| `shared/Config` | All tuning: stages, refinement, node tiers, spawn weights, techniques, combat, persistence |
+| `shared/Progression` | Stage and refinement math, catalyst gate, the ratchet, save sanitizing |
+| `shared/AuraNodes` | Spawn rolls, occupancy, capacity, decay, cycle rates, contest detection, sensing, telegraph scope |
 | `shared/Combat` | Resources, technique gating, buffs, mitigation, damage resolution, slot resolution |
-| `server/NodeService` | Field lifecycle and the node parts in Workspace |
-| `server/CultivationService` | Per-player state, cycling tick, catalyst grants, death loss |
-| `server/CombatService` | Actors, the UseTechnique remote, hit resolution, constructs, death, respawn |
-| `client/init.client` | HUD mirroring player attributes; keys 1-4 fire the remote |
+| `server/ArenaService` | Ground and spawn, if the place lacks them |
+| `server/NodeService` | Field lifecycle, node parts, spawn and drain hooks |
+| `server/CultivationService` | Per-player state, cycling tick, catalyst grants, death loss, breakthrough |
+| `server/CombatService` | Actors, UseTechnique, hit resolution, constructs, death, respawn |
+| `server/AwarenessService` | Per-player sensed-node feed and telegraph announcements |
+| `server/PersistenceService` | DataStore load and save, retries, autosave |
+| `client/init.client` | Status, sense and notice panels; keys 1-4 and B |
 
-**193 Lune assertions across three suites**, plus selene, stylua, `rojo build`
+**233 Lune assertions across three suites**, plus selene, stylua, `rojo build`
 and `luau-lsp analyze` all clean.
 
 The assertions worth not breaking:
 
 - intra-bracket time-to-kill advantage is **exactly 18%**
 - time-to-kill is **constant across brackets**
+- **finding outpaces fighting** — the sense-range spread across refinement is
+  strictly larger than the power spread, which is the pressure valve working
 - spawn distribution matches configured weights over 20,000 samples
 - a construct cannot kill from full over its whole duration, and is still worth
-  stepping out of — these two bounds are what pin `constructTickSeconds`
-- within a kind, a harder-hitting technique telegraphs longer
+  stepping out of — these two bounds pin `constructTickSeconds`
+- Prime announces to everyone regardless of range; common announces to nobody
+- a sanitized save always survives the functions that assert on their input
 
 ## What has never been run
 
-Still the headline. The pure logic is tested and the **Roblox binding layer has
-never executed** — it builds and typechecks, but no one has stood in a node and
-watched the bar move, and now no one has thrown a technique either. There is
-more untested binding than there was before, not less. Expect the first Studio
-session to surface bugs that nothing above would catch.
+**Everything that touches Roblox.** The pure rules are tested; the entire binding
+layer — six server modules and the client — has never executed. It builds and
+typechecks, which is not the same thing.
 
-Two things to know before that first run:
+Specific things worth watching on the first run, roughly in order of how likely
+they are to be wrong:
 
-- **The project tree has no ground and no spawn.** `Workspace` in
-  `default.project.json` sets only gravity. Use `rojo serve` and connect from a
-  Studio place that already has a Baseplate and a SpawnLocation; a place built
-  from `rojo build` alone will drop the player into the void.
-- The node field places nodes within a 220-stud radius of the origin at `y = 4`,
-  so the ground needs to reach that far.
+1. **Does a technique fire at all**, and does the HUD move when it does?
+2. **Striker aim.** The raycast runs from `HumanoidRootPart` along its
+   LookVector, which is the character's facing, *not* the camera's. In
+   shift-lock they agree; in free camera they do not. This probably needs the
+   camera vector sent from the client and validated server-side against a sane
+   angle — that is a design decision, not just a fix.
+3. **Bearing arrows.** Taken against the camera's own forward and right vectors,
+   so the handedness should be right, but nobody has looked at it.
+4. **Node spawn heights.** Nodes are placed at `y = 4` on flat ground. On a place
+   with terrain they will float or sink.
+5. **Whether the 0.4s global cooldown reads as rhythm or as lag.**
 
-Not built at all: DataStore persistence (state is in-memory and dies with the
-server), bracket-enforced matchmaking, the proving ground, telegraph
-announcements, and contest resolution.
+DataStores do not work in an unpublished place, or in Studio without *Enable
+Studio Access to API Services*. That is handled: the server warns once and runs
+in memory. **Persistence itself is therefore untested** — it needs a published
+place to exercise at all.
+
+Not built at all: bracket-enforced matchmaking, the proving ground as a distinct
+experience, contest resolution, and a loadout editor.
 
 ## What the last session added
 
-`server/CombatService`, wiring the finished combat rules to the engine:
+Everything needed to complete the loop, on top of the combat binding:
 
-- An actor per player, sized from their stage index and rebuilt on breakthrough.
-  The actor is authoritative; the Humanoid is a readout mirrored from it, and the
-  only thing read back is `Humanoid.Died`, so falling off the map costs the same
-  refinement a lost fight does.
-- `UseTechnique` carries a **slot name only**. `Combat.resolveSlot` — a new
-  function in the pure module, so the trust boundary is unit-tested — refuses
-  unknown slots, non-strings, empty slots and kind mismatches before anything
-  else runs.
-- Striker raycasts, Ruler sphere-queries with the caster's region applied, and
-  Enforcer resolves as the self-buff `Combat.use` already applied.
-- Cross-bracket damage refused via `Combat.canEngage` per target.
-- Death routes `Combat.deathLoss` through the new
-  `CultivationService.applyDeathLoss`, so cultivation state keeps one owner.
-  Respawn uses `Players.RespawnTime`.
+- **`ArenaService`** — the project tree ships no Workspace geometry, so a place
+  built from `rojo build` alone dropped the player into the void. Now it builds
+  a 700-stud plate and a spawn pad when the place lacks them. No spawn
+  forcefield: an invulnerability window at the one place everyone returns to
+  would have made the spawn a safe grind.
+- **`AwarenessService`** — sensing and telegraphs. `senseRange` had been a
+  computed stat with no gameplay effect at all, which meant the "veterans
+  out-*find* newcomers" valve was documented but absent. Filtering is
+  server-side.
+- **`PersistenceService`** — DataStore with retries. The rule that matters: **a
+  failed load never overwrites a save.** A player whose data could not be read is
+  marked unsaveable for the session rather than having their progress silently
+  replaced by a fresh state.
+- **Breakthrough is reachable.** `CultivationService.tryAdvance` had existed
+  since the first commit with nothing calling it, so the core loop could not be
+  completed. `B` now fires it, and every refusal reason has a sentence.
+- **`Progression.sanitizeState`** — saves outlive the config that wrote them.
 
-Three judgment calls worth knowing about, each reversible:
+Two bugs found by re-reading rather than by running:
 
-1. **Forger constructs were built rather than deferred.** Leaving them out would
-   have left two of three forger options dead and made the first playtest of the
-   loadout misleading. They are per-tick damage volumes with the damage
-   snapshotted at cast; `Config.Combat.constructTickSeconds` is new, and the two
-   test bounds above are what justify its value.
-2. **Windup is implemented** via `task.delay` between cast and effect. Cost and
-   cooldown are paid at cast; the effect is dropped if the caster dies during the
-   telegraph. Ignoring windup would have invalidated tempest's 1.8s telegraph,
-   which is load-bearing for its 140 damage.
-3. **Aura node parts are now `CanQuery = false`.** They are neon readouts, and
-   leaving them queryable let a common node body-block every Striker shot.
-
-## Next task: first Studio run
-
-Not more code. `rojo serve`, connect, and play it. Specifically worth watching:
-
-- Does a technique fire at all, and does the HUD move when it does?
-- Striker raycasts from `HumanoidRootPart` along its LookVector — does that
-  actually point where the camera does, or does it need the camera vector sent
-  from the client (which would then need validating against the character)?
-- Do constructs look like anything useful at an 18-stud radius?
-- Does the 0.4s global cooldown feel like a rhythm or like lag?
-
-Then, in likely order: DataStore persistence (the highest-risk unbuilt system),
-contest resolution, telegraph announcements.
+- `Humanoid.Died` was only connected when an actor already existed, so a player
+  whose state was still loading when their character spawned would never have
+  had a death handler. Death now resolves the stage at death time.
+- The node spawn hook compared list lengths, but `AuraNodes.step` culls before it
+  appends — so a tick that expired three nodes and spawned one would have
+  announced nothing. It compares ids now.
 
 ## Deferred, on purpose
 
@@ -137,16 +164,19 @@ contest resolution, telegraph announcements.
 | `Config.PrimeSpawnMode` | `random` / `scheduled` | `random` |
 
 Themed combat paths and AI/encounters are deferred. When paths arrive they
-should become a restricted, empowered subset of the existing technique pool —
-the pool was shaped to make that a metadata layer rather than a rewrite.
+should become a restricted, empowered subset of the existing technique pool.
 
-Loadouts are server-held but not yet changeable: every player gets
+Loadouts are server-held but not changeable: every player gets
 `Config.DefaultLoadout`, published to `Slot_<slot>` attributes so the client can
-label its keys. A loadout editor is the obvious next thing the remote needs.
+label its keys.
 
 ## Open design questions
 
-- What does losing a node fight actually cost, beyond the death loss?
+- **The first two minutes.** At Lowgold a tier is 9,000 progress and a stage is
+  ten of them — roughly three hours at a rare node's rate. That is probably right
+  for the endgame and certainly wrong for onboarding. The proving-ground stages
+  exist to absorb this and have never been played or tuned.
+- What does losing a node fight cost, beyond the death loss?
 - Does the Remnant mechanic (a kill dropping absorbable material) go in?
 - What absorbs passive cycling at the Truegold cap, where most playtime lives?
 - Should a breakthrough restore health and madra? It currently does, as a side

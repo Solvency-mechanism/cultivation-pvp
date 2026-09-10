@@ -11,6 +11,15 @@
         "$className": "Folder",
         "UseTechnique": {
           "$className": "RemoteEvent"
+        },
+        "Breakthrough": {
+          "$className": "RemoteEvent"
+        },
+        "Notice": {
+          "$className": "RemoteEvent"
+        },
+        "Sensed": {
+          "$className": "RemoteEvent"
         }
       },
       "Packages": {

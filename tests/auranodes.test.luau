@@ -160,6 +160,55 @@ local farFuture = 100000
 AuraNodes.step(Config, field, farFuture, stepRng, nextId, placer)
 eq("expired nodes culled, one respawned", #field, 1)
 
+--[[ Sensing. This is what turns sense range from a number on a HUD into a
+	mechanic: refinement raises it faster than it raises power, so a veteran's
+	real edge is finding nodes first rather than winning fights harder. ]]
+local function nodeAt(id: string, tier: string, x: number, z: number): AuraNodes.Node
+	return AuraNodes.create(Config, id, tier, { x = x, y = 0, z = z }, "open", 0)
+end
+
+do
+	local scattered = {
+		nodeAt("near", "common", 10, 0),
+		nodeAt("far", "common", 300, 0),
+		nodeAt("mid", "rare", 100, 0),
+	}
+	local origin = { x = 0, y = 0, z = 0 }
+
+	local found = AuraNodes.sensed(scattered, origin, 150, 0)
+	eq("sense range excludes what is out of range", #found, 2)
+	eq("sensed is nearest first", found[1].node.id, "near")
+	eq("second is the next nearest", found[2].node.id, "mid")
+	near("distance is measured, not bucketed", found[2].distance, 100, 1e-6)
+
+	eq("a blind cultivator senses nothing", #AuraNodes.sensed(scattered, origin, 0, 0), 0)
+	eq("everything is in range eventually", #AuraNodes.sensed(scattered, origin, 1000, 0), 3)
+	eq(
+		"range is a radius, not a box",
+		#AuraNodes.sensed({ nodeAt("diag", "common", 100, 100) }, origin, 140, 0),
+		0
+	)
+
+	-- A drained node is gone whether or not the field has been culled yet.
+	local drained = nodeAt("drained", "common", 5, 0)
+	drained.drained = true
+	eq("expired nodes are never sensed", #AuraNodes.sensed({ drained }, origin, 500, 0), 0)
+end
+
+--[[ Telegraph scope. Prime reaching everyone regardless of range is the reason
+	there is no safe grind, so it is worth pinning against a config edit. ]]
+do
+	local common = nodeAt("c", "common", 0, 0)
+	local rare = nodeAt("r", "rare", 0, 0)
+	local prime = nodeAt("p", "prime", 0, 0)
+
+	eq("common is never announced", AuraNodes.shouldAnnounce(Config, common, 1, 10000), false)
+	eq("rare reaches those in range", AuraNodes.shouldAnnounce(Config, rare, 50, 100), true)
+	eq("rare stops at the edge of range", AuraNodes.shouldAnnounce(Config, rare, 150, 100), false)
+	eq("prime reaches everyone", AuraNodes.shouldAnnounce(Config, prime, 99999, 0), true)
+	eq("prime reaches the blind", AuraNodes.shouldAnnounce(Config, prime, 0, 0), true)
+end
+
 print(`\n  passed: {passed}   failed: {failed}`)
 if failed > 0 then
 	for _, f in failures do

@@ -116,6 +116,86 @@ Progression.addProgress(Config, before, 99999)
 Progression.applyLoss(Config, before, 99999)
 eq("input state untouched by addProgress/applyLoss", before.tier, 1)
 
+--[[ Sense range is the one axis where refinement is allowed to compound, so
+	the veteran advantage in *finding* must outrun the 18% advantage in
+	fighting. If these ever cross, the pressure valve has closed. ]]
+do
+	local freshPower = Progression.effectivePower(Config, stateAt(LOWGOLD, 1, 0, 0))
+	local maxedPower =
+		Progression.effectivePower(Config, stateAt(LOWGOLD, Config.RefinementTiers, 0, 0))
+	local freshSense = Progression.senseRange(Config, stateAt(LOWGOLD, 1, 0, 0))
+	local maxedSense =
+		Progression.senseRange(Config, stateAt(LOWGOLD, Config.RefinementTiers, 0, 0))
+
+	check("sense range grows with refinement", maxedSense > freshSense)
+	check("finding outpaces fighting", (maxedSense / freshSense) > (maxedPower / freshPower))
+end
+
+--[[ Sanitizing stored state.
+
+	Saves outlive the config that wrote them, and refusing to load is worse than
+	losing a tier, so every branch has to land on a state the rest of this module
+	will accept without asserting. ]]
+do
+	local blank = Progression.newState()
+
+	for _, junk in { 5, "state", true } do
+		local state = Progression.sanitizeState(Config, junk)
+		eq("junk becomes a fresh stage", state.stageIndex, blank.stageIndex)
+		eq("junk becomes a fresh tier", state.tier, blank.tier)
+	end
+	eq(
+		"nil becomes a fresh state",
+		Progression.sanitizeState(Config, nil).stageIndex,
+		blank.stageIndex
+	)
+
+	local overflow = Progression.sanitizeState(
+		Config,
+		{ stageIndex = 999, tier = 999, progress = 1e12, catalysts = 5 }
+	)
+	eq("stage index is clamped to the ladder", overflow.stageIndex, TRUEGOLD)
+	eq("tier is clamped to the cap", overflow.tier, Config.RefinementTiers)
+	check(
+		"progress cannot exceed a tier",
+		overflow.progress <= Config.Stages[TRUEGOLD].perTierProgress
+	)
+	eq("valid catalysts survive", overflow.catalysts, 5)
+
+	local negative = Progression.sanitizeState(
+		Config,
+		{ stageIndex = -3, tier = 0, progress = -50, catalysts = -9 }
+	)
+	eq("stage index floors at one", negative.stageIndex, 1)
+	eq("tier floors at one", negative.tier, 1)
+	eq("negative progress becomes zero", negative.progress, 0)
+	eq("negative catalysts become zero", negative.catalysts, 0)
+
+	local nan = Progression.sanitizeState(Config, { stageIndex = 0 / 0, progress = 0 / 0 })
+	eq("NaN stage index falls back", nan.stageIndex, blank.stageIndex)
+	eq("NaN progress falls back", nan.progress, 0)
+
+	-- Stores hand back floats. A fractional stage index would index nothing.
+	local fractional = Progression.sanitizeState(Config, { stageIndex = 4.7, tier = 3.2 })
+	eq("fractional stage index floors", fractional.stageIndex, 4)
+	eq("fractional tier floors", fractional.tier, 3)
+
+	-- The real point: a sanitized state survives the functions that assert.
+	local restored = Progression.sanitizeState(
+		Config,
+		{ stageIndex = LOWGOLD, tier = 4, progress = 120, catalysts = 1 }
+	)
+	eq("a real save round-trips its stage", restored.stageIndex, LOWGOLD)
+	eq("a real save round-trips its tier", restored.tier, 4)
+	eq("a real save round-trips its progress", restored.progress, 120)
+	check("power is computable from it", Progression.effectivePower(Config, restored) > 0)
+	check(
+		"progress is addable to it",
+		Progression.addProgress(Config, restored, 10).state.progress > 120
+	)
+	check("loss is applicable to it", Progression.applyLoss(Config, restored, 50).progress >= 0)
+end
+
 print(`\n  passed: {passed}   failed: {failed}`)
 if failed > 0 then
 	for _, f in failures do
