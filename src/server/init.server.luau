@@ -50,6 +50,15 @@ CultivationService.setRefusalHandler(function(player: Player, reason: string)
 	AwarenessService.notify(player, "refused", NODE_REFUSAL_MESSAGES[reason] or reason)
 end)
 
+--[[ leaderstats: Roblox's built-in player list, for the same "advancement is
+	public and contested" reason PresenceService's own header already gives --
+	that pitch was only true of the one opponent standing in front of you.
+	CombatService owns the kill moment and PresenceService owns the tally;
+	neither requires the other, same shape as the refusal handler above. ]]
+CombatService.setKillHandler(function(killer: Player)
+	PresenceService.recordKill(killer)
+end)
+
 startService("CombatService", CombatService.start)
 startService("AwarenessService", AwarenessService.start)
 

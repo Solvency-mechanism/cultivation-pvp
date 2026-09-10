@@ -40,7 +40,21 @@ local STAGE_COLOR: { Color3 } = {
 local AURA_NAME = "CultivatorAura"
 local PLATE_NAME = "CultivatorPlate"
 
+--[[ Roblox's player list renders a folder literally named "leaderstats"
+	holding IntValue/StringValue children, and nothing else -- no UI to build,
+	no remote, no client code. "Advancement is public and contested" was true
+	of a single opponent standing in front of you and false of the rest of the
+	server: four friends in one place had no shared frame of reference for who
+	was ahead. Kills first (the social one -- what makes four friends talk to
+	each other), then Stage (the one fact that decides whether two players can
+	even fight), then Tier (progression within the bracket). ]]
+local LEADERSTATS_NAME = "leaderstats"
+local KILLS_STAT = "Kills"
+local STAGE_STAT = "Stage"
+local TIER_STAT = "Tier"
+
 local shown: { [number]: number } = {}
+local kills: { [number]: number } = {}
 
 local function stageColor(stageIndex: number): Color3
 	return STAGE_COLOR[stageIndex] or STAGE_COLOR[#STAGE_COLOR]
@@ -127,6 +141,62 @@ local function buildAura(root: BasePart, stageIndex: number, tier: number, color
 	emitter.Parent = attachment
 end
 
+--[[ Idempotent -- safe to call every time a player's presence is touched, not
+	just at join, so a leaderstats folder that failed to build once (or never
+	got the chance, if this service's own start was fault-isolated away) has
+	another chance to exist the next time anyone looks at this player. ]]
+local function ensureLeaderstats(player: Player): Folder
+	local existing = player:FindFirstChild(LEADERSTATS_NAME)
+	if existing and existing:IsA("Folder") then
+		return existing
+	end
+
+	local folder = Instance.new("Folder")
+	folder.Name = LEADERSTATS_NAME
+
+	local killsValue = Instance.new("IntValue")
+	killsValue.Name = KILLS_STAT
+	killsValue.Value = kills[player.UserId] or 0
+	killsValue.Parent = folder
+
+	local stageValue = Instance.new("StringValue")
+	stageValue.Name = STAGE_STAT
+	stageValue.Parent = folder
+
+	local tierValue = Instance.new("IntValue")
+	tierValue.Name = TIER_STAT
+	tierValue.Parent = folder
+
+	folder.Parent = player
+	return folder
+end
+
+local function updateLeaderstats(player: Player, state: Progression.State)
+	local folder = ensureLeaderstats(player)
+	local stage = Progression.getStage(Config, state)
+	local stageValue = folder:FindFirstChild(STAGE_STAT)
+	if stageValue and stageValue:IsA("StringValue") then
+		stageValue.Value = stage.name
+	end
+	local tierValue = folder:FindFirstChild(TIER_STAT)
+	if tierValue and tierValue:IsA("IntValue") then
+		tierValue.Value = state.tier
+	end
+end
+
+--[[ Wired from CombatService's injected kill handler in init.server.luau --
+	see this file's header for why PresenceService does not require
+	CombatService to learn this happened. ]]
+function PresenceService.recordKill(player: Player)
+	local total = (kills[player.UserId] or 0) + 1
+	kills[player.UserId] = total
+	local folder = ensureLeaderstats(player)
+	local killsValue = folder:FindFirstChild(KILLS_STAT)
+	if killsValue and killsValue:IsA("IntValue") then
+		killsValue.Value = total
+	end
+end
+
 local function apply(player: Player)
 	local state = CultivationService.getState(player)
 	local character = player.Character
@@ -145,12 +215,18 @@ local function apply(player: Player)
 	local color = stageColor(state.stageIndex)
 	buildAura(root, state.stageIndex, state.tier, color)
 	buildPlate(head, stage.name, state.tier, color)
+	updateLeaderstats(player, state)
 
 	-- Packed so one comparison catches either axis changing.
 	shown[player.UserId] = state.stageIndex * 1000 + state.tier
 end
 
 function PresenceService.onPlayerAdded(player: Player)
+	ensureLeaderstats(player)
+	local state = CultivationService.getState(player)
+	if state then
+		updateLeaderstats(player, state)
+	end
 	player.CharacterAppearanceLoaded:Connect(function()
 		shown[player.UserId] = nil
 	end)
@@ -158,6 +234,7 @@ end
 
 function PresenceService.onPlayerRemoving(player: Player)
 	shown[player.UserId] = nil
+	kills[player.UserId] = nil
 end
 
 --[[ Polled rather than pushed, for the same reason CombatService polls: it

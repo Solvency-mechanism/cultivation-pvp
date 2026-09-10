@@ -48,6 +48,20 @@ local impactRemote: RemoteEvent? = nil
 local constructCounter = 0
 local constructFolder: Folder? = nil
 
+--[[ Fired once per confirmed kill, with the killer only -- the victim side of
+	a kill already has AwarenessService.notify's "death" line, and this exists
+	for whoever wants to tally the other side of it (PresenceService's
+	leaderstats). Injected rather than required directly: CombatService is a
+	leaf other services read from, and it should stay that way rather than
+	pick up a reason to know PresenceService exists. Same shape
+	CultivationService.setRefusalHandler already uses for the identical
+	problem. ]]
+local killHandler: ((Player) -> ())? = nil
+
+function CombatService.setKillHandler(handler: (Player) -> ())
+	killHandler = handler
+end
+
 -- A refused request still costs the server work. The global cooldown already
 -- caps legitimate use at one per 0.4s; this only blunts a flood of rejects.
 local MIN_REQUEST_INTERVAL = 0.05
@@ -297,6 +311,9 @@ local function handleDeath(player: Player, attackerActor: Combat.Actor?)
 			a percentage does not. ]]
 		local lossAmount = math.floor(loss)
 		if killer then
+			if killHandler then
+				killHandler(killer)
+			end
 			-- DisplayName, not Name: interface's nameplates and target frame
 			-- both read DisplayName, and a notice naming someone by their
 			-- username instead would be a different person to look for mid-fight.
