@@ -79,10 +79,11 @@ function ArenaService.start()
 		buildSpawn()
 	end
 
-	-- Falling off a 700-stud plate should not be a silent, permanent loss of the
-	-- character; the void kills, the death handler charges for it, and respawn
-	-- puts you back on the pad.
-	Workspace.FallenPartsDestroyHeight = -120
+	-- Deliberately not setting Workspace.FallenPartsDestroyHeight: it carries the
+	-- Plugin capability and a game script writing it throws, which took down the
+	-- whole server bootstrap on the first Studio run. The engine default already
+	-- destroys fallen parts, and falling kills the character, which is all the
+	-- death handler needs.
 
 	print(`[arena] ready -- {#Config.Stages} stages, ground {groundSize()} studs`)
 end

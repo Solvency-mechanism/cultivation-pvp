@@ -12,11 +12,28 @@ local CultivationService = require(script.CultivationService)
 local NodeService = require(script.NodeService)
 local PersistenceService = require(script.PersistenceService)
 
-ArenaService.start()
-PersistenceService.start()
+--[[ Fault-isolated startup.
+
+	On the first Studio run a single unwritable property in ArenaService threw
+	and took every service after it with it -- no persistence, no combat, no
+	awareness, and no PlayerAdded handler, from one line. A service that cannot
+	start should be loud and survivable, not silently fatal to the rest. ]]
+local function startService(name: string, start: () -> ())
+	-- pcall's result arity follows its callee, and these return nothing, so the
+	-- error value has to be asked for explicitly.
+	local protectedStart = start :: () -> any
+	local ok, err = pcall(protectedStart)
+	if not ok then
+		warn(`[boot] {name} failed to start: {err}`)
+	end
+	return ok
+end
+
+startService("ArenaService", ArenaService.start)
+startService("PersistenceService", PersistenceService.start)
 NodeService.setDrainedHandler(CultivationService.onNodeDrained)
-CombatService.start()
-AwarenessService.start()
+startService("CombatService", CombatService.start)
+startService("AwarenessService", AwarenessService.start)
 
 --[[ Joining yields on the data store, so everything downstream of cultivation
 	state has to tolerate a player who does not have one yet. CombatService and
