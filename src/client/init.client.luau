@@ -256,6 +256,26 @@ madraRow.BackgroundTransparency = 1
 madraRow.Parent = vitals
 local _madraBack, madraFill = bar(madraRow, madraHeight, MADRA)
 
+--[[ The resource is named, and health is not.
+
+	Moving the numbers to the ends of the bars dropped the word the old HUD
+	carried -- it read `madra 174 / 200`, this read `174 / 200` -- and that was a
+	real loss rather than a tidy-up. A red bar that empties when you are hit
+	needs no label in any game anyone has played. "Madra" is a word from this
+	game's own fiction, on an unlabelled blue bar, with the cost on every slot a
+	bare number in the same blue: colour was carrying the entire meaning of a
+	term nobody arrives knowing.
+
+	So the bar is labelled and the slot cost is not. Once the bar says MADRA in
+	this blue, the blue number on a technique is joined to it by colour, which is
+	the association the palette was built to make -- and a unit printed four
+	times across the action bar would cost more room than it buys. ]]
+local madraLabel = caption(madraRow, text(VITALS.valueTextSize) - 1, TEXT_DIM, true)
+madraLabel.Size = UDim2.new(1, -px(12), 1, 0)
+madraLabel.Position = UDim2.fromOffset(px(6), 0)
+madraLabel.ZIndex = 3
+madraLabel.Text = "MADRA"
+
 local madraValue = caption(madraRow, text(VITALS.valueTextSize) - 1, TEXT_DIM, true)
 madraValue.Size = UDim2.new(1, -px(6), 1, 0)
 madraValue.Position = UDim2.fromOffset(px(6), 0)
