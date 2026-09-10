@@ -119,6 +119,7 @@ type Plate = {
 	castFill: Frame,
 	castLabel: TextLabel,
 	character: Model,
+	head: BasePart,
 }
 
 local plates: { [number]: Plate } = {}
@@ -255,14 +256,6 @@ local function buildPlate(target: Player, character: Model, head: BasePart): Pla
 	castLabel.Parent = castRow
 	stroked(castLabel)
 
-	-- PresenceService's plate steps aside. Disabled, not destroyed: its own tick
-	-- rebuilds a plate it cannot find, and fighting it every frame would be a
-	-- fine way to spend a playtest.
-	local serverPlate = character:FindFirstChild(SERVER_PLATE_NAME, true)
-	if serverPlate and serverPlate:IsA("BillboardGui") then
-		serverPlate.Enabled = false
-	end
-
 	return {
 		gui = gui,
 		name = nameLabel,
@@ -272,7 +265,32 @@ local function buildPlate(target: Player, character: Model, head: BasePart): Pla
 		castFill = castFill,
 		castLabel = castLabel,
 		character = character,
+		head = head,
 	}
+end
+
+--[[ Stand PresenceService's plate down, every frame rather than once at build.
+
+	Doing it once did not work, and the reason is a race this could not have been
+	reasoned out of without two clients on screen: PresenceService *polls*, so its
+	plate is frequently created after ours, and a one-shot disable at build time
+	finds nothing to disable. Worse, `PresenceService.apply` destroys and rebuilds
+	the plate whenever stage or tier changes, so even a correctly-timed disable
+	would come undone at the next breakthrough.
+
+	Disabled rather than destroyed, still: its own tick rebuilds a plate it cannot
+	find, so destroying it would start a fight that runs every tick for the rest
+	of the session. Setting a property that is already set costs nothing, and if
+	anything in this module throws, one property brings the original plate back.
+
+	Looked up non-recursively on the head, which is where PresenceService parents
+	it -- a recursive search over a whole character every frame for every player
+	is not a thing to do sixty times a second. ]]
+local function standDownServerPlate(plate: Plate)
+	local serverPlate = plate.head:FindFirstChild(SERVER_PLATE_NAME)
+	if serverPlate and serverPlate:IsA("BillboardGui") and serverPlate.Enabled then
+		serverPlate.Enabled = false
+	end
 end
 
 local function dropPlate(userId: number)
@@ -312,6 +330,8 @@ local function ensurePlate(target: Player)
 end
 
 local function refresh(target: Player, plate: Plate)
+	standDownServerPlate(plate)
+
 	local health = target:GetAttribute("Health")
 	local maxHealth = target:GetAttribute("MaxHealth")
 	local fraction = InterfaceSpec.fraction(

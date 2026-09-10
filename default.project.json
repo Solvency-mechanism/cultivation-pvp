@@ -12,6 +12,9 @@
         "UseTechnique": {
           "$className": "RemoteEvent"
         },
+        "SetLoadout": {
+          "$className": "RemoteEvent"
+        },
         "Breakthrough": {
           "$className": "RemoteEvent"
         },

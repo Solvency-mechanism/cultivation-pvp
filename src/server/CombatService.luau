@@ -16,6 +16,7 @@ local Workspace = game:GetService("Workspace")
 local Combat = require(ReplicatedStorage.Shared.Combat)
 local Config = require(ReplicatedStorage.Shared.Config)
 local Progression = require(ReplicatedStorage.Shared.Progression)
+local AwarenessService = require(script.Parent.AwarenessService)
 local CultivationService = require(script.Parent.CultivationService)
 local NodeService = require(script.Parent.NodeService)
 
@@ -543,6 +544,63 @@ local function onUseTechnique(player: Player, slot: unknown, suppliedAim: unknow
 	end
 end
 
+--[[ Change one slot's technique. The client sends slot + techId and nothing
+	else -- the same register `UseTechnique` already uses for slot + aim.
+	Every check here is a trust-boundary check: known slot, known technique,
+	the technique's kind matches the slot, the player is alive, and the
+	technique currently occupying the slot is not mid-cooldown. That last one
+	is the one real exploit swapping opens up: without it a player could hot-
+	swap away from a technique the instant it goes on cooldown and install a
+	fresh one in its place, cycling through every technique of a kind almost
+	as fast as the global cooldown allows instead of waiting each one out. ]]
+local function onSetLoadout(player: Player, slot: unknown, techId: unknown)
+	local loadout = loadouts[player.UserId]
+	if not loadout then
+		return
+	end
+
+	if type(slot) ~= "string" then
+		return
+	end
+	local isKnownSlot = false
+	for _, valid in Config.LoadoutSlots do
+		if slot == valid then
+			isKnownSlot = true
+			break
+		end
+	end
+	if not isKnownSlot then
+		return
+	end
+
+	if type(techId) ~= "string" then
+		return
+	end
+	local tech = Config.Techniques[techId]
+	if not tech or tech.kind ~= slot then
+		return
+	end
+
+	local actor = ensureActor(player)
+	if not actor or actor.health <= 0 then
+		AwarenessService.notify(player, "refused", "You cannot change your loadout while dead.")
+		return
+	end
+
+	local now = os.clock()
+	local outgoingId = loadout[slot]
+	local outgoingReadyAt = if outgoingId then actor.cooldowns[outgoingId] else nil
+	if outgoingReadyAt and now < outgoingReadyAt then
+		local outgoingTech = Config.Techniques[outgoingId]
+		local name = if outgoingTech then outgoingTech.name else outgoingId
+		AwarenessService.notify(player, "refused", `{name} is still cooling.`)
+		return
+	end
+
+	loadout[slot] = techId
+	player:SetAttribute("Slot_" .. slot, techId)
+end
+
 local function onCharacterAdded(player: Player)
 	dying[player.UserId] = nil
 	actors[player.UserId] = nil
@@ -654,6 +712,13 @@ function CombatService.start()
 
 	useTechnique.OnServerEvent:Connect(function(player: Player, slot: unknown, aim: unknown)
 		onUseTechnique(player, slot, aim)
+	end)
+
+	local setLoadout = remotes:WaitForChild("SetLoadout")
+	assert(setLoadout:IsA("RemoteEvent"), "SetLoadout must be a RemoteEvent")
+
+	setLoadout.OnServerEvent:Connect(function(player: Player, slot: unknown, techId: unknown)
+		onSetLoadout(player, slot, techId)
 	end)
 end
 

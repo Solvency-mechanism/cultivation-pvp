@@ -431,6 +431,18 @@ for index = 1, slotCount do
 	cost.TextXAlignment = Enum.TextXAlignment.Center
 	cost.ZIndex = 4
 
+	--[[ The swap affordance. A player who is never told a slot can be changed
+		will conclude every character in this game is the same one -- which is
+		the exact opposite of what a shared pool of twelve techniques across four
+		slots is for. A dim glyph in the corner is the cheapest possible way to
+		say "this is a thing, not a label". ]]
+	local swap = caption(root, text(SLOT.keyTextSize) - 1, TEXT_FAINT, true)
+	swap.Size = UDim2.fromOffset(px(14), px(12))
+	swap.Position = UDim2.new(1, -px(16), 0, px(4))
+	swap.TextXAlignment = Enum.TextXAlignment.Right
+	swap.ZIndex = 4
+	swap.Text = "\u{21C4}"
+
 	local countdown = caption(root, text(SLOT.countdownTextSize), TEXT, true)
 	countdown.Size = UDim2.fromScale(1, 1)
 	countdown.TextXAlignment = Enum.TextXAlignment.Center
@@ -1218,6 +1230,16 @@ local CULTIVATION_ATTRIBUTES = {
 }
 local VITAL_ATTRIBUTES = { "Health", "MaxHealth", "Madra", "MaxMadra" }
 
+--[[ A breakthrough rebuilds the server's actor with genuinely empty cooldowns,
+	but the local prediction table knew nothing about it -- so a slot could sit
+	there showing up to twenty seconds of Tempest cooldown that the server would
+	have fired instantly. Self-correcting and cosmetic, except that it landed on
+	the single most triumphant moment in the game. ]]
+player:GetAttributeChangedSignal("StageIndex"):Connect(function()
+	table.clear(cooldownUntil)
+	gcdUntil = 0
+end)
+
 for _, attribute in CULTIVATION_ATTRIBUTES do
 	player:GetAttributeChangedSignal(attribute):Connect(refreshCultivation)
 end
@@ -1240,6 +1262,13 @@ local sensed = remotes:WaitForChild("Sensed") :: RemoteEvent
 local notice = remotes:WaitForChild("Notice") :: RemoteEvent
 local techniqueFired = remotes:WaitForChild("TechniqueFired") :: RemoteEvent
 local castStarted = remotes:WaitForChild("CastStarted") :: RemoteEvent
+
+--[[ Looked up without waiting, unlike every remote above it. `SetLoadout` is
+	landing from the combat workstream in a separate change, and a `WaitForChild`
+	on a remote that has not shipped yet would hang this script forever -- taking
+	the entire HUD with it, to add a feature. Absent, cycling simply does
+	nothing; present, it works. Nothing else in this file depends on it. ]]
+local setLoadout = remotes:FindFirstChild("SetLoadout")
 
 local latest: { any } = {}
 sensed.OnClientEvent:Connect(function(nodes: { any })
@@ -1384,6 +1413,64 @@ local function fireSlot(slot: string)
 	useTechnique:FireServer(slot, if camera then camera.CFrame.LookVector else nil)
 end
 
+--[[ Loadout cycling, without a picker.
+
+	Every player has been running the identical character -- `CombatService`
+	clones `Config.DefaultLoadout` once and nothing ever writes to that table
+	again -- so eight of the twelve finished techniques have never been in
+	anyone's hands. `Config`'s own comment calls 81 loadouts the point of the
+	shared pool, and that entire axis was dead.
+
+	A picker panel is the obvious answer and the wrong one this afternoon: it is
+	a new screen, a new focus state and a new thing to explain to four people who
+	have never played. Instead the action bar *is* the picker -- Shift and a slot
+	key steps that slot to the next technique of its kind, and the slot relabels
+	itself off the `Slot_<slot>` attribute the server publishes back. No new
+	screen at all.
+
+	Options are enumerated from the replicated `Config`, ordered by madra cost so
+	cycling reads cheap-to-dear rather than in hash order. That client-side guess
+	only decides what to *ask for*; the server validates the slot, the technique,
+	the kind match, and whether the technique being swapped away is mid-cooldown
+	-- otherwise swapping would be a free cooldown reset. ]]
+local optionsBySlot: { [string]: { string } } = {}
+for _, slot in slotNames do
+	local options: { string } = {}
+	for id, tech in Config.Techniques do
+		if tech.kind == slot then
+			table.insert(options, id)
+		end
+	end
+	table.sort(options, function(a: string, b: string): boolean
+		local left, right = Config.Techniques[a], Config.Techniques[b]
+		if left.madraCost ~= right.madraCost then
+			return left.madraCost < right.madraCost
+		end
+		-- Ties broken by id so the order is stable across clients and sessions.
+		return a < b
+	end)
+	optionsBySlot[slot] = options
+end
+
+local function cycleSlot(slot: string)
+	local options = optionsBySlot[slot]
+	if not options or #options < 2 then
+		return
+	end
+	local current = player:GetAttribute("Slot_" .. slot)
+	local index = 0
+	for position, id in options do
+		if id == current then
+			index = position
+			break
+		end
+	end
+	local nextId = options[(index % #options) + 1]
+	if nextId and nextId ~= current and setLoadout and setLoadout:IsA("RemoteEvent") then
+		(setLoadout :: RemoteEvent):FireServer(slot, nextId)
+	end
+end
+
 local SLOT_KEYS: { [Enum.KeyCode]: string } = {}
 for index, slot in slotNames do
 	local keyCode = KEY_CODES[index]
@@ -1396,6 +1483,13 @@ for _, widget in slotWidgets do
 	widget.root.Activated:Connect(function()
 		dismissCard()
 		fireSlot(widget.slot)
+	end)
+	--[[ Right-click cycles the slot, as a second route to the same thing the
+		Shift chord does. Two ways in, because a player who never finds either
+		concludes every character in this game is identical. ]]
+	widget.root.MouseButton2Click:Connect(function()
+		dismissCard()
+		cycleSlot(widget.slot)
 	end)
 end
 
@@ -1410,7 +1504,15 @@ UserInputService.InputBegan:Connect(function(input: InputObject, processed: bool
 	end
 	local slot = SLOT_KEYS[input.KeyCode]
 	if slot then
-		fireSlot(slot)
+		-- Shift and a slot key swaps the technique in it rather than casting it.
+		if
+			UserInputService:IsKeyDown(Enum.KeyCode.LeftShift)
+			or UserInputService:IsKeyDown(Enum.KeyCode.RightShift)
+		then
+			cycleSlot(slot)
+		else
+			fireSlot(slot)
+		end
 	elseif input.KeyCode == Enum.KeyCode.B then
 		breakthrough:FireServer()
 	end
