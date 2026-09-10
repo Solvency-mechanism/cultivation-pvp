@@ -33,6 +33,23 @@ end
 startService("ArenaService", ArenaService.start)
 startService("PersistenceService", PersistenceService.start)
 NodeService.setDrainedHandler(CultivationService.onNodeDrained)
+
+--[[ Capacity refusal was completely silent: a player standing inside a full
+	node earned bare-ground rate with no explanation and nothing to tell them
+	why. `CultivationService` cannot call `AwarenessService` directly --
+	`AwarenessService` already requires `CultivationService`, so the reverse
+	require would be a cycle -- so this is the same injected-handler shape
+	`setDrainedHandler` above already uses. `CultivationService.tick` itself
+	debounces so this only fires on the transition into refused, not once a
+	tick for as long as the player stands there. ]]
+local NODE_REFUSAL_MESSAGES: { [string]: string } = {
+	at_capacity = "This node already feeds three.",
+	expired = "That node has drained.",
+}
+CultivationService.setRefusalHandler(function(player: Player, reason: string)
+	AwarenessService.notify(player, "refused", NODE_REFUSAL_MESSAGES[reason] or reason)
+end)
+
 startService("CombatService", CombatService.start)
 startService("AwarenessService", AwarenessService.start)
 

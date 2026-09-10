@@ -654,7 +654,20 @@ local NOTICE = InterfaceSpec.Notice
 local noticeFrame = Instance.new("Frame")
 noticeFrame.AnchorPoint = Vector2.new(0.5, 0)
 noticeFrame.Position = UDim2.new(0.5, 0, 0, px(NOTICE.top))
-noticeFrame.Size = UDim2.fromOffset(px(NOTICE.width), px(NOTICE.height))
+--[[ The notice grows to fit rather than clipping.
+
+	It was a fixed 460x26 with a single unwrapped line, which was fine while
+	every notice was a short authored sentence. The kill and death copy makes
+	that unsafe: a death line carries a player's name *and* the refinement
+	number, at 1.34x weight, and a long display name pushes it past the width
+	with no wrap and no truncation -- so the one message the player most needs to
+	read is the one that would have run off the panel.
+
+	Wrapped, with the frame sized from its contents. The longest realistic death
+	line takes two rows and the panel grows by one row to hold it; every ordinary
+	notice is unchanged, because one line still measures as one line. ]]
+noticeFrame.Size = UDim2.fromOffset(px(NOTICE.width), 0)
+noticeFrame.AutomaticSize = Enum.AutomaticSize.Y
 noticeFrame.BackgroundColor3 = PANEL
 noticeFrame.BackgroundTransparency = 0.2
 noticeFrame.BorderSizePixel = 0
@@ -662,8 +675,17 @@ noticeFrame.Visible = false
 noticeFrame.Parent = screen
 corner(noticeFrame, 3)
 
+local noticePadding = Instance.new("UIPadding")
+noticePadding.PaddingTop = UDim.new(0, px(5))
+noticePadding.PaddingBottom = UDim.new(0, px(5))
+noticePadding.PaddingLeft = UDim.new(0, px(10))
+noticePadding.PaddingRight = UDim.new(0, px(10))
+noticePadding.Parent = noticeFrame
+
 local noticeLabel = caption(noticeFrame, text(NOTICE.textSize), CEILING, true)
-noticeLabel.Size = UDim2.fromScale(1, 1)
+noticeLabel.Size = UDim2.fromScale(1, 0)
+noticeLabel.AutomaticSize = Enum.AutomaticSize.Y
+noticeLabel.TextWrapped = true
 noticeLabel.TextXAlignment = Enum.TextXAlignment.Center
 
 -- ===================================================================

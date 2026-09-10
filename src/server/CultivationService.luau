@@ -18,6 +18,9 @@ local CultivationService = {}
 
 local states: { [number]: Progression.State } = {}
 local occupying: { [number]: string } = {}
+local lastRefusalNodeId: { [number]: string } = {}
+
+local refusalHandler: ((Player, string) -> ())? = nil
 
 local function publish(player: Player)
 	local state = states[player.UserId]
@@ -38,6 +41,20 @@ end
 
 function CultivationService.getState(player: Player): Progression.State?
 	return states[player.UserId]
+end
+
+--[[ Fired once per refused occupancy attempt -- never once per tick, see
+	`tick` below -- with the raw reason string `AuraNodes.addOccupant` already
+	returns ("at_capacity", "expired"). The caller decides how to phrase it,
+	same as `CultivationService.tryAdvance`'s reason does for breakthrough.
+
+	Injected from boot rather than required directly: `AwarenessService`
+	already requires `CultivationService` (to read sense range for spawn
+	announcements), so this file requiring `AwarenessService` back would be a
+	cycle. This is the same shape `NodeService.setDrainedHandler` already
+	uses to solve the identical problem. ]]
+function CultivationService.setRefusalHandler(handler: (Player, string) -> ())
+	refusalHandler = handler
 end
 
 --[[ A brand new cultivator. Testers start in the Gold game rather than the
@@ -66,6 +83,7 @@ function CultivationService.onPlayerRemoving(player: Player)
 	end
 	states[player.UserId] = nil
 	occupying[player.UserId] = nil
+	lastRefusalNodeId[player.UserId] = nil
 end
 
 local function releaseFrom(player: Player, nodeId: string)
@@ -108,15 +126,30 @@ function CultivationService.tick(deltaSeconds: number, now: number)
 			releaseFrom(player, previous)
 		end
 
+		-- A refusal is told once per node, not once per tick -- tick runs
+		-- every cycleTickSeconds and would otherwise spam for as long as the
+		-- player stands there. Clearing the memory the moment they are no
+		-- longer standing on the node that refused them (walked off, or onto
+		-- a different one) is what lets a later refusal speak again.
+		local rememberedRefusal = lastRefusalNodeId[player.UserId]
+		if rememberedRefusal and (not node or node.id ~= rememberedRefusal) then
+			lastRefusalNodeId[player.UserId] = nil
+		end
+
 		local region = "open"
 		if node then
 			region = node.region
 			if occupying[player.UserId] ~= node.id then
-				local ok = AuraNodes.addOccupant(Config, node, userIdStr, now)
+				local ok, reason = AuraNodes.addOccupant(Config, node, userIdStr, now)
 				if ok then
 					occupying[player.UserId] = node.id
+					lastRefusalNodeId[player.UserId] = nil
 				else
 					-- Refused (full or expired): cycle at bare ground rate.
+					if refusalHandler and lastRefusalNodeId[player.UserId] ~= node.id then
+						lastRefusalNodeId[player.UserId] = node.id
+						refusalHandler(player, reason or "refused")
+					end
 					node = nil
 					region = "open"
 				end
