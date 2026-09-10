@@ -55,6 +55,7 @@ so the same files load in Roblox (`require(script.Parent.X)`) and under Lune
 ```sh
 lune run tests/progression.test     # 31 assertions
 lune run tests/auranodes.test       # 43 assertions
+lune run tests/combat.test          # 119 assertions
 selene src tests                    # lint
 stylua src tests                    # format
 rojo build default.project.json --output starter-game.rbxlx
@@ -75,4 +76,13 @@ luau-lsp analyze --sourcemap=sourcemap.json --definitions=globalTypes.d.luau --b
 Players spawn straight into **Lowgold** — the bracket that needs validating.
 Glowing spheres are aura nodes: blue common, purple rare, gold prime. Stand
 inside one to cycle. Live state is published to player attributes (`Stage`,
-`Tier`, `Progress`, `Catalysts`, `Power`, `SenseRange`, `AtCeiling`).
+`Tier`, `Progress`, `Catalysts`, `Power`, `SenseRange`, `AtCeiling`, `Health`,
+`Madra`).
+
+Keys **1-4** fire the four loadout slots (striker, enforcer, forger, ruler). The
+client sends only the slot name; the server resolves it against the loadout it
+holds and owns every cost, cooldown and damage decision.
+
+The project tree defines no ground and no spawn, so connect Rojo to a Studio
+place that already has a Baseplate and a SpawnLocation. Nodes spawn within 220
+studs of the origin.

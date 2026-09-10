@@ -219,6 +219,84 @@ local afterDeath = Progression.applyLoss(Config, stateAt(LOWGOLD, 1), loss)
 eq("death never demotes the stage", afterDeath.stageIndex, LOWGOLD)
 eq("death floors at the stage bottom", afterDeath.tier, 1)
 
+-- Slot resolution is the trust boundary: the client sends a slot name, and the
+-- server must refuse everything that is not one of its own four slots.
+do
+	local techId, reason = Combat.resolveSlot(Config, Config.DefaultLoadout, "striker")
+	eq("resolves a real slot", techId, Config.DefaultLoadout.striker)
+	eq("resolve reason is ok", reason, "ok")
+end
+for _, bad in { "damage", "Striker", "", "../src/shared/Config" } do
+	eq(`refuses slot "{bad}"`, Combat.resolveSlot(Config, Config.DefaultLoadout, bad), nil)
+end
+for _, bad in { 1, true, {} } do
+	eq(
+		`refuses non-string slot {typeof(bad)}`,
+		Combat.resolveSlot(Config, Config.DefaultLoadout, bad),
+		nil
+	)
+end
+eq("refuses a nil slot", Combat.resolveSlot(Config, Config.DefaultLoadout, nil), nil)
+do
+	-- A loadout whose technique does not match its slot kind is refused rather
+	-- than silently firing a Ruler out of the Striker key.
+	local crossed =
+		{ striker = "tempest", enforcer = "surge", forger = "barrier", ruler = "siphon" }
+	local techId, reason = Combat.resolveSlot(Config, crossed, "striker")
+	eq("refuses a kind mismatch", techId, nil)
+	eq("kind mismatch is named", reason, "slot_kind_mismatch")
+end
+
+-- A fresh player must have no dead key.
+for _, slot in Config.LoadoutSlots do
+	check(
+		`default loadout fills {slot}`,
+		Combat.resolveSlot(Config, Config.DefaultLoadout, slot) ~= nil
+	)
+end
+
+--[[ Constructs are zoning pressure, not kill buttons. Their damage is per tick,
+	so the tick cadence decides whether standing in one is a mistake or a death
+	sentence. If either bound trips, constructTickSeconds is wrong. ]]
+local tickSeconds = Config.Combat.constructTickSeconds
+check("construct tick cadence is set", tickSeconds > 0)
+for _, techId in { "caltrops", "sentry" } do
+	local tech = Config.Techniques[techId]
+	local owner = Combat.newActor(Config, "construct-owner", LOWGOLD)
+	local perTick = Combat.outgoingDamage(Config, owner, techId, powerAt(LOWGOLD, 1), "open", 0)
+	local total = perTick * math.floor(tech.buffDuration / tickSeconds)
+	check(`{techId} cannot kill from full over its whole duration`, total < hp)
+	check(`{techId} is worth stepping out of`, total > hp * 0.2)
+end
+
+-- Reach is ordered the way the kinds are described: Striker pokes from range,
+-- Ruler blankets an area, Forger drops something at its feet, Enforcer is self.
+local ranges = Config.Combat.ranges
+check("striker outreaches ruler", ranges.striker > ranges.ruler)
+check("ruler outreaches forger", ranges.ruler > ranges.forger)
+eq("enforcer is self only", ranges.enforcer, 0)
+check("respawn delay is set", Config.Combat.respawnSeconds > 0)
+
+--[[ Windup is the counterplay budget: the harder a technique hits, the longer it
+	telegraphs. Checked per kind, since kinds sit on different damage scales. ]]
+for _, kind in { "striker", "ruler" } do
+	local pool = {}
+	for _, tech in Config.Techniques do
+		if tech.kind == kind then
+			table.insert(pool, tech)
+		end
+	end
+	table.sort(pool, function(left, right)
+		return left.damage < right.damage
+	end)
+	for i = 2, #pool do
+		check(
+			`{kind}: {pool[i].id} telegraphs longer than {pool[i - 1].id}`,
+			pool[i].windup > pool[i - 1].windup
+		)
+	end
+end
+
 print(`\n  passed: {passed}   failed: {failed}`)
 if failed > 0 then
 	for _, f in failures do

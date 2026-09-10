@@ -74,6 +74,10 @@ local function buildPart(node: AuraNodes.Node): BasePart
 	part.Name = node.id
 	part.Anchored = true
 	part.CanCollide = false
+	-- Nodes are a readout of field state, not physical objects. Leaving them
+	-- queryable would let a common node body-block every Striker technique.
+	part.CanQuery = false
+	part.CanTouch = false
 	part.Shape = Enum.PartType.Ball
 	part.Material = Enum.Material.Neon
 	part.Size = Vector3.new(size, size, size)

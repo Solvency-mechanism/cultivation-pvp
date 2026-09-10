@@ -129,6 +129,20 @@ function CultivationService.tick(deltaSeconds: number, now: number)
 	end
 end
 
+--[[ Apply the refinement loss from a combat death.
+
+	CombatService computes the amount and Progression owns the ratchet; the
+	write is routed through here so cultivation state has exactly one owner and
+	the publish cannot be forgotten. ]]
+function CultivationService.applyDeathLoss(player: Player, amount: number)
+	local state = states[player.UserId]
+	if not state then
+		return
+	end
+	states[player.UserId] = Progression.applyLoss(Config, state, amount)
+	publish(player)
+end
+
 --[[ Attempt a breakthrough. Returns ok, reason so a UI can explain refusals. ]]
 function CultivationService.tryAdvance(player: Player): (boolean, string)
 	local state = states[player.UserId]

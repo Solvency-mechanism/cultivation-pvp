@@ -212,6 +212,12 @@ Config.Combat = {
 		enforcer = 0,
 	},
 	respawnSeconds = 5,
+	-- Forger constructs damage on an interval rather than continuously, so a
+	-- technique's `damage` reads as damage *per tick*. At 2s, caltrops over its
+	-- full 10s window is 5 ticks (150) and sentry over 12s is 6 (144) -- around
+	-- a third of a Lowgold pool for standing still in a hazard you can walk out
+	-- of. Zoning pressure, not a kill button.
+	constructTickSeconds = 2.0,
 }
 
 --[[

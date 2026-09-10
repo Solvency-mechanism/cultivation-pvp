@@ -212,6 +212,44 @@ function Combat.deathLoss(config: any, stageIndex: number): number
 	return stage.perTierProgress * config.Combat.deathLossTierFraction
 end
 
+--[[ Resolve a client-supplied slot name against the server-held loadout.
+
+	This is the trust boundary. The client sends a slot name and nothing else,
+	so an unknown slot, an empty slot, an unknown technique or a technique whose
+	kind does not match its slot is refused here -- in a module that is unit
+	tested -- rather than deeper inside the service.  ]]
+function Combat.resolveSlot(
+	config: any,
+	loadout: { [string]: string },
+	slot: unknown
+): (string?, string)
+	if type(slot) ~= "string" then
+		return nil, "invalid_slot"
+	end
+	local isKnownSlot = false
+	for _, valid in config.LoadoutSlots do
+		if slot == valid then
+			isKnownSlot = true
+			break
+		end
+	end
+	if not isKnownSlot then
+		return nil, "unknown_slot"
+	end
+	local techId = loadout[slot]
+	if not techId then
+		return nil, "empty_slot"
+	end
+	local tech = config.Techniques[techId]
+	if not tech then
+		return nil, "unknown_technique"
+	end
+	if tech.kind ~= slot then
+		return nil, "slot_kind_mismatch"
+	end
+	return techId, "ok"
+end
+
 --[[ A loadout is exactly one technique per slot, each matching its slot kind. ]]
 function Combat.validateLoadout(config: any, loadout: { [string]: string }): (boolean, string)
 	for _, slot in config.LoadoutSlots do
