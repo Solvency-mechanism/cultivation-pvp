@@ -2,10 +2,18 @@
 --[[
 	Interface tuning: the geometry, palette and curves behind the HUD.
 
-	Pure data and pure math, in the shape `ImpactSpec` established. No requires,
-	no Roblox datatypes -- colours are RGB triples rather than Color3 -- and
-	`Config` arrives as a parameter, so this module loads unchanged under both
-	Roblox and Lune like every other module in src/shared/.
+	Pure data and pure math, in the shape `ImpactSpec` established. No requires
+	and no Roblox datatypes -- colours are RGB triples rather than Color3 -- so
+	this module loads unchanged under both Roblox and Lune like every other
+	module in src/shared/.
+
+	It goes one step further than the house rule asks: `ImpactSpec` takes
+	`Config` as a parameter because its severity curve genuinely needs stage
+	data, and nothing here does. Every function below closes over its own
+	arguments alone. That is worth stating rather than leaving to be discovered,
+	because the obvious way to extend this file -- a helper that wants a
+	technique's cost or a stage's name -- should take `Config` as an argument
+	when it arrives, and must never reach for a require.
 
 	**Density is a ratio, not a pixel count.** This is the one idea here and the
 	rest follows from it. Moving from the Roblox-traditional register to the WoW
