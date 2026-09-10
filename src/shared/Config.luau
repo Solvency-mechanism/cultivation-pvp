@@ -472,6 +472,26 @@ Config.Field.maxActiveNodes = 7 -- permanent value 12
 -- Windup only -- no projectile speed/landingRadius/d_cross/falloff tonight.
 Config.Techniques.lance.windup = 0.28 -- permanent value 0.15
 Config.Techniques.volley.windup = 0.50 -- permanent value 0.35
+
+--[[ Tonight's saves go to their own store, and this line is the reason the
+	rest of this block is allowed to be as aggressive as it is.
+
+	Every number above was chosen on the premise that persistence was deferred,
+	so nothing survived the session and there was no save to protect. Publishing
+	the place invalidates that premise: it switches on the DataStore branch that
+	has never once executed, and from that moment these values are writing real,
+	permanent saves. A tier is 350 tonight against a true 9000, so a tester
+	advances roughly twenty-six times too fast -- and because `AllowStageDemotion`
+	is false, the ratchet makes every stage they gain permanent. Four people
+	would be left sitting in the production store at stages they were never
+	meant to reach, on a curve that stops existing tomorrow morning.
+
+	Bumping the store is this codebase's own documented answer to exactly this
+	("Bump storeName rather than migrating"), and it costs nothing tonight
+	because nobody has a save to be cut off from -- the DataStore path has never
+	successfully run. Deleting this block tomorrow returns everyone to a
+	`Cultivation_v1` that tonight never touched. ]]
+Config.Persistence.storeName = "Cultivation_playtest_20260910" -- permanent value "Cultivation_v1"
 --======================= END PLAYTEST-ONLY OVERRIDE =======================
 
 return Config
