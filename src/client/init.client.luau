@@ -8,6 +8,7 @@
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 
@@ -87,7 +88,7 @@ local function bar(parent: Instance, y: number, fillColor: Color3): Frame
 end
 
 -- Status panel, bottom left.
-local status = panel(UDim2.fromOffset(260, 196), UDim2.new(0, 16, 1, -212))
+local status = panel(UDim2.fromOffset(260, 176), UDim2.new(0, 16, 1, -192))
 local stageLabel = label(status, 8, 26, 20, Color3.fromRGB(255, 205, 110), true)
 stageLabel.Text = "--"
 local detailLabel = label(status, 34, 18, 13, Color3.fromRGB(200, 205, 220), false)
@@ -96,8 +97,7 @@ local footLabel = label(status, 68, 16, 12, Color3.fromRGB(150, 155, 175), false
 local healthFill = bar(status, 90, Color3.fromRGB(225, 90, 90))
 local madraFill = bar(status, 104, Color3.fromRGB(130, 150, 255))
 local vitalsLabel = label(status, 116, 16, 12, Color3.fromRGB(150, 155, 175), false)
-local slotsLabel = label(status, 136, 20, 12, Color3.fromRGB(170, 175, 195), false)
-local promptLabel = label(status, 158, 30, 12, Color3.fromRGB(255, 205, 110), false)
+local promptLabel = label(status, 138, 30, 12, Color3.fromRGB(255, 205, 110), false)
 promptLabel.TextWrapped = true
 
 -- Sense panel, right side. Empty until the server says something is in range.
@@ -158,14 +158,183 @@ local function refreshVitals()
 	vitalsLabel.Text = `hp {health}/{maxHealth}     madra {madra}/{maxMadra}`
 end
 
-local function refreshSlots()
-	local parts: { string } = {}
-	for index, slot in Config.LoadoutSlots do
-		local techId = player:GetAttribute("Slot_" .. slot)
-		local tech = if typeof(techId) == "string" then Config.Techniques[techId] else nil
-		table.insert(parts, `[{index}] {if tech then tech.name else "--"}`)
+--[[ The slot bar.
+
+	Four keys, always on screen, each showing whether it is actually usable. The
+	server owns cost, cooldown and the global cooldown and refuses anything it
+	does not like; this only predicts locally from the same Config so the player
+	can see *why* a press did nothing. A desynced prediction costs a wasted
+	keypress, never a wrong outcome. ]]
+local SLOT_W, SLOT_H, SLOT_GAP = 108, 76, 10
+local slotBarWidth = (SLOT_W * 4) + (SLOT_GAP * 3)
+
+local slotBar = Instance.new("Frame")
+slotBar.Size = UDim2.fromOffset(slotBarWidth, SLOT_H)
+slotBar.Position = UDim2.new(0.5, -slotBarWidth / 2, 1, -SLOT_H - 26)
+slotBar.BackgroundTransparency = 1
+slotBar.Parent = screen
+
+type SlotWidget = {
+	root: Frame,
+	key: TextLabel,
+	name: TextLabel,
+	cost: TextLabel,
+	sweep: Frame,
+	stroke: UIStroke,
+}
+
+local slotWidgets: { SlotWidget } = {}
+
+for index = 1, 4 do
+	local root = Instance.new("Frame")
+	root.Size = UDim2.fromOffset(SLOT_W, SLOT_H)
+	root.Position = UDim2.fromOffset((index - 1) * (SLOT_W + SLOT_GAP), 0)
+	root.BackgroundColor3 = Color3.fromRGB(16, 17, 24)
+	root.BackgroundTransparency = 0.15
+	root.BorderSizePixel = 0
+	root.Parent = slotBar
+
+	local corner = Instance.new("UICorner")
+	corner.CornerRadius = UDim.new(0, 6)
+	corner.Parent = root
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = Color3.fromRGB(70, 74, 92)
+	stroke.Thickness = 1
+	stroke.Parent = root
+
+	-- The sweep drains downward over the cooldown, so readiness is a shape you
+	-- catch peripherally rather than a number you have to read.
+	local sweep = Instance.new("Frame")
+	sweep.AnchorPoint = Vector2.new(0, 1)
+	sweep.Position = UDim2.fromScale(0, 1)
+	sweep.Size = UDim2.fromScale(1, 0)
+	sweep.BackgroundColor3 = Color3.fromRGB(58, 62, 84)
+	sweep.BackgroundTransparency = 0.35
+	sweep.BorderSizePixel = 0
+	sweep.ZIndex = 2
+	sweep.Parent = root
+
+	local sweepCorner = Instance.new("UICorner")
+	sweepCorner.CornerRadius = UDim.new(0, 6)
+	sweepCorner.Parent = sweep
+
+	local key = Instance.new("TextLabel")
+	key.Size = UDim2.fromOffset(20, 18)
+	key.Position = UDim2.fromOffset(8, 6)
+	key.BackgroundTransparency = 1
+	key.Font = Enum.Font.GothamBold
+	key.TextSize = 13
+	key.TextColor3 = Color3.fromRGB(255, 205, 110)
+	key.TextXAlignment = Enum.TextXAlignment.Left
+	key.Text = tostring(index)
+	key.ZIndex = 3
+	key.Parent = root
+
+	local name = Instance.new("TextLabel")
+	name.Size = UDim2.new(1, -16, 0, 20)
+	name.Position = UDim2.fromOffset(8, 28)
+	name.BackgroundTransparency = 1
+	name.Font = Enum.Font.GothamBold
+	name.TextSize = 15
+	name.TextColor3 = Color3.fromRGB(235, 238, 248)
+	name.TextXAlignment = Enum.TextXAlignment.Left
+	name.TextTruncate = Enum.TextTruncate.AtEnd
+	name.Text = "--"
+	name.ZIndex = 3
+	name.Parent = root
+
+	local cost = Instance.new("TextLabel")
+	cost.Size = UDim2.new(1, -16, 0, 16)
+	cost.Position = UDim2.fromOffset(8, 50)
+	cost.BackgroundTransparency = 1
+	cost.Font = Enum.Font.Gotham
+	cost.TextSize = 12
+	cost.TextColor3 = Color3.fromRGB(130, 150, 255)
+	cost.TextXAlignment = Enum.TextXAlignment.Left
+	cost.Text = ""
+	cost.ZIndex = 3
+	cost.Parent = root
+
+	slotWidgets[index] = {
+		root = root,
+		key = key,
+		name = name,
+		cost = cost,
+		sweep = sweep,
+		stroke = stroke,
+	}
+end
+
+-- Locally predicted only. The server is still the authority on every refusal.
+local cooldownUntil: { [string]: number } = {}
+local gcdUntil = 0
+
+local READY_STROKE = Color3.fromRGB(120, 190, 255)
+local COOLING_STROKE = Color3.fromRGB(70, 74, 92)
+local BROKE_STROKE = Color3.fromRGB(120, 70, 78)
+
+local function slotTechnique(slot: string): Config.Technique?
+	local techId = player:GetAttribute("Slot_" .. slot)
+	if typeof(techId) ~= "string" then
+		return nil
 	end
-	slotsLabel.Text = table.concat(parts, "  ")
+	return Config.Techniques[techId]
+end
+
+local function refreshSlots()
+	local now = os.clock()
+	local madra = player:GetAttribute("Madra") or 0
+
+	for index, slot in Config.LoadoutSlots do
+		local widget = slotWidgets[index]
+		if not widget then
+			continue
+		end
+		local tech = slotTechnique(slot)
+		if not tech then
+			widget.name.Text = "--"
+			widget.cost.Text = ""
+			widget.sweep.Size = UDim2.fromScale(1, 0)
+			continue
+		end
+
+		widget.name.Text = tech.name
+		widget.cost.Text = `{tech.madraCost} madra`
+
+		local readyAt = math.max(cooldownUntil[tech.id] or 0, gcdUntil)
+		local remaining = readyAt - now
+		local affordable = madra >= tech.madraCost
+
+		if remaining > 0 and tech.cooldown > 0 then
+			widget.sweep.Size = UDim2.fromScale(1, math.clamp(remaining / tech.cooldown, 0, 1))
+			widget.stroke.Color = COOLING_STROKE
+			widget.name.TextColor3 = Color3.fromRGB(150, 155, 175)
+			widget.cost.TextColor3 = Color3.fromRGB(110, 118, 145)
+		else
+			widget.sweep.Size = UDim2.fromScale(1, 0)
+			widget.stroke.Color = if affordable then READY_STROKE else BROKE_STROKE
+			widget.name.TextColor3 = if affordable
+				then Color3.fromRGB(235, 238, 248)
+				else Color3.fromRGB(160, 130, 138)
+			widget.cost.TextColor3 = if affordable
+				then Color3.fromRGB(130, 150, 255)
+				else Color3.fromRGB(190, 100, 108)
+		end
+	end
+end
+
+--[[ Start the local prediction when the server confirms our own cast. Driving
+	it from the server's broadcast rather than from the keypress means a refused
+	press does not put the slot on a cooldown it never actually paid for. ]]
+local function noteOwnCast(techId: string)
+	local tech = Config.Techniques[techId]
+	if not tech then
+		return
+	end
+	local now = os.clock()
+	cooldownUntil[techId] = now + tech.cooldown
+	gcdUntil = now + Config.Combat.globalCooldown
 end
 
 --[[ Bearing to a node as an arrow, relative to where the camera is looking.
@@ -260,6 +429,7 @@ for _, attribute in CULTIVATION_ATTRIBUTES do
 end
 for _, attribute in VITAL_ATTRIBUTES do
 	player:GetAttributeChangedSignal(attribute):Connect(refreshVitals)
+	player:GetAttributeChangedSignal(attribute):Connect(refreshSlots)
 end
 for _, slot in Config.LoadoutSlots do
 	player:GetAttributeChangedSignal("Slot_" .. slot):Connect(refreshSlots)
@@ -285,8 +455,15 @@ notice.OnClientEvent:Connect(showNotice)
 
 local techniqueFired = remotes:WaitForChild("TechniqueFired") :: RemoteEvent
 techniqueFired.OnClientEvent:Connect(function(shot: Vfx.Shot)
+	if shot.casterId == player.UserId then
+		noteOwnCast(shot.techId)
+	end
 	Vfx.play(shot)
 end)
+
+-- The cooldown sweep has to animate, so the slot bar is the one thing here that
+-- redraws every frame rather than only on a signal.
+RunService.RenderStepped:Connect(refreshSlots)
 
 -- Arrows are relative to the camera, so they have to be redrawn as it turns
 -- even when the node list has not changed.
