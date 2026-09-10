@@ -18,12 +18,20 @@ Everything needed is installed and on the persistent user PATH.
 ## How to run it
 
 ```sh
-rojo serve      # then Connect from the Rojo plugin in Studio, and press Play
+rojo build default.project.json --output starter-game.rbxlx
 ```
 
-Any Studio place works — `ArenaService` builds ground and a spawn if the place
-does not already have them, and skips both if it does, so connecting to a
-Baseplate place will not produce two floors.
+Then open that file in Studio and press **Play (F5)**. That is the whole loop --
+the built place is self-contained, so the Rojo plugin is not needed to test.
+`rojo serve` plus Connect still works if you want live sync while editing.
+
+`ArenaService` builds ground and a spawn if the place lacks them and skips both
+if it has them, so a Baseplate place will not end up with two floors.
+
+> Rebuilding the `.rbxlx` while Studio has it open leaves Studio holding the old
+> copy, and opening it again spawns a **second** Studio process against a stale
+> place. Close the place first, or check `Get-Process RobloxStudioBeta` if
+> behaviour looks impossible -- an hour was lost to exactly this.
 
 **Controls:** `1-4` fire the four loadout slots (striker, enforcer, forger,
 ruler). `B` attempts a breakthrough. Walk into a glowing sphere to cycle.
@@ -96,34 +104,44 @@ The assertions worth not breaking:
 - Prime announces to everyone regardless of range; common announces to nobody
 - a sanitized save always survives the functions that assert on their input
 
-## What has never been run
+## What has been run, and what has not
 
-**Everything that touches Roblox.** The pure rules are tested; the entire binding
-layer — six server modules and the client — has never executed. It builds and
-typechecks, which is not the same thing.
+The place was run in Studio on 2026-09-09. **Zero Lua errors across the session.**
 
-Specific things worth watching on the first run, roughly in order of how likely
-they are to be wrong:
+Observed working, first hand:
 
-1. **Does a technique fire at all**, and does the HUD move when it does?
-2. **Striker aim.** The raycast runs from `HumanoidRootPart` along its
-   LookVector, which is the character's facing, *not* the camera's. In
-   shift-lock they agree; in free camera they do not. This probably needs the
-   camera vector sent from the client and validated server-side against a sane
-   angle — that is a design decision, not just a fix.
-3. **Bearing arrows.** Taken against the camera's own forward and right vectors,
-   so the handedness should be right, but nobody has looked at it.
-4. **Node spawn heights.** Nodes are placed at `y = 4` on flat ground. On a place
-   with terrain they will float or sink.
-5. **Whether the 0.4s global cooldown reads as rhythm or as lag.**
+| Behaviour | Evidence |
+|---|---|
+| Arena builds | ground and spawn pad present; `[arena] ready -- 7 stages, ground 700 studs` |
+| Cultivation publishes | HUD reads Lowgold tier 1, power 100, sense 400 |
+| Combat pools sized from Config | hp 400/400, madra 200/200 (basePower 100 x4 and x2) |
+| Cycling accrues | refinement climbed while standing in a node |
+| Occupancy | the occupied node reported `1/3`, and `0/3` again after respawn |
+| Aura sense | nodes listed nearest-first with distance, occupancy, bearing, and an overflow count |
+| Telegraphs | regional ("You feel a rare node nearby") and server ("A Prime node has surfaced in the rich") |
+| Techniques fire, charged server-side | madra 200 -> Lance -> regen tick -> Surge -> regen tick -> **174**, exactly as configured |
+| Madra regen | 6% of pool per second, visible between casts |
+| Death | refinement dropped and floored; **stage and tier held** -- the ratchet |
+| Respawn | character returned to the pad with pools restored |
+| Persistence degradation | warns once, marks the player unsaveable, runs in memory |
 
-DataStores do not work in an unpublished place, or in Studio without *Enable
-Studio Access to API Services*. That is handled: the server warns once and runs
-in memory. **Persistence itself is therefore untested** — it needs a published
-place to exercise at all.
+**Still unverified, and each needs something this run could not provide:**
 
-Not built at all: bracket-enforced matchmaking, the proving ground as a distinct
-experience, contest resolution, and a loadout editor.
+1. **Striker aim against a real target.** The raycast runs from `HumanoidRootPart`
+   along its LookVector -- the character's facing, not the camera's. In shift-lock
+   they agree; in free camera they do not. Nothing was hit because nothing was
+   there to hit. This probably needs the camera vector sent from the client and
+   validated server-side, which is a design decision rather than a fix.
+2. **PvP.** Needs two clients; use Test > Clients and Servers with 2 players.
+3. **Breakthrough.** Needs a full refinement bar -- 9,000 x 10 at Lowgold, so
+   hours. Worth testing by temporarily lowering `perTierProgress` rather than by
+   playing to it.
+4. **The DataStore read/write path.** Only the unavailable branch has run. This
+   needs a published place; nothing about it can be trusted until then.
+5. **Bearing-arrow handedness.** The arrows render and update, but nobody has
+   walked toward one to confirm they point at the node rather than away from it.
+6. **Node spawn heights.** Nodes sit at `y = 4` on flat ground. On terrain they
+   will float or sink.
 
 ## What the last session added
 
