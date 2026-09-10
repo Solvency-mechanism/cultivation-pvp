@@ -701,7 +701,7 @@ guidanceLabel.TextXAlignment = Enum.TextXAlignment.Center
 local cardFrame = Instance.new("Frame")
 cardFrame.AnchorPoint = Vector2.new(0.5, 0.5)
 cardFrame.Position = UDim2.fromScale(0.5, 0.34)
-cardFrame.Size = UDim2.fromOffset(px(460), px(96))
+cardFrame.Size = UDim2.fromOffset(px(468), px(120))
 cardFrame.BackgroundColor3 = PANEL
 cardFrame.BackgroundTransparency = 0.18
 cardFrame.BorderSizePixel = 0
@@ -712,7 +712,7 @@ local cardStroke = outline(cardFrame, EDGE, 1)
 cardStroke.Transparency = 0.4
 
 local cardLines: { TextLabel } = {}
-for index = 1, 3 do
+for index = 1, 4 do
 	local line = caption(cardFrame, text(if index == 1 then 15 else 13), TEXT, index == 1)
 	line.Size = UDim2.new(1, -px(24), 0, px(22))
 	line.Position = UDim2.fromOffset(px(12), px(14) + (index - 1) * px(24))
@@ -754,7 +754,8 @@ local function showCard()
 		else "You are a cultivator."
 	cardLines[2].Text =
 		`Stand inside an aura node to cycle. Keys 1-{slotCount} are your techniques.`
-	cardLines[3].Text = "Every cultivator at your stage is a rival. There is no safe ground."
+	cardLines[3].Text = "Hold Shift and a technique key to swap it. The kit is yours to choose."
+	cardLines[4].Text = "Every cultivator at your stage is a rival. There is no safe ground."
 	cardFrame.Visible = true
 	task.delay(12, dismissCard)
 end
