@@ -5,6 +5,81 @@ All names in this project are placeholders, including the title.
 Versions are dated and describe what was **observed working**, not what was
 written. Anything unverified is listed as unverified.
 
+## playtest build — 2026-09-10, afternoon
+
+Built for the first external session: four players who are not us. Carries a
+**playtest-only override block at the bottom of `Config.luau`** — delete that
+block to revert every tuning number in it. Tonight's saves go to their own
+DataStore for the same reason.
+
+**This is the build on which two people were in a server for the first time.**
+
+### Verified with more than one client
+
+Observed directly, on a session confirmed to be running current code:
+
+- **Two players see each other.** Characters render; nameplates draw over other
+  players at distance with stage-coloured text.
+- **Damage between two real players is exact.** Client 1 fired Siphon; client 2's
+  HUD went 400/400 to 345/400. That is 55 — Siphon's configured damage, times
+  region 1.0, times power 100/100, with tier 1 granting no bonus.
+- **`Combat.canEngage` permits same-bracket, proven rather than inferred.**
+  `damagePlayer` early-returns and deals nothing when it fails. Health moved,
+  therefore it returned true for two real `Player` objects.
+- **Impact feedback reaches the defender**: damage number, red vignette,
+  nameplate health bar, and the attacker's Ruler dome drawn for another player's cast.
+- **Four clients run concurrently** on one machine alongside the editor.
+- **The Prime telegraph reaches a second client at server scope**, reading "A Prime
+  node has surfaced in the Verdant Reach" — the region name rendering as a
+  signpost rather than a raw key.
+- **The pacing override is live and applies, not merely displays.** A character on
+  bare ground rolled to tier 2 in about six minutes, which is `perTierProgress`
+  350 at the 1.0/sec bare-ground rate; `power` read 102, i.e. 100 base times one
+  2% refinement step.
+- Per-slot madra costs read 18/32/40/50, matching `Config.Techniques`.
+
+### Shipped this round
+
+Five silent failures closed — the pattern was that this codebase decides things
+well and rarely tells the player what it decided, and **none of it was visible
+with one player**:
+
+- Onboarding: a first-run card and a persistent guidance line. There was none.
+- Loadout selection. `loadouts` was cloned from `DefaultLoadout` at join and never
+  written again, so eight of the twelve techniques were unreachable by any means.
+- Kills and deaths produce output. `handleDeath` did not even receive the killer,
+  and the victim was charged refinement without being told.
+- Capacity refusal produces output. Capacity is 3; the refusal had never fired.
+- A leaderboard, so four players share a frame of reference.
+
+Also: the HUD rebuilt in a denser register, nameplates, a reticle, a soft-target
+frame stating bracket refusal outright, cast telegraphs broadcast at intent time
+(an opponent previously could not see a cast at all), Ruler techniques scaling off
+the ground rather than only off a node, fault isolation on the tick loop and the
+join handler, and a build fingerprint printed at boot.
+
+### Not verified
+
+- **Node capacity contest with four players**, and whether the refused fourth is told.
+- Kill/death notices, loadout cycling and the defender-side cast bar, in practice.
+- **Breakthrough.** Still never performed by anybody. Now reachable within a session.
+- **The DataStore read/write path.** Still only the unavailable branch has run.
+- Whether time-to-kill feels right. Deliberately untuned: the session exists to
+  answer that, and pre-tuning it blind would destroy the measurement.
+
+### Known
+
+- **Studio silently ignores `-localProjectFile`** and runs its own cached document,
+  with no error. Every test session for an afternoon ran a build six hours stale
+  while the file on disk was current. Open the place in Studio and let it load
+  *before* starting a session, and check the boot fingerprint line.
+- Technique range is invisible and a refused cast is silent.
+- Below a ~600px viewport the HUD keeps its absolute size and eats the frame; the
+  scale function has a floor for legibility and no ceiling for footprint.
+- Aura geography is still decorative for node placement: `NodeService.placer` rolls
+  a region unrelated to where the node lands. `ArenaService.regionAt` exists and
+  nothing calls it.
+
 ## v0.1.0 — 2026-09-10
 
 First packaged build. The game is playable end to end by one player.
