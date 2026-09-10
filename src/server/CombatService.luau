@@ -251,7 +251,11 @@ local function ensureActor(player: Player): Combat.Actor?
 	return actor
 end
 
-local function handleDeath(player: Player)
+--[[ `attackerActor` is optional and only ever supplied by `damagePlayer` --
+	the raw `Humanoid.Died` path below has no attacker to give, because a fall
+	has no killer. Everything downstream of it stays silent about a killer
+	that does not exist rather than guessing one. ]]
+local function handleDeath(player: Player, attackerActor: Combat.Actor?)
 	if dying[player.UserId] then
 		return
 	end
@@ -266,11 +270,58 @@ local function handleDeath(player: Player)
 	local actor = ensureActor(player)
 	dying[player.UserId] = true
 
+	local killer: Player? = if attackerActor
+		then Players:GetPlayerByUserId(tonumber(attackerActor.id) or -1)
+		else nil
+
 	local stageIndex = if actor then actor.stageIndex else stageIndexOf(player)
 	if stageIndex then
 		-- Amount comes from Combat, the ratchet lives in Progression, and the
 		-- write is routed through CultivationService so state has one owner.
-		CultivationService.applyDeathLoss(player, Combat.deathLoss(Config, stageIndex))
+		local loss = Combat.deathLoss(Config, stageIndex)
+		CultivationService.applyDeathLoss(player, loss)
+
+		--[[ A kill produced no output at all before this: the killer was never
+			told, the victim was never told who killed them or that they had just
+			been charged refinement, and nobody else in the server heard anything
+			happened. In a game whose entire economy is contested ground, that is
+			the most important moment producing the least feedback. The channel
+			already exists -- this only spends it.
+
+			`kill`/`death` are interface's priority notice kinds -- gold/red, held
+			longer, and immune to being overwritten by a lower-priority notice for
+			a few seconds, so a kill cannot be erased by a Prime spawn landing half
+			a second later. The victim's line carries the number, not just the
+			fraction: "your refinement falls" is the first time a player learns
+			what a death actually costs, and a raw number teaches that in one line
+			a percentage does not. ]]
+		local lossAmount = math.floor(loss)
+		if killer then
+			AwarenessService.notify(killer, "kill", `You kill {player.Name}.`)
+			AwarenessService.notify(
+				player,
+				"death",
+				`{killer.Name} kills you. Your refinement falls {lossAmount}.`
+			)
+			-- Everyone else gets the public version, which is what turns a kill
+			-- into a shared story in a small server instead of a silence only
+			-- two people noticed.
+			for _, spectator in Players:GetPlayers() do
+				if spectator ~= player and spectator ~= killer then
+					AwarenessService.notify(
+						spectator,
+						"server",
+						`{killer.Name} kills {player.Name}.`
+					)
+				end
+			end
+		else
+			AwarenessService.notify(
+				player,
+				"death",
+				`You fall. Your refinement falls {lossAmount}.`
+			)
+		end
 	end
 	actors[player.UserId] = nil
 
@@ -316,7 +367,7 @@ local function damagePlayer(source: Combat.Actor, target: Player, raw: number, n
 	end
 
 	if result.died then
-		handleDeath(target)
+		handleDeath(target, source)
 	end
 end
 
