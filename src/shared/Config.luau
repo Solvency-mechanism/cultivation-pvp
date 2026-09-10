@@ -176,6 +176,18 @@ Config.Field = {
 	},
 }
 
+--[[ How a region is spoken about. Announcements read "surfaced in the Ember
+	Barrens", not "surfaced in the barren" -- a broken template string in the
+	most prominent text on screen reads as unfinished more loudly than
+	placeholder geometry does, because a grey slab could be a style choice and a
+	half-written sentence cannot. ]]
+Config.RegionNames = {
+	barren = "the Ember Barrens",
+	open = "the open field",
+	rich = "the Verdant Reach",
+	wellspring = "a Wellspring",
+}
+
 -- Static aura geography: permanent terrain richness, layered under the
 -- dynamic field. Known to everyone, learnable, and what clans hold long term.
 Config.StaticRegionMultipliers = {

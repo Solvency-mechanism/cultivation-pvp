@@ -90,9 +90,10 @@ local function announceSpawn(node: AuraNodes.Node)
 		local distance = if position then AuraNodes.distanceTo(node, position) else math.huge
 		if AuraNodes.shouldAnnounce(Config, node, distance, senseRange) then
 			local scope = AuraNodes.telegraphOf(Config, node)
+			local where = Config.RegionNames[node.region] or "the field"
 			local text = if scope == "server"
-				then `A Prime node has surfaced in the {node.region}.`
-				else `You feel a {node.tier} node nearby.`
+				then `A Prime node has surfaced in {where}.`
+				else `You feel a {node.tier} node stir nearby.`
 			AwarenessService.notify(player, scope, text)
 		end
 	end
