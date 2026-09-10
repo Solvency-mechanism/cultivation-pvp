@@ -209,6 +209,21 @@ RunService.Heartbeat:Connect(function(delta: number)
 	end)
 end)
 
+--[[ The build fingerprint, printed at boot so which code is running is a fact
+	in the log rather than something read off a HUD.
+
+	Today this cost most of an afternoon. Studio silently ignores
+	`-localProjectFile` and runs its own cached document, giving no error, so
+	every session ran the morning build while the file on disk was current --
+	and the only way anyone noticed was spotting a wrong number in a screenshot.
+	A pixel read is a bad instrument for "am I running my own code"; a line in
+	the output window is a good one.
+
+	The per-tier figure is the fingerprint because it is the value the playtest
+	override changes most visibly (350 tonight against a permanent 9000), so it
+	distinguishes a build with the override from one without it at a glance. ]]
+local lowgold = Config.Stages[5]
 print(
 	`[cultivation] online -- {#Config.Stages} stages, cap at {Config.Stages[#Config.Stages].name}`
 )
+print(`[cultivation] build check -- {lowgold.name} tier = {lowgold.perTierProgress} progress`)
