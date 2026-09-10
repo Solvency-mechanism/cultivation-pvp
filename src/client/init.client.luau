@@ -886,6 +886,11 @@ end
 local currentTarget: Player? = nil
 local targetSeenAt = 0
 local lastPoll = 0
+--[[ Whether the aim ray is on a player *right now*, as opposed to the sticky
+	target the frame holds for a few seconds. The reticle needs the live answer;
+	a reticle that stayed lit for three seconds after you looked away would be
+	telling you that you can hit something you cannot. ]]
+local aimOnTarget = false
 
 local function playerFromInstance(instance: Instance): Player?
 	local model = instance:FindFirstAncestorWhichIsA("Model")
@@ -922,11 +927,99 @@ local function pollTarget()
 		params
 	)
 	local found = if hit then playerFromInstance(hit.Instance) else nil
+	aimOnTarget = found ~= nil and found ~= player
 	if found and found ~= player then
 		currentTarget = found
 		targetSeenAt = now
 	elseif currentTarget and now - targetSeenAt > TARGET.stickySeconds then
 		currentTarget = nil
+	end
+end
+
+--[[ The reticle.
+
+	This game aims with the camera -- `resolveStriker` raycasts from the root
+	along the look vector -- and until now nothing on screen said where that ray
+	went. In third person, with a free camera, that means a player firing a
+	140-stud bolt is guessing. The hitmarker in `Impact` tells you afterwards
+	that you connected; nothing told you beforehand where you were pointing.
+
+	Four axis-aligned ticks around a centre gap, deliberately *not* an X: the X
+	at screen centre is already spoken for by `ImpactSpec.Marker`, and a reticle
+	a player could confuse with a hit confirmation would be worse than none.
+
+	It also carries the one fact that decides whether a fight is even legal.
+	`Combat.canEngage` refuses across brackets, and the reticle is where a player
+	is already looking, so that refusal is cheapest to read here. ]]
+local RETICLE_GAP = px(5)
+local RETICLE_LEN = px(6)
+local RETICLE_THICK = math.max(px(2), 2)
+
+local reticle = Instance.new("Frame")
+reticle.Name = "Reticle"
+reticle.AnchorPoint = Vector2.new(0.5, 0.5)
+reticle.Position = UDim2.fromScale(0.5, 0.5)
+reticle.Size = UDim2.fromOffset(px(40), px(40))
+reticle.BackgroundTransparency = 1
+reticle.Parent = screen
+
+local reticleTicks: { Frame } = {}
+for _, spec in
+	{
+		{ x = 0, y = -1, vertical = true },
+		{ x = 0, y = 1, vertical = true },
+		{ x = -1, y = 0, vertical = false },
+		{ x = 1, y = 0, vertical = false },
+	}
+do
+	local tick = Instance.new("Frame")
+	tick.AnchorPoint = Vector2.new(0.5, 0.5)
+	tick.Position = UDim2.new(
+		0.5,
+		spec.x * (RETICLE_GAP + RETICLE_LEN / 2),
+		0.5,
+		spec.y * (RETICLE_GAP + RETICLE_LEN / 2)
+	)
+	tick.Size = if spec.vertical
+		then UDim2.fromOffset(RETICLE_THICK, RETICLE_LEN)
+		else UDim2.fromOffset(RETICLE_LEN, RETICLE_THICK)
+	tick.BorderSizePixel = 0
+	tick.BackgroundColor3 = TEXT
+	tick.BackgroundTransparency = 0.45
+	tick.Parent = reticle
+	table.insert(reticleTicks, tick)
+
+	-- A hairline of black under each tick, so the reticle survives a bright
+	-- wall or a pale sky. The same value-contrast rule the impact grammar uses.
+	local shadow = Instance.new("Frame")
+	shadow.AnchorPoint = Vector2.new(0.5, 0.5)
+	shadow.Position = UDim2.fromScale(0.5, 0.5)
+	shadow.Size = UDim2.new(1, 2, 1, 2)
+	shadow.BackgroundColor3 = BLACK
+	shadow.BackgroundTransparency = 0.5
+	shadow.BorderSizePixel = 0
+	shadow.ZIndex = tick.ZIndex - 1
+	shadow.Parent = tick
+end
+
+local function refreshReticle()
+	local tint = TEXT
+	local transparency = 0.45
+
+	if aimOnTarget and currentTarget then
+		local ownStage = player:GetAttribute("StageIndex")
+		local theirStage = currentTarget:GetAttribute("StageIndex")
+		local sameBracket = typeof(ownStage) == "number"
+			and typeof(theirStage) == "number"
+			and ownStage == theirStage
+		-- Lit for a fight you can have, dim red for one the bracket refuses.
+		tint = if sameBracket then READY else UNAFFORDABLE
+		transparency = if sameBracket then 0 else 0.25
+	end
+
+	for _, tick in reticleTicks do
+		tick.BackgroundColor3 = tint
+		tick.BackgroundTransparency = transparency
 	end
 end
 
@@ -1267,6 +1360,7 @@ RunService.RenderStepped:Connect(function()
 		pollTarget()
 	end
 	refreshTarget()
+	refreshReticle()
 end)
 
 -- Arrows are relative to the camera, so they are redrawn as it turns even when

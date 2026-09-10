@@ -231,12 +231,17 @@ local function handleDeath(player: Player)
 	if dying[player.UserId] then
 		return
 	end
-	dying[player.UserId] = true
 
 	-- Resolved at death rather than captured at spawn, so a player who dies
 	-- before their state has loaded is charged nothing instead of being charged
-	-- at the wrong stage.
-	local actor = actors[player.UserId]
+	-- at the wrong stage. Routed through ensureActor, not a raw table read, so
+	-- a death landing in the brief window after a stage change still charges
+	-- the current stage -- the same discipline damagePlayer already applies to
+	-- every combat death. Must run before the dying flag below, since
+	-- ensureActor itself refuses to act once dying[player.UserId] is set.
+	local actor = ensureActor(player)
+	dying[player.UserId] = true
+
 	local stageIndex = if actor then actor.stageIndex else stageIndexOf(player)
 	if stageIndex then
 		-- Amount comes from Combat, the ratchet lives in Progression, and the
