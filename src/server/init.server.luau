@@ -11,6 +11,7 @@ local Config = require(ReplicatedStorage.Shared.Config)
 local CultivationService = require(script.CultivationService)
 local NodeService = require(script.NodeService)
 local PersistenceService = require(script.PersistenceService)
+local PresenceService = require(script.PresenceService)
 
 --[[ Fault-isolated startup.
 
@@ -43,6 +44,7 @@ local function onPlayerAdded(player: Player)
 	local restored = PersistenceService.load(player)
 	CultivationService.onPlayerAdded(player, restored)
 	CombatService.onPlayerAdded(player)
+	PresenceService.onPlayerAdded(player)
 
 	if restored then
 		AwarenessService.notify(player, "local", "Your cultivation resumes where you left it.")
@@ -52,6 +54,7 @@ end
 Players.PlayerAdded:Connect(onPlayerAdded)
 Players.PlayerRemoving:Connect(function(player: Player)
 	PersistenceService.onPlayerRemoving(player)
+	PresenceService.onPlayerRemoving(player)
 	AwarenessService.onPlayerRemoving(player)
 	CombatService.onPlayerRemoving(player)
 	CultivationService.onPlayerRemoving(player)
@@ -98,6 +101,7 @@ RunService.Heartbeat:Connect(function(delta: number)
 	CultivationService.tick(elapsed, now)
 	CombatService.tick(elapsed, now)
 	AwarenessService.tick()
+	PresenceService.tick()
 	PersistenceService.tick(now)
 end)
 
