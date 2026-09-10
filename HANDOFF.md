@@ -1,6 +1,6 @@
 # Handoff
 
-State as of the "playable loop" commit. All names are placeholders.
+State as of the first Studio run. All names are placeholders.
 
 ## Machine setup
 
@@ -57,7 +57,8 @@ cultivation change polls for it rather than being called back — which is why
 
 ## The loop, end to end
 
-Every step below now exists in code. **None of it has been played.**
+Steps 1-3, 5 and 7 have been played. Steps 4, 6 and 8 have not -- see
+"What has been run, and what has not" below.
 
 1. Spawn at Lowgold (testers skip the proving ground; Lowgold is the bracket
    that needs validating).
@@ -173,6 +174,22 @@ Two bugs found by re-reading rather than by running:
 - The node spawn hook compared list lengths, but `AuraNodes.step` culls before it
   appends — so a tick that expired three nodes and spawned one would have
   announced nothing. It compares ids now.
+
+## Next task
+
+The loop runs. What it has never had is a second player, which is what the whole
+design is about, so that is next:
+
+1. **Two clients.** Test > Clients and Servers, 2 players. First real test of
+   `Combat.canEngage`, the striker raycast against something that can be hit,
+   node capacity contest, and whether a fight is legible at all.
+2. **Decide what striker aim should follow** -- character facing or camera. See
+   the unverified list; it is a design call, not a bug.
+3. **Publish the place** so the DataStore path can be exercised at all.
+
+Then: contest resolution, and the first honest look at pacing. The two-minute
+session remains the largest open question and no amount of solo testing settles
+it.
 
 ## Deferred, on purpose
 
