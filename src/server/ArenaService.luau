@@ -894,17 +894,17 @@ end
 
 --[[ Spawn ring plus one waymarker per region, each tipped in that region's own
 	colour, standing on its bearing, and captioned with the name the
-	announcements use. From the terrace this is the first structure on the axis,
-	and walking into it tells you which way the Reach is, which way the Barrens
-	are, and what to call them when a Prime surfaces there.
+	colour. From the terrace this is the first structure on the axis, and walking
+	into it tells you which way the Reach is and which way the Barrens are. The
+	*names* live on the roadside signs at each region's threshold, not here --
+	three captioned pillars clustered at one hub is how you get three captions
+	in one frame.
 
 	It used to be the spawn, ringed by eight fifteen-stud posts at eye height.
 	Nothing here is taller than the waymarks now, and the waymarks stand outside
 	the ring rather than around it, because the whole job of this place is to be
 	looked *through*. ]]
 local function buildCrossroads(decor: Folder)
-	local names = Config.RegionNames :: { [string]: string }
-
 	local plaza = newDisc(
 		PLAZA_RADIUS,
 		2,
@@ -1006,28 +1006,114 @@ local function buildCrossroads(decor: Folder)
 		)
 		finger.Name = `WaymarkFinger_{region.id}`
 		finger.Parent = decor
+	end
+end
 
-		-- World-space signage, sized to be read on a phone.
-		local sign = Instance.new("BillboardGui")
-		sign.Name = "WaymarkSign"
-		sign.Size = UDim2.fromOffset(320, 56)
-		sign.StudsOffsetWorldSpace = Vector3.new(0, 12, 0)
-		sign.AlwaysOnTop = false
-		sign.MaxDistance = 340
-		sign.Parent = pillar
+--[[ A roadside sign at each region's threshold, and the post-mortem on the
+	banners it replaces.
+
+	The names were `BillboardGui`s on the three crossroads pillars, sized with
+	`UDim2.fromOffset(320, 56)`. That is 320 by 56 *pixels*, held constant at
+	every distance -- a billboard's Offset size does not shrink as you walk away
+	from it. So three captions each a sixth of the screen wide hung in the middle
+	of the frame at any range, overlapped each other into
+	"e Emb r Barrens W ll p the Verd ch", and drew over the AURA SENSE panel.
+	Round 1's finding was that a broken string reads as unfinished more loudly
+	than placeholder geometry does. That was the same failure, in 96-point type.
+
+	These are `SurfaceGui`s on real boards instead, and the difference is not a
+	tuning pass -- it is a different class of object. A SurfaceGui is a texture on
+	a surface: it is measured in studs, so it shrinks with distance like every
+	other thing in the world; it is depth-tested, so geometry occludes it; and it
+	renders in the 3D scene, so it cannot land on top of a ScreenGui. There is no
+	setting on it that can reproduce the failure above.
+
+	Placement and range do the rest, and both are arithmetic rather than hope:
+
+	- One sign per region, standing just *outside* that region's near rim on its
+	  own bearing, thirteen studs to the side of the road. The closest pair are
+	  109 studs apart, so any viewer near enough to render both is standing
+	  between them and sees them 105 to 161 degrees apart -- opposite sides of
+	  the screen, never the same part of it.
+	- `MaxDistance` is 80, and at 80 studs the caption is about 214 pixels wide
+	  in a 1920 frame. A sign therefore only exists on screen once it is big
+	  enough to read, and there is no range at which a smear of unreadable type
+	  can appear at all.
+	- From the spawn terrace the nearest sign is 116 studs away, which is past
+	  that cutoff: **the establishing shot contains no text whatsoever.** The
+	  first caption appears once you have committed to walking somewhere.
+
+	Both faces are captioned, so it reads on the way in and on the way out.
+
+	Keeping the text at all is a judgement call: the regions are already legible
+	from terrain alone, which was the actual goal. But "a Prime node has surfaced
+	in the Ember Barrens" is the game's loudest sentence, and one sign standing
+	where the Barrens begin is what connects that sentence to a place. ]]
+local function buildRegionSign(region: Region, decor: Folder)
+	local names = Config.RegionNames :: { [string]: string }
+	local caption = names[region.id]
+	if not caption then
+		return
+	end
+
+	local lobe = region.blobs[1]
+	-- On the bearing at the region's near rim, but never crowding the
+	-- crossroads, and set beside the road rather than across it.
+	local reach = math.max(lobe.center.Magnitude - lobe.radius - 8, PLAZA_RADIUS + 14)
+	local side = Vector3.new(-math.sin(region.bearing), 0, math.cos(region.bearing))
+	local base = onBearing(region.bearing, reach) + side * 13
+	local facing = CFrame.lookAt(base + Vector3.new(0, 12, 0), Vector3.new(0, 12, 0))
+
+	for leg = -1, 1, 2 do
+		local post = newBlock(
+			Vector3.new(2.4, 11, 2.4),
+			facing * CFrame.new(6.5 * leg, -6.5, 0),
+			DARK_STONE,
+			Enum.Material.Rock
+		)
+		post.Name = `SignPost_{region.id}_{if leg < 0 then "L" else "R"}`
+		post.Parent = decor
+	end
+
+	local board =
+		newBlock(Vector3.new(18, 5, 0.8), facing, Color3.fromRGB(38, 32, 30), Enum.Material.Slate)
+	board.Name = `RegionSign_{region.id}`
+	board.Parent = decor
+
+	local cap = newBlock(
+		Vector3.new(19.5, 1, 2),
+		facing * CFrame.new(0, 3, 0),
+		region.glow,
+		Enum.Material.Neon
+	)
+	cap.Name = `RegionSignCap_{region.id}`
+	cap.CastShadow = false
+	cap.Parent = decor
+
+	-- Front looks back down the road, Back looks into the region.
+	for _, face in { Enum.NormalId.Front, Enum.NormalId.Back } do
+		local surface = Instance.new("SurfaceGui")
+		surface.Name = `Caption_{face.Name}`
+		surface.Face = face
+		surface.PixelsPerStud = 40
+		surface.LightInfluence = 0
+		surface.AlwaysOnTop = false
+		surface.MaxDistance = 80
+		surface.Parent = board
 
 		local label = Instance.new("TextLabel")
 		label.BackgroundTransparency = 1
-		label.Size = UDim2.fromScale(1, 1)
+		label.Size = UDim2.fromScale(0.92, 0.8)
+		label.Position = UDim2.fromScale(0.04, 0.1)
 		label.Font = Enum.Font.GothamBold
 		label.TextScaled = true
 		label.TextColor3 = region.glow
-		label.Text = names[region.id]
-		label.Parent = sign
+		label.Text = caption
+		label.Parent = surface
 
 		local stroke = Instance.new("UIStroke")
-		stroke.Thickness = 3
-		stroke.Color = Color3.fromRGB(12, 10, 10)
+		stroke.Thickness = 2
+		stroke.Color = Color3.fromRGB(10, 9, 9)
 		stroke.Parent = label
 	end
 end
@@ -1447,6 +1533,10 @@ function ArenaService.start()
 				17,
 				decor
 			)
+		end
+
+		for _, region in REGIONS do
+			buildRegionSign(region, decor)
 		end
 
 		buildTerrace(decor)

@@ -4,6 +4,9 @@
 /DevPackages
 wally.lock
 
+# Packaged release artifacts (reproducible from the tag)
+/dist
+
 # Rojo / Studio build output
 *.rbxl
 *.rbxlx

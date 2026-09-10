@@ -53,6 +53,23 @@ Shared modules take config as a parameter and contain **zero internal requires**
 so the same files load in Roblox (`require(script.Parent.X)`) and under Lune
 (`require("./X")`). That is what makes the game rules unit-testable outside Studio.
 
+## Packaging a build
+
+```powershell
+.\package.ps1 -Version v0.1.0
+```
+
+Runs the full gate and refuses to package if any part fails, then writes the
+place plus a receipt (commit, size, SHA-256) into `dist/`. `dist/` is gitignored:
+the artifact is reproducible from the tag, so the tag is what is worth keeping.
+
+`.github/workflows/gate.yml` runs the same checks on every push. It proves the
+rules and the build. It cannot prove the game is fun -- only a person playing it
+can do that.
+
+See `CHANGELOG.md` for what each build was actually observed doing, as opposed
+to what was written.
+
 ## Commands
 
 ```sh

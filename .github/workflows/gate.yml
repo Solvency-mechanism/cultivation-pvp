@@ -1,0 +1,53 @@
+name: gate
+
+# The same checks that run locally before every commit. Studio is not available
+# here, so this proves the rules and the build -- never that the game is fun,
+# which only a person playing it can establish.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        uses: CompeyDev/setup-rokit@v0.1.2
+
+      - name: Lint
+        run: selene src tests
+
+      - name: Format
+        run: stylua --check src tests
+
+      - name: Tests
+        run: |
+          lune run tests/progression.test
+          lune run tests/auranodes.test
+          lune run tests/combat.test
+
+      # The shared modules must contain zero internal requires. Roblox requires
+      # by instance and Lune requires by relative path, and the two are
+      # incompatible -- this rule is the only reason the game rules are testable
+      # outside Studio, and it breaks silently rather than loudly.
+      - name: Shared modules stay pure
+        run: |
+          if grep -REn '^[[:space:]]*(local[[:space:]]+[A-Za-z_]+[[:space:]]*=[[:space:]]*)?require\(' src/shared/; then
+            echo "::error::a shared module gained a require; this breaks every Lune test"
+            exit 1
+          fi
+          echo "all shared modules are dependency-free"
+
+      - name: Build place
+        run: rojo build default.project.json --output cultivation-pvp.rbxlx
+
+      - name: Upload place
+        uses: actions/upload-artifact@v4
+        with:
+          name: place
+          path: cultivation-pvp.rbxlx
