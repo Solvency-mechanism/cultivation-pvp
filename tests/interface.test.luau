@@ -1,0 +1,177 @@
+--!strict
+--[[ Run with: lune run tests/interface.test
+
+	`InterfaceSpec` is pure and dependency-free for the same reason every other
+	module in src/shared is, and it earns the same treatment: the numbers behind
+	the HUD are checkable without Studio, without a running game and without a
+	second player.
+
+	What is worth asserting here is narrow and deliberate. Not "does the bar look
+	right" -- no test can answer that -- but the handful of places where a wrong
+	answer is silent and would only ever be discovered by someone playing:
+	a divide-by-zero on a pool the server has not published yet, a scale factor
+	that collapses the interface on an unusual viewport, a cast bar drawn for a
+	windup too short to read, a notice priority that lets a node telegraph erase
+	a death. ]]
+
+local process = require("@lune/process")
+local Config = require("../src/shared/Config")
+local InterfaceSpec = require("../src/shared/InterfaceSpec")
+
+local passed, failed = 0, 0
+local failures: { string } = {}
+
+local function check(name: string, ok: boolean, detail: string?)
+	if ok then
+		passed += 1
+	else
+		failed += 1
+		table.insert(failures, `{name}{if detail then ` -- {detail}` else ""}`)
+	end
+end
+
+local function eq(name: string, actual: any, expected: any)
+	check(name, actual == expected, `expected {expected}, got {actual}`)
+end
+
+-- Bar fractions. A client renders before the server has published anything, so
+-- every one of these arrives in practice rather than only in theory.
+eq("half a pool reads as half", InterfaceSpec.fraction(50, 100), 0.5)
+eq("an unpublished pool is empty, not an error", InterfaceSpec.fraction(0, 0), 0)
+eq("a negative maximum is empty", InterfaceSpec.fraction(10, -5), 0)
+eq("overfull clamps to one", InterfaceSpec.fraction(150, 100), 1)
+eq("negative health clamps to zero", InterfaceSpec.fraction(-20, 100), 0)
+
+--[[ Viewport scaling. The failure this guards against is the one that cannot be
+	seen from a developer's own machine: the interface silently collapsing on a
+	phone, or ballooning on a viewport nobody tested. ]]
+check("a phone scales the interface up, not down", InterfaceSpec.scale(480) > 1.2)
+check("the reference viewport is unscaled", math.abs(InterfaceSpec.scale(1080) - 1) < 0.02)
+check(
+	"a tablet sits between phone and reference",
+	(function(): boolean
+		local tablet = InterfaceSpec.scale(820)
+		return tablet > 1.0 and tablet < InterfaceSpec.scale(480)
+	end)()
+)
+check("a large monitor grows sublinearly", InterfaceSpec.scale(2160) < 1.5)
+check("scale is clamped at the bottom", InterfaceSpec.scale(4000) <= InterfaceSpec.Scale.maxScale)
+check("a degenerate viewport does not divide by zero", InterfaceSpec.scale(0) == 1)
+
+--[[ The action bar has to fit. The movement pass flagged a five-slot bar as a
+	phone-width worry it could not resolve, and the whole reason square icon
+	slots were chosen over the old wide name-plates is that they retire it. If
+	that ever stops being true, it should fail here rather than on a phone. ]]
+local FOUR_SLOT_LEGACY_WIDTH = 468
+check(
+	"five slots are narrower than the four wide plates they replaced",
+	InterfaceSpec.barWidth(5) < FOUR_SLOT_LEGACY_WIDTH,
+	`five slots came to {InterfaceSpec.barWidth(5)}px`
+)
+--[[ Phone width, modelled honestly. Roblox plays landscape, so a 480-tall
+	phone is roughly 854 wide -- the constraint is not "does it fit", which is
+	trivially yes, but whether the bar has eaten so much of the width that the
+	world is gone. Half is the line: past that the HUD is the game. ]]
+local PHONE_HEIGHT, PHONE_WIDTH = 480, 854
+local phoneBar = InterfaceSpec.barWidth(5) * InterfaceSpec.scale(PHONE_HEIGHT)
+check(
+	"five slots take under half a landscape phone's width",
+	phoneBar < PHONE_WIDTH / 2,
+	`{math.round(phoneBar)}px of {PHONE_WIDTH}`
+)
+-- The vitals cluster sits above the bar and is the wider of the two, so it is
+-- the element that actually decides whether the cluster fits.
+local phoneVitals = InterfaceSpec.Vitals.width * InterfaceSpec.scale(PHONE_HEIGHT)
+check(
+	"the vitals cluster takes under half a landscape phone's width",
+	phoneVitals < PHONE_WIDTH / 2,
+	`{math.round(phoneVitals)}px of {PHONE_WIDTH}`
+)
+eq("one slot is just the slot", InterfaceSpec.barWidth(1), InterfaceSpec.Slot.size)
+eq("no slots is no bar", InterfaceSpec.barWidth(0), 0)
+
+--[[ The telegraph floor. A bar that lives two frames is worse than no bar,
+	because it trains the eye to look for something that is not reliably there.
+	These assertions pin that judgement against the live technique pool, so a
+	future technique that drops under the floor is discovered here. ]]
+check("a zero windup does not telegraph", not InterfaceSpec.telegraphs(0))
+check("a 0.06s dash does not telegraph", not InterfaceSpec.telegraphs(0.06))
+check("a 0.9s pierce telegraphs", InterfaceSpec.telegraphs(0.9))
+
+--[[ Every striker must be readable. Read-and-react is the stated core of the
+	combat design, and it is meaningless if the attacks it is about cannot be
+	seen coming. This is the assertion that caught lance sitting at exactly the
+	floor. ]]
+for id, tech in Config.Techniques do
+	if tech.kind == "striker" then
+		check(
+			`striker {id} is telegraphable`,
+			InterfaceSpec.telegraphs(tech.windup),
+			`windup {tech.windup} is under the {InterfaceSpec.Cast.windupFloor} floor`
+		)
+	end
+end
+
+-- Every kind the config can produce needs a colour, or a slot falls back to
+-- grey and the kind vocabulary silently stops working for it.
+for id, tech in Config.Techniques do
+	check(
+		`technique {id} has a colour for kind {tech.kind}`,
+		InterfaceSpec.KindColor[tech.kind] ~= nil
+	)
+end
+for _, slot in Config.LoadoutSlots do
+	check(`slot {slot} has a kind colour`, InterfaceSpec.KindColor[slot] ~= nil)
+end
+
+-- Stage colours must cover the ladder, and must not run out at the top.
+for index = 1, #Config.Stages do
+	check(`stage {index} has a colour`, InterfaceSpec.stageColor(index) ~= nil)
+end
+eq(
+	"past the top of the ladder clamps rather than returning nil",
+	InterfaceSpec.stageColor(#Config.Stages + 5),
+	InterfaceSpec.stageColor(#Config.Stages)
+)
+
+--[[ Notice weight. The single-slot channel means priority is the only thing
+	stopping a Prime-node announcement from erasing a kill that landed half a
+	second earlier. ]]
+local death = InterfaceSpec.noticeKind("death")
+local kill = InterfaceSpec.noticeKind("kill")
+local server = InterfaceSpec.noticeKind("server")
+local plain = InterfaceSpec.noticeKind("local")
+
+check("a death outranks a server announcement", death.priority > server.priority)
+check("a kill outranks a server announcement", kill.priority > server.priority)
+check("a death is held longer than a plain notice", death.seconds > plain.seconds)
+check("a death is drawn larger than a plain notice", death.scale > plain.scale)
+check("a kill cannot be erased immediately", kill.floor > 0)
+check("a plain notice claims no floor", plain.floor == 0)
+eq("an unknown kind degrades to the plain weight", InterfaceSpec.noticeKind("nonsense"), plain)
+
+-- Cooldown countdowns, in the shape an icon prints them.
+eq("a sub-second cooldown shows a decimal", InterfaceSpec.countdown(0.8), "0.8")
+eq("a long cooldown rounds up to whole seconds", InterfaceSpec.countdown(15.2), "16")
+eq("an elapsed cooldown prints nothing", InterfaceSpec.countdown(0), "")
+eq("a negative cooldown prints nothing", InterfaceSpec.countdown(-3), "")
+
+-- Thousands separators. Refinement runs to five figures at Lowgold, and an
+-- unseparated five-figure number is read digit by digit rather than at a glance.
+eq("small numbers are untouched", InterfaceSpec.commas(42), "42")
+eq("four figures separate", InterfaceSpec.commas(9000), "9,000")
+eq("five figures separate", InterfaceSpec.commas(45000), "45,000")
+eq("seven figures separate twice", InterfaceSpec.commas(1234567), "1,234,567")
+eq("exactly three digits do not separate", InterfaceSpec.commas(999), "999")
+eq("a fraction floors", InterfaceSpec.commas(1999.7), "1,999")
+eq("zero is zero", InterfaceSpec.commas(0), "0")
+eq("a negative keeps its sign", InterfaceSpec.commas(-12345), "-12,345")
+
+print(`\n  passed: {passed}   failed: {failed}`)
+if failed > 0 then
+	for _, f in failures do
+		print(`  FAIL  {f}`)
+	end
+	process.exit(1)
+end
+print("  all interface tests passed\n")
