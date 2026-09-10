@@ -40,11 +40,34 @@ startService("AwarenessService", AwarenessService.start)
 	state has to tolerate a player who does not have one yet. CombatService and
 	AwarenessService both do -- they skip the player and pick them up on a later
 	tick. ]]
+--[[ Each step isolated, for the reason given at the tick loop below: these run
+	in order in one handler, so a throw in an early step silently denies the
+	player every later one. A player who joined and got no cultivation state, no
+	actor and no nameplate is a player with no game, and the join path is the
+	one that has never run for a *second* player at all. Load failing should
+	cost that player their saved progress, not their entire session. ]]
+local function step(name: string, player: Player, run: () -> ())
+	local protectedRun = run :: () -> any
+	local ok, err = pcall(protectedRun)
+	if not ok then
+		warn(`[player] {name} failed for {player.Name}: {err}`)
+	end
+end
+
 local function onPlayerAdded(player: Player)
-	local restored = PersistenceService.load(player)
-	CultivationService.onPlayerAdded(player, restored)
-	CombatService.onPlayerAdded(player)
-	PresenceService.onPlayerAdded(player)
+	local restored = nil
+	step("PersistenceService.load", player, function()
+		restored = PersistenceService.load(player)
+	end)
+	step("CultivationService.onPlayerAdded", player, function()
+		CultivationService.onPlayerAdded(player, restored)
+	end)
+	step("CombatService.onPlayerAdded", player, function()
+		CombatService.onPlayerAdded(player)
+	end)
+	step("PresenceService.onPlayerAdded", player, function()
+		PresenceService.onPlayerAdded(player)
+	end)
 
 	if restored then
 		AwarenessService.notify(player, "local", "Your cultivation resumes where you left it.")
@@ -53,11 +76,21 @@ end
 
 Players.PlayerAdded:Connect(onPlayerAdded)
 Players.PlayerRemoving:Connect(function(player: Player)
-	PersistenceService.onPlayerRemoving(player)
-	PresenceService.onPlayerRemoving(player)
-	AwarenessService.onPlayerRemoving(player)
-	CombatService.onPlayerRemoving(player)
-	CultivationService.onPlayerRemoving(player)
+	step("PersistenceService.onPlayerRemoving", player, function()
+		PersistenceService.onPlayerRemoving(player)
+	end)
+	step("PresenceService.onPlayerRemoving", player, function()
+		PresenceService.onPlayerRemoving(player)
+	end)
+	step("AwarenessService.onPlayerRemoving", player, function()
+		AwarenessService.onPlayerRemoving(player)
+	end)
+	step("CombatService.onPlayerRemoving", player, function()
+		CombatService.onPlayerRemoving(player)
+	end)
+	step("CultivationService.onPlayerRemoving", player, function()
+		CultivationService.onPlayerRemoving(player)
+	end)
 end)
 for _, player in Players:GetPlayers() do
 	task.spawn(onPlayerAdded, player)
@@ -86,6 +119,43 @@ breakthrough.OnServerEvent:Connect(function(player: Player)
 	AwarenessService.notify(player, "refused", BREAKTHROUGH_MESSAGES[reason] or reason)
 end)
 
+--[[ Fault-isolated ticking, for the same reason startup is fault-isolated.
+
+	`startService` above exists because one unwritable property in ArenaService
+	threw on the first Studio run and took every service after it with it. The
+	tick loop had the identical shape and had not learned the lesson: these six
+	calls run in order in one callback, so anything that throws in an early one
+	silently skips every later one. A persistent fault in cultivation would mean
+	combat, awareness, presence and persistence simply never run again -- for
+	everyone in the server, not just the player who triggered it.
+
+	That matters most for exactly the code that has never been exercised. Every
+	two-player path in this game is unverified, and a fault that only appears
+	with a second player in the server is the most likely kind there is right
+	now. This does not fix such a fault; it contains it to its own subsystem and
+	writes it down, instead of letting it take the session with it.
+
+	Warnings are throttled per subsystem because a fault that recurs every tick
+	would otherwise bury the output window in the noise of its own reporting,
+	and the output window is the only diagnostic anyone has during a session. ]]
+local WARN_INTERVAL = 5
+local lastWarnAt: { [string]: number } = {}
+
+local function tickService(name: string, now: number, run: () -> ())
+	-- pcall's result arity follows its callee, and these return nothing, so the
+	-- error value has to be asked for explicitly.
+	local protectedRun = run :: () -> any
+	local ok, err = pcall(protectedRun)
+	if ok then
+		return
+	end
+	local last = lastWarnAt[name]
+	if not last or now - last >= WARN_INTERVAL then
+		lastWarnAt[name] = now
+		warn(`[tick] {name} failed: {err}`)
+	end
+end
+
 local accumulator = 0
 RunService.Heartbeat:Connect(function(delta: number)
 	accumulator += delta
@@ -97,12 +167,20 @@ RunService.Heartbeat:Connect(function(delta: number)
 	accumulator = 0
 
 	local now = os.clock()
-	NodeService.step(now)
-	CultivationService.tick(elapsed, now)
-	CombatService.tick(elapsed, now)
-	AwarenessService.tick()
-	PresenceService.tick()
-	PersistenceService.tick(now)
+	tickService("NodeService", now, function()
+		NodeService.step(now)
+	end)
+	tickService("CultivationService", now, function()
+		CultivationService.tick(elapsed, now)
+	end)
+	tickService("CombatService", now, function()
+		CombatService.tick(elapsed, now)
+	end)
+	tickService("AwarenessService", now, AwarenessService.tick)
+	tickService("PresenceService", now, PresenceService.tick)
+	tickService("PersistenceService", now, function()
+		PersistenceService.tick(now)
+	end)
 end)
 
 print(
