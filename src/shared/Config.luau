@@ -444,4 +444,34 @@ Config.LoadoutSlots = { "striker", "enforcer", "forger", "ruler" }
 Config.DefaultLoadout =
 	{ striker = "lance", enforcer = "surge", forger = "barrier", ruler = "siphon" }
 
+--============================================================================
+-- PLAYTEST-ONLY PACING OVERRIDE -- Remi's group, single-session playtest,
+-- 2026-09-10 ~18:00. Ordered by gamelead. DELETE THIS ENTIRE BLOCK TOMORROW
+-- to revert every number below to its permanent value defined above.
+-- Persistence is deferred for this session by human decision, so there is no
+-- save to protect -- these values are deliberately aggressive and are NOT a
+-- balance ruling. Foundation/Copper/Iron/Jade are untouched on purpose:
+-- CultivationService.newPlayerState starts everyone at Lowgold tonight, so
+-- nobody will ever see those stages.
+--============================================================================
+Config.Stages[5].perTierProgress = 350 -- lowgold, permanent value 9000
+Config.Stages[6].perTierProgress = 950 -- highgold, permanent value 24000
+Config.Stages[7].perTierProgress = 1750 -- truegold, permanent value 45000
+
+Config.Field.spawnWeights = {
+	{ tier = "common", weight = 62 },
+	{ tier = "rare", weight = 30 },
+	{ tier = "prime", weight = 8 },
+}
+Config.Field.spawnIntervalSeconds = 15 -- permanent value 20
+Config.Field.maxActiveNodes = 7 -- permanent value 12
+
+-- interface's cast-bar telegraph will not draw a bar under 0.15s -- a bar
+-- that lives two frames trains the eye to distrust it. Lance sat exactly on
+-- that line; without this it would cast with no visible windup tonight.
+-- Windup only -- no projectile speed/landingRadius/d_cross/falloff tonight.
+Config.Techniques.lance.windup = 0.28 -- permanent value 0.15
+Config.Techniques.volley.windup = 0.50 -- permanent value 0.35
+--======================= END PLAYTEST-ONLY OVERRIDE =======================
+
 return Config
