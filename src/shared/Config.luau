@@ -185,4 +185,235 @@ Config.StaticRegionMultipliers = {
 	wellspring = 2.6,
 }
 
+-- Combat resources.
+--
+-- Health scales with stage but is FLAT inside a stage, while damage scales
+-- with refinement. That is deliberate: if both scaled, the 18% refinement
+-- spread would compound into a ~64% time-to-kill advantage. Keeping health
+-- flat within a bracket holds the real spread at exactly 18%.
+Config.Combat = {
+	-- Damage is expressed relative to this power value, so time-to-kill stays
+	-- constant across brackets while numbers still grow.
+	referencePower = 100,
+	healthMultiplier = 4.0,
+	madraMultiplier = 2.0,
+	-- Fraction of the madra pool regenerated per second.
+	madraRegenFraction = 0.06,
+	-- A death costs this fraction of one refinement tier. The ratchet in
+	-- Progression guarantees it can never cost the stage itself.
+	deathLossTierFraction = 0.35,
+	globalCooldown = 0.4,
+	-- Reach per technique kind, in studs. Striker pokes, Ruler blankets,
+	-- Forger drops a construct at your feet, Enforcer is self-only.
+	ranges = {
+		striker = 140,
+		ruler = 42,
+		forger = 18,
+		enforcer = 0,
+	},
+	respawnSeconds = 5,
+}
+
+--[[
+	Shared technique pool. Themed paths are deferred, so every player draws
+	from this same pool -- which is exactly the point: it isolates whether the
+	combat feels good before build diversity can paper over it.
+
+	Four technique types, three options each, one slot per type. That is 3^4 =
+	81 loadouts with no themed content at all. When paths arrive they become a
+	restricted, empowered subset of this pool rather than a rewrite.
+
+	kind:
+		striker  -- ranged bolt, burst
+		enforcer -- self-buff window, melee sustain
+		forger   -- persistent construct, zoning
+		ruler    -- ambient aura command; scales with terrain richness
+]]
+export type Technique = {
+	id: string,
+	name: string,
+	kind: "striker" | "enforcer" | "forger" | "ruler",
+	madraCost: number,
+	cooldown: number,
+	windup: number,
+	damage: number,
+	buffDuration: number,
+	damageBuff: number,
+	mitigation: number,
+	regionScaled: boolean,
+}
+
+Config.Techniques = {
+	-- Striker
+	lance = {
+		id = "lance",
+		name = "Lance",
+		kind = "striker",
+		madraCost = 18,
+		cooldown = 1.2,
+		windup = 0.15,
+		damage = 42,
+		buffDuration = 0,
+		damageBuff = 0,
+		mitigation = 0,
+		regionScaled = false,
+	},
+	volley = {
+		id = "volley",
+		name = "Volley",
+		kind = "striker",
+		madraCost = 30,
+		cooldown = 2.6,
+		windup = 0.35,
+		damage = 66,
+		buffDuration = 0,
+		damageBuff = 0,
+		mitigation = 0,
+		regionScaled = false,
+	},
+	pierce = {
+		id = "pierce",
+		name = "Pierce",
+		kind = "striker",
+		madraCost = 44,
+		cooldown = 5.0,
+		windup = 0.9,
+		damage = 128,
+		buffDuration = 0,
+		damageBuff = 0,
+		mitigation = 0,
+		regionScaled = false,
+	},
+
+	-- Enforcer
+	surge = {
+		id = "surge",
+		name = "Surge",
+		kind = "enforcer",
+		madraCost = 32,
+		cooldown = 9.0,
+		windup = 0.1,
+		damage = 0,
+		buffDuration = 5.0,
+		damageBuff = 0.35,
+		mitigation = 0,
+		regionScaled = false,
+	},
+	bulwark = {
+		id = "bulwark",
+		name = "Bulwark",
+		kind = "enforcer",
+		madraCost = 28,
+		cooldown = 11.0,
+		windup = 0.1,
+		damage = 0,
+		buffDuration = 6.0,
+		damageBuff = 0,
+		mitigation = 0.40,
+		regionScaled = false,
+	},
+	swiftstep = {
+		id = "swiftstep",
+		name = "Swiftstep",
+		kind = "enforcer",
+		madraCost = 22,
+		cooldown = 7.0,
+		windup = 0.05,
+		damage = 0,
+		buffDuration = 4.0,
+		damageBuff = 0.15,
+		mitigation = 0.10,
+		regionScaled = false,
+	},
+
+	-- Forger
+	barrier = {
+		id = "barrier",
+		name = "Barrier",
+		kind = "forger",
+		madraCost = 40,
+		cooldown = 12.0,
+		windup = 0.4,
+		damage = 0,
+		buffDuration = 8.0,
+		damageBuff = 0,
+		mitigation = 0.55,
+		regionScaled = false,
+	},
+	caltrops = {
+		id = "caltrops",
+		name = "Caltrops",
+		kind = "forger",
+		madraCost = 45,
+		cooldown = 10.0,
+		windup = 0.5,
+		damage = 30,
+		buffDuration = 10.0,
+		damageBuff = 0,
+		mitigation = 0,
+		regionScaled = false,
+	},
+	sentry = {
+		id = "sentry",
+		name = "Sentry",
+		kind = "forger",
+		madraCost = 55,
+		cooldown = 16.0,
+		windup = 0.7,
+		damage = 24,
+		buffDuration = 12.0,
+		damageBuff = 0,
+		mitigation = 0,
+		regionScaled = false,
+	},
+
+	-- Ruler -- these are the terrain-dependent ones. Monstrous in a
+	-- wellspring, close to useless on barren ground.
+	upheaval = {
+		id = "upheaval",
+		name = "Upheaval",
+		kind = "ruler",
+		madraCost = 70,
+		cooldown = 14.0,
+		windup = 1.4,
+		damage = 95,
+		buffDuration = 0,
+		damageBuff = 0,
+		mitigation = 0,
+		regionScaled = true,
+	},
+	siphon = {
+		id = "siphon",
+		name = "Siphon",
+		kind = "ruler",
+		madraCost = 50,
+		cooldown = 11.0,
+		windup = 0.8,
+		damage = 55,
+		buffDuration = 0,
+		damageBuff = 0,
+		mitigation = 0,
+		regionScaled = true,
+	},
+	tempest = {
+		id = "tempest",
+		name = "Tempest",
+		kind = "ruler",
+		madraCost = 85,
+		cooldown = 20.0,
+		windup = 1.8,
+		damage = 140,
+		buffDuration = 0,
+		damageBuff = 0,
+		mitigation = 0,
+		regionScaled = true,
+	},
+} :: { [string]: Technique }
+
+-- One slot per technique type.
+Config.LoadoutSlots = { "striker", "enforcer", "forger", "ruler" }
+
+Config.DefaultLoadout =
+	{ striker = "lance", enforcer = "surge", forger = "barrier", ruler = "siphon" }
+
 return Config
