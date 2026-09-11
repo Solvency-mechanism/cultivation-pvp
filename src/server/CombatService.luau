@@ -62,7 +62,7 @@ type Construct = {
 
 	`player` is set only for `kind == "player"`. ]]
 export type Combatant = {
-	kind: "player" | "dummy",
+	kind: "player" | "dummy" | "npc",
 	combatantId: number,
 	actor: Combat.Actor,
 	model: Model,
@@ -122,6 +122,21 @@ local killHandler: ((Player) -> ())? = nil
 
 function CombatService.setKillHandler(handler: (Player) -> ())
 	killHandler = handler
+end
+
+--[[ Fired from damageCombatant whenever a hit lands on an npc-kind target --
+	the "has-been-hit flag flips in damageCombatant" from npcs.md, except the
+	flag itself lives in NpcService, not here, the same division
+	setKillHandler/setDrainedHandler/setRefusalHandler already draw: this
+	tells the other service a hit happened; it does not hold the
+	consequence. Handler receives the NPC's model and the attacker's own
+	Actor, so NpcService can retaliate through the exact same
+	CombatService.dummyCast loop a caster dummy already uses -- dummyCast
+	never reads `.kind`, so nothing there needed to change. ]]
+local npcHitHandler: ((Model, Combat.Actor) -> ())? = nil
+
+function CombatService.setNpcHitHandler(handler: (Model, Combat.Actor) -> ())
+	npcHitHandler = handler
 end
 
 -- A refused request still costs the server work. The global cooldown already
@@ -511,6 +526,21 @@ local function combatantById(combatantId: number): Combatant?
 	return nil
 end
 
+--[[ Whether an Actor belongs to an NPC, per npcs.md's bracket exemption --
+	`Actor` itself carries no `kind`, only `Combatant` does, so this resolves
+	the id back through `combatantById` the same way a dummy attacker's id
+	already round-trips. Used on the ATTACKER side of a bracket check, where
+	only a bare `Combat.Actor` is available; the target side already has its
+	full `Combatant` (with `.kind`) in hand and needs no lookup. ]]
+local function isNpcActor(actor: Combat.Actor): boolean
+	local id = tonumber(actor.id)
+	if not id then
+		return false
+	end
+	local combatant = combatantById(id)
+	return combatant ~= nil and combatant.kind == "npc"
+end
+
 -- The last bracket notice already told to each attacker, keyed by
 -- (relation, targetCombatantId) per bracket-tone.md -- a duel against one
 -- person says it once, and a new target says it again.
@@ -593,13 +623,18 @@ local function validateLockTarget(
 		return nil, "no_target"
 	end
 	local range = Config.Combat.ranges[tech.kind] or 0
+	-- Per npcs.md: an NPC has no bracket relation to anyone, so a lock
+	-- reaches it regardless of stage, unconditionally -- not folded into
+	-- the "notice" branch below, which is a mode a tester can flip and an
+	-- NPC's exemption must not depend on.
 	local ok, reason = Combat.canUseOnTarget(
 		actor,
 		toVec3(casterRoot.Position),
 		target.actor,
 		toVec3(target.root.Position),
 		range,
-		hasLineOfSight(character, target.model)
+		hasLineOfSight(character, target.model),
+		target.kind == "npc"
 	)
 	if not ok then
 		if reason == "out_of_bracket" and Config.Combat.crossBracket == "notice" then
@@ -726,7 +761,14 @@ local function damageCombatant(source: Combat.Actor, target: Combatant, raw: num
 	if target.actor.health <= 0 then
 		return
 	end
-	if not Combat.canEngage(source, target.actor) then
+	-- Per npcs.md: an NPC has no bracket relation to anyone, on either side
+	-- of the hit -- an NPC retaliating through its own dummyCast-style loop
+	-- is exempt exactly as a player attacking an NPC is.
+	if
+		target.kind ~= "npc"
+		and not isNpcActor(source)
+		and not Combat.canEngage(source, target.actor)
+	then
 		notifyBracketRelation(source, target, Combat.bracketRelation(source, target.actor))
 		if Config.Combat.crossBracket == "refuse" then
 			return
@@ -762,6 +804,9 @@ local function damageCombatant(source: Combat.Actor, target: Combatant, raw: num
 		-- Madra/MaxMadra are player-only; dummies neither spend nor need to
 		-- show them.
 		publish(target.player)
+	end
+	if target.kind == "npc" and npcHitHandler then
+		npcHitHandler(target.model, source)
 	end
 
 	--[[ Every applied hit, from one place, so a Ruler sweep and a construct tick
@@ -1104,21 +1149,31 @@ end
 -- not declared yet at this point in the file.
 
 --[[ Registers a Model as a full combatant -- same damage-resolution path,
-	same `Combat.canEngage` bracket check a player already goes through.
-	`stageIndex` is fixed at registration rather than derived, unlike a
-	player's: a dummy's bracket is something a tester sets deliberately, to
-	exercise `canEngage`'s refusal for the first time without needing two
-	real players parked at two different stages, which is why it has never
-	been properly exercised.
+	same `Combat.canEngage` bracket check a player already goes through
+	(unless `kind == "npc"`: see the bracket exemption in `damageCombatant`
+	and `validateLockTarget` below, per npcs.md). `stageIndex` is fixed at
+	registration rather than derived, unlike a player's: a dummy's bracket
+	is something a tester sets deliberately, to exercise `canEngage`'s
+	refusal without needing two real players at two different stages.
 
 	Tags and attributes follow the scheme agreed directly with interface:
 	CollectionService tag `"Combatant"`, and `CombatantId`/`Health`/
 	`MaxHealth`/`StageIndex`/`Stage` set on the model using the exact names a
 	player already carries, so one nameplate read path covers both. Returns
-	the actor so the caller (DummyService) can poll `actor.health` on its own
-	tick rather than CombatService needing a reason to know DummyService
-	exists. ]]
-function CombatService.registerDummy(model: Model, stageIndex: number): Combat.Actor?
+	the actor so the caller (DummyService, NpcService) can poll
+	`actor.health` on its own tick rather than CombatService needing a
+	reason to know either of them exists.
+
+	Generalised from the dummy-only `registerDummy`/`unregisterDummy`/
+	`resetDummyHealth` this replaces -- DummyService's three call sites were
+	updated to these names rather than keeping the old ones as aliases, and
+	NpcService calls them directly too rather than gaining its own
+	redundant `registerNpc` wrapper. ]]
+function CombatService.registerCombatant(
+	model: Model,
+	stageIndex: number,
+	kind: "dummy" | "npc"
+): Combat.Actor?
 	local stage = Config.Stages[stageIndex]
 	local root = model:FindFirstChild("HumanoidRootPart")
 	if not stage or not root or not root:IsA("BasePart") then
@@ -1131,7 +1186,7 @@ function CombatService.registerDummy(model: Model, stageIndex: number): Combat.A
 	local actor = Combat.newActor(Config, tostring(combatantId), stageIndex)
 
 	dummies[model] = {
-		kind = "dummy",
+		kind = kind,
 		combatantId = combatantId,
 		actor = actor,
 		model = model,
@@ -1150,23 +1205,36 @@ function CombatService.registerDummy(model: Model, stageIndex: number): Combat.A
 	return actor
 end
 
-function CombatService.unregisterDummy(model: Model)
+function CombatService.unregisterCombatant(model: Model)
 	dummies[model] = nil
 end
 
---[[ Heals a registered dummy to full and republishes -- the auto-reset a
-	dummy needs to be a continuous instrument rather than a respawn chore.
-	No-ops for a model that was never registered or has since been
-	unregistered, so a reset scheduled just before a `/cleardummies` cannot
+--[[ Heals a registered combatant to full and republishes -- the auto-reset
+	a dummy needs to be a continuous instrument rather than a respawn chore,
+	and the health half of an NPC's respawn (NpcService also repositions the
+	model back to its route start, which this knows nothing about). No-ops
+	for a model that was never registered or has since been unregistered, so
+	a reset scheduled just before a `/cleardummies` or a despawn cannot
 	resurrect one. ]]
-function CombatService.resetDummyHealth(model: Model)
-	local dummy = dummies[model]
-	if not dummy then
+function CombatService.resetCombatantHealth(model: Model)
+	local combatant = dummies[model]
+	if not combatant then
 		return
 	end
-	dummy.actor.health = Combat.maxHealth(Config, dummy.actor.stageIndex)
-	mirrorHumanoid(dummy.humanoid, dummy.actor)
-	publishHealth(model, dummy.actor)
+	combatant.actor.health = Combat.maxHealth(Config, combatant.actor.stageIndex)
+	mirrorHumanoid(combatant.humanoid, combatant.actor)
+	publishHealth(model, combatant.actor)
+end
+
+--[[ "Dead or gone" for whoever is retaliating against, or holding a lock,
+	or anything else that needs to know a combatant is still real without
+	holding a reference into CombatService's own registries -- resolves a
+	combatantId the same way `combatantById` does (a departed player's
+	character is gone, which `combatantById`'s Players:GetPlayerByUserId
+	lookup already answers the same as death does). ]]
+function CombatService.isCombatantAlive(combatantId: number): boolean
+	local combatant = combatantById(combatantId)
+	return combatant ~= nil and combatant.actor.health > 0
 end
 
 --[[ A scripted loop-caster, for DummyService's telegraphed-cast variant.

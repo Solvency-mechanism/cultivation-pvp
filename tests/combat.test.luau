@@ -235,6 +235,14 @@ local outOfBracket = Combat.newActor(Config, "p13", 6)
 local _, bracketReason = Combat.canUseOnTarget(locker, origin, outOfBracket, near5, 10, clearSight)
 eq("cross-bracket target refused", bracketReason, "out_of_bracket")
 
+-- ignoreBracket, per npcs.md: an NPC has no bracket relation to anyone, and
+-- the caller (CombatService) is the only one who knows to ask for this --
+-- canEngage itself is untouched.
+local okIgnored, reasonIgnored =
+	Combat.canUseOnTarget(locker, origin, outOfBracket, near5, 10, clearSight, true)
+check("ignoreBracket lets a cross-bracket target through", okIgnored)
+eq("ignoreBracket reason is ok", reasonIgnored, "ok")
+
 local _, rangeReason = Combat.canUseOnTarget(locker, origin, lockTarget, far500, 10, clearSight)
 eq("out-of-range target refused", rangeReason, "out_of_range")
 

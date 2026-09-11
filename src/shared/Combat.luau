@@ -217,18 +217,25 @@ end
 	function for a lock technique too, so there is exactly one answer to
 	"can I hit this" rather than a client copy that can drift from the
 	server's. ]]
+--[[ `ignoreBracket`, per npcs.md: an NPC has no bracket relation to anyone,
+	and `Actor` itself carries no `kind` to detect that from -- only the
+	caller (CombatService, which knows a target's `Combatant.kind`) can tell.
+	This does not touch `canEngage`, which the bracket-tone ruling keeps pure
+	and unchanged; it only lets THIS function's own bracket check be skipped
+	by a caller that already knows it should be. ]]
 function Combat.canUseOnTarget(
 	caster: Actor,
 	casterPosition: Vec3,
 	target: Actor,
 	targetPosition: Vec3,
 	range: number,
-	hasLineOfSight: (Vec3, Vec3) -> boolean
+	hasLineOfSight: (Vec3, Vec3) -> boolean,
+	ignoreBracket: boolean?
 ): (boolean, string)
 	if target.health <= 0 then
 		return false, "target_dead"
 	end
-	if not Combat.canEngage(caster, target) then
+	if not ignoreBracket and not Combat.canEngage(caster, target) then
 		return false, "out_of_bracket"
 	end
 	if distance(casterPosition, targetPosition) > range then

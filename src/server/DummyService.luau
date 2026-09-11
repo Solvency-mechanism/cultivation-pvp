@@ -4,7 +4,7 @@
 	exercising `Combat.canEngage` bracket refusal, and driving the
 	defender-side cast bar, none of which has ever run against a real target
 	in this project. A dummy is registered through CombatService's Combatant
-	API (registerDummy/resetDummyHealth/dummyCast) and takes damage through
+	API (registerCombatant/resetCombatantHealth/dummyCast) and takes damage through
 	the exact same resolution and damage functions a player does -- there is
 	no dummy-specific combat logic here, only spawning, patrol, and the
 	auto-reset poll.
@@ -199,9 +199,9 @@ end
 
 local function register(model: Model, root: BasePart, stageIndex: number, kind: Kind): Dummy?
 	model.Parent = ensureFolder()
-	local actor = CombatService.registerDummy(model, stageIndex)
+	local actor = CombatService.registerCombatant(model, stageIndex, "dummy")
 	if not actor then
-		warn(`[dummy] registerDummy refused stage index {stageIndex}`)
+		warn(`[dummy] registerCombatant refused stage index {stageIndex}`)
 		model:Destroy()
 		return nil
 	end
@@ -277,7 +277,7 @@ function DummyService.clearAll()
 	local snapshot = table.clone(dummies)
 	table.clear(dummies)
 	for _, dummy in snapshot do
-		CombatService.unregisterDummy(dummy.model)
+		CombatService.unregisterCombatant(dummy.model)
 		dummy.model:Destroy()
 	end
 end
@@ -309,7 +309,7 @@ function DummyService.tick(now: number)
 			if not dummy.resetAt then
 				dummy.resetAt = now + RESET_DELAY
 			elseif now >= dummy.resetAt then
-				CombatService.resetDummyHealth(dummy.model)
+				CombatService.resetCombatantHealth(dummy.model)
 				dummy.resetAt = nil
 			end
 			continue
