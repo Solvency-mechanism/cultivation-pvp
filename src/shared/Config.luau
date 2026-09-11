@@ -562,8 +562,10 @@ Config.Techniques = {
 		purpose and outlasts a channel this short that gets interrupted,
 		because the snap is the event of the break, not the time spent in
 		red. Tests: a quick homing channel, a load-bearing slow, and that
-		snap. Priced by the rule: at 0.25 it must hit no harder than lance
-		under release-profile windups. ]]
+		snap. Priced by the rule, which constrains the HEAVIER technique: a
+		0.25 commit means every striker that hits harder must commit at least
+		0.25, and lance commits 0.15 under the release profile -- so this
+		hits exactly as hard as lance, never less, and lance is not heavier. ]]
 	hoarfrost = {
 		id = "hoarfrost",
 		name = "Hoarfrost",
@@ -571,7 +573,7 @@ Config.Techniques = {
 		madraCost = 20,
 		cooldown = 5.0,
 		windup = 0,
-		damage = 24,
+		damage = 42,
 		buffDuration = 0,
 		damageBuff = 0,
 		mitigation = 0,

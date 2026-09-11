@@ -435,22 +435,47 @@ local function commitOf(tech): number
 	return if tech.castTime > 0 then tech.castTime else tech.windup
 end
 
-for _, kind in { "striker", "ruler" } do
-	local pool = {}
-	for _, tech in Config.Techniques do
-		if tech.kind == kind then
-			table.insert(pool, tech)
-		end
-	end
-	for _, heavier in pool do
-		for _, lighter in pool do
-			if heavier.damage > lighter.damage then
-				check(
-					`{kind}: {heavier.id} telegraphs at least as long as {lighter.id}`,
-					commitOf(heavier) >= commitOf(lighter)
-				)
+local function checkCommitOrdering(profile: string)
+	for _, kind in { "striker", "ruler" } do
+		local pool = {}
+		for _, tech in Config.Techniques do
+			if tech.kind == kind then
+				table.insert(pool, tech)
 			end
 		end
+		for _, heavier in pool do
+			for _, lighter in pool do
+				if heavier.damage > lighter.damage then
+					check(
+						`{kind} ({profile}): {heavier.id} telegraphs at least as long as {lighter.id}`,
+						commitOf(heavier) >= commitOf(lighter)
+					)
+				end
+			end
+		end
+	end
+end
+
+checkCommitOrdering(Config.Profile)
+
+--[[ The development profile lengthens lance and volley's windups for cast-bar
+	legibility, and this suite loads under whichever profile Config is set to.
+	A technique priced against the development windups can violate the rule
+	under release ones -- hoarfrost at 0.25 was, against release lance at 0.15
+	-- and that is exactly the profile the shipped game runs. So the ordering
+	is checked under BOTH: the release values are restored here, checked, and
+	the loaded profile's values put back. The pairs are the ones the profile
+	block in Config overrides; if it grows another, this list grows with it. ]]
+do
+	local RELEASE_WINDUPS = { lance = 0.15, volley = 0.35 }
+	local restore: { [string]: number } = {}
+	for id, windup in RELEASE_WINDUPS do
+		restore[id] = Config.Techniques[id].windup
+		Config.Techniques[id].windup = windup
+	end
+	checkCommitOrdering("release")
+	for id, windup in restore do
+		Config.Techniques[id].windup = windup
 	end
 end
 
