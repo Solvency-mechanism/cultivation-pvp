@@ -1758,7 +1758,10 @@ local function refreshTarget()
 		and ownStage == stageIndex
 
 	local cast = Nameplates.castOf(target.id)
-	local drawingCast = cast ~= nil and InterfaceSpec.telegraphs(cast.duration)
+	-- A snap is drawn even for a cast under the floor: the bar could not be
+	-- seen, but its breaking is an event and is shown. Same rule as the plate.
+	local drawingCast = cast ~= nil
+		and (InterfaceSpec.telegraphs(cast.duration) or Nameplates.isSnapped(cast))
 
 	if not sameBracket then
 		targetUi.stroke.Color = DANGER
@@ -1815,7 +1818,7 @@ local function refreshOwnCast()
 		castUi.frame.Visible = false
 		return
 	end
-	if not InterfaceSpec.telegraphs(cast.duration) then
+	if not InterfaceSpec.telegraphs(cast.duration) and not Nameplates.isSnapped(cast) then
 		castUi.frame.Visible = false
 		return
 	end

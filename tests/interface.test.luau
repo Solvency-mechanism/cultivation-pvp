@@ -149,13 +149,32 @@ check("a 0.9s pierce telegraphs", InterfaceSpec.telegraphs(0.9))
 -- The telegraph is the commit: castTime for a channelled technique, windup for
 -- everything else. One number, per the one-timer ruling -- a channel with
 -- windup 0 is not a flash, it is a three-second bar.
+--[[ Three ways a striker can be telegraphed, and the assertion accepts any:
+
+	1. A commit at or above the floor -- the bar is the telegraph. Every
+	   striker before the projectile variations was this.
+	2. A projectile -- the FLIGHT is the telegraph. A Shard has no bar because
+	   you dodge the bolt, which is what "skillshot" means. An instant hitscan
+	   with no bar would fail here; an instant bolt does not, because there is
+	   still a thing to react to.
+	3. A named sub-floor channel. A real channel -- server-tracked, interruptible
+	   -- deliberately under the floor is a design choice about a technique that
+	   is meant not to be reactable, and it is the case this layer had to give
+	   an explicit answer for (no bar; the snap still draws). It is a NAMED
+	   list so that a future one fails this test until someone adds it on
+	   purpose. It cannot happen by accident. ]]
+local SUB_FLOOR_CHANNELS: { [string]: boolean } = { hoarfrost = true }
+
 for id, tech in Config.Techniques do
 	if tech.kind == "striker" then
 		local commit = if tech.castTime > 0 then tech.castTime else tech.windup
+		local byCommit = InterfaceSpec.telegraphs(commit)
+		local byFlight = (tech :: any).projectile ~= nil
+		local byDesign = SUB_FLOOR_CHANNELS[id] == true and tech.castTime > 0
 		check(
-			`striker {id} is telegraphable`,
-			InterfaceSpec.telegraphs(commit),
-			`commit {commit} is under the {InterfaceSpec.Cast.windupFloor} floor`
+			`striker {id} is telegraphable, by bar, by flight, or by name`,
+			byCommit or byFlight or byDesign,
+			`commit {commit} is under the {InterfaceSpec.Cast.windupFloor} floor with no projectile and no exemption`
 		)
 	end
 end

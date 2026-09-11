@@ -586,8 +586,13 @@ local function refresh(who: Combatant, plate: Plate)
 		plate.name.TextColor3 = color(InterfaceSpec.stageColor(stageIndex))
 	end
 
+	--[[ A cast under the floor draws no bar -- it cannot be seen -- but its
+		SNAP is still drawn, because the snap is the event of the cast breaking
+		and an event needs no duration to have happened. Without this, an
+		interrupted sub-floor channel was invisible end to end: no bar during,
+		no sign after. Found by asking what a 0.1s channel would show. ]]
 	local cast = Nameplates.castOf(who.id)
-	if cast and InterfaceSpec.telegraphs(cast.duration) then
+	if cast and (InterfaceSpec.telegraphs(cast.duration) or Nameplates.isSnapped(cast)) then
 		plate.castRow.Visible = true
 		plate.stage.Visible = false
 		if cast.snappedAt then
