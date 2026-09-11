@@ -1325,13 +1325,35 @@ local RETICLE_GAP = px(5)
 local RETICLE_LEN = px(6)
 local RETICLE_THICK = math.max(px(2), 2)
 
+--[[ The reticle lives in its own ScreenGui, and the reason is a bug that was
+	live in the deployed build.
+
+	The HUD's ScreenGui respects Roblox's top inset -- correctly, so notices and
+	the target frame sit below the engine's own chrome. But that means its
+	(0.5, 0.5) is not the viewport's centre; it is half an inset below it, which
+	at a high-DPI display was measured at 27 pixels. The aim ray follows the
+	camera's optical axis, which IS the viewport centre, and so does the
+	hitmarker in `Impact`, whose ScreenGui ignores the inset. So the reticle
+	sat 27 pixels under where the shot actually went and under the X it is
+	meant to be concentric with. A tester who knew exactly where to look
+	cropped the true centre at 4x and 12x and found hair.
+
+	Its own ScreenGui with the inset ignored puts it in the same space as the
+	ray and the hitmarker, with no arithmetic to drift when the inset does. ]]
+local reticleScreen = Instance.new("ScreenGui")
+reticleScreen.Name = "CultivationReticle"
+reticleScreen.ResetOnSpawn = false
+reticleScreen.IgnoreGuiInset = true
+reticleScreen.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+reticleScreen.Parent = player:WaitForChild("PlayerGui")
+
 local reticle = Instance.new("Frame")
 reticle.Name = "Reticle"
 reticle.AnchorPoint = Vector2.new(0.5, 0.5)
 reticle.Position = UDim2.fromScale(0.5, 0.5)
 reticle.Size = UDim2.fromOffset(px(40), px(40))
 reticle.BackgroundTransparency = 1
-reticle.Parent = screen
+reticle.Parent = reticleScreen
 
 local reticleTicks: { Frame } = {}
 for _, spec in
@@ -1355,7 +1377,7 @@ do
 		else UDim2.fromOffset(RETICLE_LEN, RETICLE_THICK)
 	tick.BorderSizePixel = 0
 	tick.BackgroundColor3 = TEXT
-	tick.BackgroundTransparency = 0.45
+	tick.BackgroundTransparency = InterfaceSpec.Reticle.idleTransparency
 	tick.Parent = reticle
 	table.insert(reticleTicks, tick)
 
@@ -1374,7 +1396,7 @@ end
 
 local function refreshReticle()
 	local tint = TEXT
-	local transparency = 0.45
+	local transparency = InterfaceSpec.Reticle.idleTransparency
 
 	if aimOnTarget and currentTarget then
 		local ownStage = player:GetAttribute("StageIndex")

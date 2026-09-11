@@ -547,6 +547,21 @@ InterfaceSpec.Picker = {
 	unavailableTransparency = 0.55,
 }
 
+--[[ The reticle's resting weight.
+
+	It was 0.45 -- deliberately quiet, because a loud crosshair at screen
+	centre for the whole session is exactly the clutter this HUD exists to
+	refuse. Then a tester who knew precisely what to look for, and where,
+	could not find it in two honest magnified crops over a dark-haired
+	character. In third person the reticle sits over your own character's head
+	and shoulders essentially always, which is the busiest background on the
+	screen, and a two-pixel light tick at 45% over dark hair is mid-grey on
+	dark. 0.25 keeps it quiet and makes it findable; the lit state on a valid
+	target is unchanged at fully opaque, which is the state that matters. ]]
+InterfaceSpec.Reticle = {
+	idleTransparency = 0.25,
+}
+
 InterfaceSpec.Notice = {
 	width = 460,
 	top = 14,
