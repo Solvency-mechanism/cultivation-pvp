@@ -26,6 +26,7 @@
 	people in a node fight rather than just whoever is under your reticle.
 ]]
 
+local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -39,6 +40,11 @@ local Nameplates = {}
 local player = Players.LocalPlayer
 
 local PLATE_NAME = "HudNameplate"
+--[[ The tag CombatService puts on anything that can be fought, agreed with it
+	directly rather than inferred. A dummy carries the same `Health`, `MaxHealth`,
+	`StageIndex` and `Stage` attributes a player does, on the Model instead of on
+	the Player, which is what lets one read path cover both. ]]
+local COMBATANT_TAG = "Combatant"
 -- PresenceService's own plate, which this one supersedes.
 local SERVER_PLATE_NAME = "CultivatorPlate"
 
@@ -110,6 +116,25 @@ function Nameplates.castOf(userId: number): Cast?
 	return cast
 end
 
+--[[ A combatant, player or dummy, behind one shape.
+
+	The plate does not care which it is drawing. A player's attributes live on
+	the Player object and a dummy's live on its Model, so the only difference is
+	*which instance to read from* -- and that is one field rather than a second
+	code path. Combat made the same call server-side with its own `Combatant`
+	handle, deliberately: two parallel implementations of "who is in this fight"
+	would drift, and the drift would show up as a health bar that stops moving.
+
+	`id` is the combatant id: a player's UserId, always positive, or a dummy's
+	negative pseudo-id. That is why plates can be keyed by it without collision,
+	and why a cast broadcast binds to the right plate whoever cast it. ]]
+export type Combatant = {
+	id: number,
+	source: Instance,
+	model: Model,
+	name: string,
+}
+
 type Plate = {
 	gui: BillboardGui,
 	name: TextLabel,
@@ -118,7 +143,7 @@ type Plate = {
 	castRow: Frame,
 	castFill: Frame,
 	castLabel: TextLabel,
-	character: Model,
+	model: Model,
 	head: BasePart,
 	humanoid: Humanoid?,
 }
@@ -139,7 +164,7 @@ local function stroked(text: TextLabel): TextLabel
 	return text
 end
 
-local function buildPlate(target: Player, character: Model, head: BasePart): Plate?
+local function buildPlate(who: Combatant, head: BasePart): Plate?
 	local scale = InterfaceSpec.scale(
 		Workspace.CurrentCamera and Workspace.CurrentCamera.ViewportSize.Y or 1080
 	)
@@ -177,7 +202,7 @@ local function buildPlate(target: Player, character: Model, head: BasePart): Pla
 	nameLabel.TextColor3 = TEXT
 	nameLabel.TextXAlignment = Enum.TextXAlignment.Center
 	nameLabel.TextTruncate = Enum.TextTruncate.AtEnd
-	nameLabel.Text = target.DisplayName
+	nameLabel.Text = who.name
 	nameLabel.Parent = gui
 	stroked(nameLabel)
 
@@ -265,10 +290,10 @@ local function buildPlate(target: Player, character: Model, head: BasePart): Pla
 		castRow = castRow,
 		castFill = castFill,
 		castLabel = castLabel,
-		character = character,
+		model = who.model,
 		head = head,
 		-- May legitimately be nil here; see `standDownEngineTag`.
-		humanoid = character:FindFirstChildOfClass("Humanoid"),
+		humanoid = who.model:FindFirstChildOfClass("Humanoid"),
 	}
 end
 
@@ -299,39 +324,75 @@ local function standDownServerPlate(plate: Plate)
 	end
 end
 
-local function dropPlate(userId: number)
-	local plate = plates[userId]
+local function dropPlate(id: number)
+	local plate = plates[id]
 	if not plate then
 		return
 	end
-	plates[userId] = nil
+	plates[id] = nil
 	if plate.gui then
 		plate.gui:Destroy()
 	end
 end
 
-local function ensurePlate(target: Player)
-	if target == player then
-		return
-	end
-	local character = target.Character
-	if not character then
-		dropPlate(target.UserId)
-		return
-	end
-	local existing = plates[target.UserId]
-	if existing and existing.character == character and existing.gui.Parent then
-		return
-	end
-	dropPlate(target.UserId)
+--[[ Everything on screen that can be fought, gathered once per frame.
 
-	local head = character:FindFirstChild("Head")
+	Players first, then anything carrying CombatService's `Combatant` tag. A
+	tagged model that *is* a player's character is skipped rather than trusted:
+	nothing tags one today, and a plate drawn twice over one head is exactly the
+	bug this file already shipped once.
+
+	The table is reused rather than reallocated, because this runs every frame
+	and a fresh table per frame for eight entries is churn with nothing to show
+	for it. ]]
+local scratch: { Combatant } = {}
+
+local function combatants(): { Combatant }
+	table.clear(scratch)
+
+	for _, other in Players:GetPlayers() do
+		local character = other.Character
+		if other ~= player and character then
+			table.insert(scratch, {
+				id = other.UserId,
+				source = other,
+				model = character,
+				name = other.DisplayName,
+			})
+		end
+	end
+
+	for _, tagged in CollectionService:GetTagged(COMBATANT_TAG) do
+		if tagged:IsA("Model") and not Players:GetPlayerFromCharacter(tagged) then
+			local id = tagged:GetAttribute("CombatantId")
+			if typeof(id) == "number" then
+				table.insert(scratch, {
+					id = id,
+					source = tagged,
+					model = tagged,
+					name = tagged.Name,
+				})
+			end
+		end
+	end
+
+	return scratch
+end
+
+local function ensurePlate(who: Combatant)
+	local existing = plates[who.id]
+	if existing and existing.model == who.model and existing.gui.Parent then
+		return
+	end
+	dropPlate(who.id)
+
+	local head = who.model:FindFirstChild("Head")
 	if not head or not head:IsA("BasePart") then
 		return
 	end
-	local built = buildPlate(target, character, head)
+	local built = buildPlate(who, head)
 	if built then
-		plates[target.UserId] = built
+		plates[who.id] = built
 	end
 end
 
@@ -370,7 +431,7 @@ end
 local function standDownEngineTag(plate: Plate)
 	local humanoid = plate.humanoid
 	if not humanoid or not humanoid.Parent then
-		humanoid = plate.character:FindFirstChildOfClass("Humanoid")
+		humanoid = plate.model:FindFirstChildOfClass("Humanoid")
 		plate.humanoid = humanoid
 	end
 	if humanoid and humanoid.DisplayDistanceType ~= Enum.HumanoidDisplayDistanceType.None then
@@ -378,12 +439,12 @@ local function standDownEngineTag(plate: Plate)
 	end
 end
 
-local function refresh(target: Player, plate: Plate)
+local function refresh(who: Combatant, plate: Plate)
 	standDownServerPlate(plate)
 	standDownEngineTag(plate)
 
-	local health = target:GetAttribute("Health")
-	local maxHealth = target:GetAttribute("MaxHealth")
+	local health = who.source:GetAttribute("Health")
+	local maxHealth = who.source:GetAttribute("MaxHealth")
 	local fraction = InterfaceSpec.fraction(
 		if typeof(health) == "number" then health else 0,
 		if typeof(maxHealth) == "number" then maxHealth else 0
@@ -394,8 +455,8 @@ local function refresh(target: Player, plate: Plate)
 		then HEALTH_LOW
 		else HEALTH
 
-	local stage = target:GetAttribute("Stage")
-	local tier = target:GetAttribute("Tier")
+	local stage = who.source:GetAttribute("Stage")
+	local tier = who.source:GetAttribute("Tier")
 	if typeof(stage) == "string" then
 		plate.stage.Text = if typeof(tier) == "number" then `{stage}  ·  {tier}` else stage
 	else
@@ -405,12 +466,12 @@ local function refresh(target: Player, plate: Plate)
 	--[[ Stage colour is carried by the *name*, not by a separate chip. One
 		coloured element per plate; anything more and a busy fight becomes a
 		field of competing hues with no hierarchy. ]]
-	local stageIndex = target:GetAttribute("StageIndex")
+	local stageIndex = who.source:GetAttribute("StageIndex")
 	if typeof(stageIndex) == "number" then
 		plate.name.TextColor3 = color(InterfaceSpec.stageColor(stageIndex))
 	end
 
-	local cast = Nameplates.castOf(target.UserId)
+	local cast = Nameplates.castOf(who.id)
 	if cast and InterfaceSpec.telegraphs(cast.windup) then
 		local elapsed = os.clock() - cast.startedAt
 		local progress = math.clamp(elapsed / math.max(cast.windup, 1e-3), 0, 1)
@@ -455,15 +516,35 @@ function Nameplates.start()
 		casts[other.UserId] = nil
 	end)
 
+	--[[ A dummy's plate is dropped when its tag goes, which is how a despawned
+		dummy stops having a health bar floating where it used to be. Players are
+		covered by CharacterRemoving above. ]]
+	CollectionService:GetInstanceRemovedSignal(COMBATANT_TAG):Connect(function(instance: Instance)
+		local id = instance:GetAttribute("CombatantId")
+		if typeof(id) == "number" then
+			dropPlate(id)
+			casts[id] = nil
+		end
+	end)
+
 	RunService.RenderStepped:Connect(function()
-		for _, other in Players:GetPlayers() do
-			if other == player then
-				continue
-			end
-			ensurePlate(other)
-			local plate = plates[other.UserId]
+		local present: { [number]: boolean } = {}
+		for _, who in combatants() do
+			present[who.id] = true
+			ensurePlate(who)
+			local plate = plates[who.id]
 			if plate then
-				refresh(other, plate)
+				refresh(who, plate)
+			end
+		end
+
+		--[[ Anything with a plate that is no longer a combatant loses it. The
+			signals above catch the ordinary cases; this catches the rest --
+			a tag removed without the attribute, a model reparented, a dummy
+			destroyed outright -- so a plate cannot outlive the thing it names. ]]
+		for id in plates do
+			if not present[id] then
+				dropPlate(id)
 			end
 		end
 	end)
