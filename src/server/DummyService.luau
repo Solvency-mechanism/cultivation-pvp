@@ -29,11 +29,13 @@
 	to every other player's chat window the way a parsed chat message would.
 
 	The trailing `ahead` places the dummy on the CALLER's own centre ray
-	(root position plus root LookVector, a few studs out) instead of the
-	fixed row -- the only way to get a lockable target when the input
-	surface reaching this place is keyboard only, confirmed by landscape:
-	world clicks and a synthetic camera drag do not reach the game, so a
-	fixed row nobody can aim a camera at cannot be locked at all.
+	(root position plus root LookVector, five studs out) instead of the
+	fixed row, and shapes it as a ground-anchored ten-stud POST rather than
+	the row's 5-stud slab -- the only way to get a lockable target when the
+	input surface reaching this place is keyboard only, confirmed by
+	landscape: world clicks and a synthetic camera drag do not reach the
+	game, and the slab's own height was too short to catch a default-
+	pitched centre ray even on the yaw it did land on.
 ]]
 
 local Players = game:GetService("Players")
@@ -132,20 +134,35 @@ local function nextSpawnPosition(): Vector3
 	return Vector3.new(flat.X, (groundY or flat.Y) + 3, flat.Z)
 end
 
--- Six studs: the aim ray leaves the root along the camera look, pitched a
--- little down at default, so six studs plus the slab's 5-stud height keep a
--- fresh north-facing spawn's centre ray on it with no camera input at all.
--- Seven is fine as margin; twenty-five is not -- the ray has left the slab
--- by then.
-local AHEAD_DISTANCE = 6
+--[[ Five studs, not six: six was tuned for YAW alone (root facing landing
+	the ray's X/Z), and landscape found it misses on PITCH -- the aim ray
+	leaves the root along the camera look, pitched down by default, and at
+	six studs it passes under a 5-stud slab centred at root height. A
+	synthetic camera drag cannot level the pitch to compensate (seven tries,
+	uncontrollable), so the target has to cover the pitch instead of the
+	camera controlling it. ]]
+local AHEAD_DISTANCE = 5
 
---[[ The caller's own root position plus their facing, at the root's own
-	height rather than groundY + 3 -- the whole point is landing on the
-	caller's centre ray, not on the ground under it. Placement, not a
-	targeting shortcut: this only decides where a dummy appears, never sends
-	a cast or a lock on the caller's behalf. ]]
-local function positionAheadOf(player: Player): Vector3?
-	local character = player.Character
+-- Ground to about ten studs tall rather than the row's 5-stud slab
+-- centred at root height: from a root three studs up, five out, this
+-- covers any downward pitch to about 30 degrees and upward to about 50.
+-- Nothing under test cares about the target's height -- the lock is a
+-- raycast hit, the send is an id, the channel and projectile aim at the
+-- root, the slow scales the lerp -- the post only decides whether the ray
+-- lands at all.
+local AHEAD_POST_HEIGHT = 10
+local AHEAD_POST_SIZE = Vector3.new(2, AHEAD_POST_HEIGHT, 1)
+
+--[[ The centre of the post to place, or nil to fall back to the row --
+	ground-anchored rather than root-height, so the post's bottom actually
+	sits on the ground instead of floating or clipping into it. Placement,
+	not a targeting shortcut: this only decides where a dummy appears, never
+	sends a cast or a lock on the caller's behalf. ]]
+local function anchorFor(aheadOf: Player?): Vector3?
+	if not aheadOf then
+		return nil
+	end
+	local character = aheadOf.Character
 	if not character then
 		return nil
 	end
@@ -153,7 +170,10 @@ local function positionAheadOf(player: Player): Vector3?
 	if not root or not root:IsA("BasePart") then
 		return nil
 	end
-	return root.Position + root.CFrame.LookVector * AHEAD_DISTANCE
+	local aheadPoint = root.Position + root.CFrame.LookVector * AHEAD_DISTANCE
+	local groundY = ArenaService.groundYAt(aheadPoint)
+	local baseY = groundY or aheadPoint.Y
+	return Vector3.new(aheadPoint.X, baseY + AHEAD_POST_HEIGHT / 2, aheadPoint.Z)
 end
 
 local function buildRig(displayName: string, color: Color3): (Model, BasePart)
@@ -191,16 +211,21 @@ local function register(model: Model, root: BasePart, stageIndex: number, kind: 
 end
 
 --[[ `aheadOf`, when given, places the dummy on that player's own centre ray
-	instead of the fixed row -- the only way to get a dummy under a lock key
-	when the input surface reaching this place is keyboard only (confirmed by
-	landscape: world clicks and synthetic camera drag do not reach the game,
-	so a fixed row nobody can aim a camera at is not a usable lock target).
-	Falls back to the row if the caller's character is not resolvable, same
-	as it always has. ]]
+	instead of the fixed row, and resizes the root from the row's 5-stud
+	slab to the ten-stud post -- the only way to get a dummy under a lock
+	key when the input surface reaching this place is keyboard only
+	(confirmed by landscape: world clicks and synthetic camera drag do not
+	reach the game, and the row's own slab was too short to catch a
+	default-pitched centre ray even where it landed on yaw). Falls back to
+	the row, at the row's own slab size, if the caller's character is not
+	resolvable, same as it always has. ]]
 function DummyService.spawnStationary(stageName: string?, aheadOf: Player?)
 	local model, root = buildRig("Training Dummy", STATIONARY_COLOR)
-	local position = if aheadOf then positionAheadOf(aheadOf) else nil
-	root.CFrame = CFrame.new(position or nextSpawnPosition())
+	local anchor = anchorFor(aheadOf)
+	if anchor then
+		root.Size = AHEAD_POST_SIZE
+	end
+	root.CFrame = CFrame.new(anchor or nextSpawnPosition())
 	register(model, root, stageIndexOf(stageName), "stationary")
 end
 
@@ -211,10 +236,16 @@ end
 	free: phase starts at 0, which is t = 0.5, the exact midpoint between
 	patrolA and patrolB -- so a fresh spawn is already standing at `center`,
 	and the sine patrol crosses back through that same point every half
-	cycle after. ]]
+	cycle after. The post rides along at its own fixed elevation while
+	patrolling; nothing under test reads the target's height, only its
+	position and whether the lock ray reaches it. ]]
 function DummyService.spawnMoving(stageName: string?, aheadOf: Player?)
 	local model, root = buildRig("Training Dummy (Moving)", MOVING_COLOR)
-	local center = (if aheadOf then positionAheadOf(aheadOf) else nil) or nextSpawnPosition()
+	local anchor = anchorFor(aheadOf)
+	if anchor then
+		root.Size = AHEAD_POST_SIZE
+	end
+	local center = anchor or nextSpawnPosition()
 	root.CFrame = CFrame.new(center)
 	local dummy = register(model, root, stageIndexOf(stageName), "moving")
 	if dummy then
@@ -230,8 +261,11 @@ function DummyService.spawnCaster(stageName: string?, techId: string?, aheadOf: 
 		then techId :: string
 		else DEFAULT_CASTER_TECH
 	local model, root = buildRig("Training Dummy (Casting)", CASTER_COLOR)
-	local position = if aheadOf then positionAheadOf(aheadOf) else nil
-	root.CFrame = CFrame.new(position or nextSpawnPosition())
+	local anchor = anchorFor(aheadOf)
+	if anchor then
+		root.Size = AHEAD_POST_SIZE
+	end
+	root.CFrame = CFrame.new(anchor or nextSpawnPosition())
 	local dummy = register(model, root, stageIndexOf(stageName), "caster")
 	if dummy then
 		dummy.techId = resolvedTechId
