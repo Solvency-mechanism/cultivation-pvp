@@ -231,6 +231,26 @@ function Combat.deathLoss(config: any, stageIndex: number): number
 	return stage.perTierProgress * config.Combat.deathLossTierFraction
 end
 
+--[[ A construct's tick/expiry decision for one step, extracted out of
+	CombatService's Roblox-coupled stepConstructs so it is unit-testable
+	under Lune without instantiating that whole binding layer. Tick is
+	decided before expiry and mutates `timer.nextTickAt` in place when it
+	fires, so a duration landing exactly on a tick still delivers that tick
+	before the caller removes the construct -- checking expiry first would
+	silently eat the last tick of any duration that is an exact multiple of
+	`tickSeconds`. ]]
+function Combat.stepConstructTimer(
+	timer: { nextTickAt: number, expiresAt: number },
+	now: number,
+	tickSeconds: number
+): (boolean, boolean)
+	local shouldTick = now >= timer.nextTickAt
+	if shouldTick then
+		timer.nextTickAt = now + tickSeconds
+	end
+	return shouldTick, now >= timer.expiresAt
+end
+
 --[[ Resolve a client-supplied slot name against the server-held loadout.
 
 	This is the trust boundary. The client sends a slot name and nothing else,

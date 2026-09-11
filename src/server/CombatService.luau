@@ -1093,35 +1093,38 @@ function CombatService.onPlayerRemoving(player: Player)
 	end
 end
 
+--[[ The tick-before-expiry ordering itself lives in Combat.stepConstructTimer,
+	a pure function Lune can exercise directly. Config's own doc comment on
+	Technique used to instruct designers to sit a duration a half second
+	past a multiple to dodge the old bug -- that was documenting it as a
+	rule rather than fixing it. ]]
 local function stepConstructs(now: number)
 	for i = #constructs, 1, -1 do
 		local construct = constructs[i]
-		if now >= construct.expiresAt then
+		local shouldTick, expired =
+			Combat.stepConstructTimer(construct, now, Config.Combat.constructTickSeconds)
+
+		if shouldTick then
+			local owner = Players:GetPlayerByUserId(construct.ownerId)
+			local ownerActor = if owner then actors[owner.UserId] else nil
+			if ownerActor then
+				-- Deduped by Model rather than UserId, so a dummy standing in
+				-- a construct dedupes exactly the same way a player does.
+				local seen: { [Model]: boolean } = {}
+				local parts = Workspace:GetPartBoundsInRadius(construct.position, construct.radius)
+				for _, part in parts do
+					local target = combatantFromInstance(part)
+					if target and target.player ~= owner and not seen[target.model] then
+						seen[target.model] = true
+						damageCombatant(ownerActor, target, construct.damagePerTick, now)
+					end
+				end
+			end
+		end
+
+		if expired then
 			construct.part:Destroy()
 			table.remove(constructs, i)
-			continue
-		end
-		if now < construct.nextTickAt then
-			continue
-		end
-		construct.nextTickAt = now + Config.Combat.constructTickSeconds
-
-		local owner = Players:GetPlayerByUserId(construct.ownerId)
-		local ownerActor = if owner then actors[owner.UserId] else nil
-		if not ownerActor then
-			continue
-		end
-
-		-- Deduped by Model rather than UserId, so a dummy standing in a
-		-- construct dedupes exactly the same way a player does.
-		local seen: { [Model]: boolean } = {}
-		local parts = Workspace:GetPartBoundsInRadius(construct.position, construct.radius)
-		for _, part in parts do
-			local target = combatantFromInstance(part)
-			if target and target.player ~= owner and not seen[target.model] then
-				seen[target.model] = true
-				damageCombatant(ownerActor, target, construct.damagePerTick, now)
-			end
 		end
 	end
 end

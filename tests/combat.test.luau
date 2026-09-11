@@ -190,6 +190,34 @@ eq("health floors at zero", target.health, 0)
 near("overkill is clamped to remaining health", lethal.dealt, 400 - 100, 1e-9)
 eq("corpses take no further damage", Combat.applyDamage(Config, target, 50, 0).dealt, 0)
 
+--[[ Construct tick/expiry ordering: a duration that is an exact multiple of
+	the tick interval must still deliver its last tick before expiring.
+	CombatService.stepConstructs used to check expiry first and silently eat
+	it -- caltrops (10s / 2s ticks) delivered 4 ticks instead of 5, sentry
+	(12s) delivered 5 instead of 6, both comments wrong since day one and
+	uncaught because nothing cast a construct at anything. This drives
+	Combat.stepConstructTimer, the extracted pure decision, the same way
+	CombatService's own Heartbeat loop does: repeated calls at a cadence
+	finer than the tick interval, not one calculation. ]]
+local function countConstructTicks(durationSeconds: number, tickSeconds: number): number
+	local timer = { nextTickAt = tickSeconds, expiresAt = durationSeconds }
+	local ticks = 0
+	local now = 0
+	local expired = false
+	while not expired do
+		now += tickSeconds / 2
+		local shouldTick
+		shouldTick, expired = Combat.stepConstructTimer(timer, now, tickSeconds)
+		if shouldTick then
+			ticks += 1
+		end
+	end
+	return ticks
+end
+
+eq("an exact-multiple duration still delivers its last tick", countConstructTicks(10, 2), 5)
+eq("a duration a half second past a multiple is unaffected", countConstructTicks(8.5, 2), 4)
+
 local mitigated = Combat.newActor(Config, "t2", LOWGOLD)
 Combat.use(Config, mitigated, "bulwark", 0)
 near("mitigation reduces incoming", Combat.applyDamage(Config, mitigated, 100, 1).dealt, 60, 1e-9)
