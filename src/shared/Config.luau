@@ -518,14 +518,33 @@ Config.DefaultLoadout =
 Config.Profile = "development" :: "development" | "release"
 
 if Config.Profile == "development" then
-	--[[ Refinement. Kept at the values Remi's session actually ran on rather
-		than cut further, deliberately: landscape is about to make cycling read
-		the ground instead of the node, which moves this curve on its own. Two
-		simultaneous changes to the same curve would confound each other, so
-		these are re-aimed once that lands and its effect is measured. ]]
-	Config.Stages[5].perTierProgress = 350 -- release 9000
-	Config.Stages[6].perTierProgress = 950 -- release 24000
-	Config.Stages[7].perTierProgress = 1750 -- release 45000
+	--[[ Refinement, re-aimed against MEASURED rates rather than guessed ones.
+
+		These were deliberately held at Remi's session values while cycling
+		still read the node, because making cycling read the GROUND moves this
+		curve by itself and two simultaneous changes would have confounded each
+		other. That landed and was measured, so this is the re-aim.
+
+		What the ground change actually did: bare ground was previously always
+		350s per tier, because off-node returned `open` unconditionally. It is
+		now a 5.2x spread -- 135s in a Wellspring, 700s in the Barrens. And the
+		average multiplier on a spawned node rose 12% (1.38 -> 1.55), because
+		the old rolled table put 40% of nodes on `open` and the derived
+		distribution puts 11%.
+
+		THE TARGET THIS IS AIMED AT: a tester on a MEDIOCRE path -- a common
+		node on open ground, the 3x case -- should reach the Lowgold ceiling in
+		about ten minutes, so a breakthrough is routinely reachable inside a
+		test session rather than being a thing we keep failing to exercise. Ten
+		tiers at 60s each is 600s, so the per-tier figure is 3 x 60 = 180.
+
+		What that buys at the extremes: a Wellspring Prime is 3.5s per tier, so
+		the ceiling in under a minute if a tester wants it. Barren bare ground
+		is 360s, which is slow -- but that is somebody standing in the worst
+		square on the map doing nothing, and the spread IS the design now. ]]
+	Config.Stages[5].perTierProgress = 180 -- release 9000
+	Config.Stages[6].perTierProgress = 490 -- release 24000
+	Config.Stages[7].perTierProgress = 900 -- release 45000
 
 	--[[ Madra regen is the single biggest limit on testing throughput. At the
 		release 6%/sec a tester spends most of their time waiting on a pool
