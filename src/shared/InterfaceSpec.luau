@@ -307,7 +307,38 @@ InterfaceSpec.Slot = {
 	-- affects every slot at once and is always short -- so it draws as a thin
 	-- sweep across the bottom of every slot rather than as a second scrim.
 	gcdBarHeight = 3,
+
+	--[[ The reach pip: is there anything for this technique to touch right now.
+
+		A new channel rather than a fourth meaning layered onto an existing one.
+		Border colour, name colour, cost colour and stripe transparency are all
+		already carrying ready / cooling / cannot-afford between them, and a 58px
+		square stops being readable if any of them has to say two things at once.
+
+		Deliberately small and quiet. This is a *soft* state -- unlike a cooldown
+		or an empty madra pool, nothing refuses the press. It is information
+		about the world, not about the button. ]]
+	reachPip = 5,
 }
+
+--[[ Which kinds have a reach that can fail, and which do not.
+
+	`forger` and `enforcer` are absent on purpose and their absence is the
+	statement: a construct dropped with nobody nearby is legitimate zoning, and a
+	self-buff has no reach at all. Showing either of them an "out of reach" state
+	would invent a failure that does not exist, and a player who saw it would
+	reasonably conclude the technique was unusable.
+
+	Keyed by kind rather than by technique, so a roster of sixty-plus needs no
+	entries added here. ]]
+InterfaceSpec.ReachKind = {
+	striker = true,
+	ruler = true,
+}
+
+function InterfaceSpec.hasReach(kind: string): boolean
+	return InterfaceSpec.ReachKind[kind] == true
+end
 
 --[[ Vitals, anchored directly above the action bar.
 

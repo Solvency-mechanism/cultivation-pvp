@@ -36,11 +36,50 @@ type Construct = {
 	part: BasePart,
 }
 
+--[[ A resolvable side of an engagement, player or dummy, behind one shape.
+
+	The whole point of a combat dummy is that it behaves exactly as a player
+	does under fire -- that is what makes it a measuring instrument rather
+	than a second thing to debug. So there is one resolution function and one
+	damage function for both, `combatantFromInstance` and `damageCombatant`
+	below, and `Combat.canEngage`'s bracket check applies to a dummy exactly
+	as it does to a player: honouring it, not skipping it, is the entire
+	value of a dummy set to a different stage than another.
+
+	`combatantId` is one id space, agreed directly with interface: a player's
+	is their `UserId` (always positive); a dummy's is negative, minted once at
+	registration and stable for its lifetime. The same number goes everywhere
+	a broadcast wants an id -- `Impact`'s attacker/target, `CastStarted`'s
+	caster -- and onto the dummy model itself as a `CombatantId` attribute, so
+	a client can bind a telegraph or a hit to the right plate without a second
+	id space to keep in sync. Negative rather than a fresh positive counter
+	because every existing `== someUserId` comparison then stays correct for
+	free, and a combatant sitting at `0` would collide with `Impact.luau`'s own
+	`localId = 0` fallback and read as the viewer's own hit -- a real hazard
+	interface's own code review caught, not a theoretical one.
+
+	`player` is set only for `kind == "player"`. ]]
+export type Combatant = {
+	kind: "player" | "dummy",
+	combatantId: number,
+	actor: Combat.Actor,
+	model: Model,
+	root: BasePart,
+	humanoid: Humanoid?,
+	player: Player?,
+}
+
 local actors: { [number]: Combat.Actor } = {}
 local loadouts: { [number]: { [string]: string } } = {}
 local constructs: { Construct } = {}
 local dying: { [number]: boolean } = {}
 local lastRequestAt: { [number]: number } = {}
+
+-- Dummies, keyed by their own Model rather than a UserId they do not have.
+-- `dummyCounter` seeds each new dummy's `combatantId`, negated so it can
+-- never collide with a real UserId.
+local dummies: { [Model]: Combatant } = {}
+local dummyCounter = 0
 
 local techniqueFiredRemote: RemoteEvent? = nil
 local castStartedRemote: RemoteEvent? = nil
@@ -93,17 +132,10 @@ local function rootOf(player: Player): BasePart?
 	return nil
 end
 
-local function playerFromInstance(instance: Instance): Player?
-	local model = instance:FindFirstAncestorWhichIsA("Model")
-	while model do
-		local found = Players:GetPlayerFromCharacter(model)
-		if found then
-			return found
-		end
-		model = model:FindFirstAncestorWhichIsA("Model")
-	end
-	return nil
-end
+-- `combatantFromInstance`, which replaces the old player-only version of
+-- this lookup, is defined after `ensureActor` below -- it needs to call it
+-- for the player branch, and `ensureActor` is not declared yet at this point
+-- in the file.
 
 local function stageIndexOf(player: Player): number?
 	local state = CultivationService.getState(player)
@@ -141,16 +173,20 @@ end
 	from this same geography. Once nodes sit where the ground says they do,
 	Ruler peaks both on rich ground and at nodes, because the nodes will be on
 	it. This is a step toward that, not a replacement for it. ]]
+local function regionAtPosition(position: Vector3): string
+	local node = NodeService.nodeAt(position)
+	if node then
+		return node.region
+	end
+	return ArenaService.regionAt(position)
+end
+
 local function regionOf(player: Player): string
 	local root = rootOf(player)
 	if not root then
 		return "open"
 	end
-	local node = NodeService.nodeAt(root.Position)
-	if node then
-		return node.region
-	end
-	return ArenaService.regionAt(root.Position)
+	return regionAtPosition(root.Position)
 end
 
 --[[ Tell every client that a technique resolved, so they can draw it.
@@ -159,7 +195,7 @@ end
 	applied by the time this fires -- so a client that ignores or fakes it changes
 	nothing but its own screen. ]]
 local function broadcastVfx(
-	caster: Player,
+	casterId: number,
 	techId: string,
 	origin: Vector3,
 	target: Vector3?,
@@ -172,7 +208,7 @@ local function broadcastVfx(
 	techniqueFiredRemote:FireAllClients({
 		techId = techId,
 		kind = tech.kind,
-		casterId = caster.UserId,
+		casterId = casterId,
 		origin = origin,
 		target = target,
 		hit = hit,
@@ -199,7 +235,7 @@ end
 	meaningless on arrival. Each client starts its own bar on receipt and eats
 	the one-way latency as a small head start for the defender, which is the
 	right direction to be wrong in. ]]
-local function broadcastCastStart(caster: Player, techId: string)
+local function broadcastCastStart(casterId: number, techId: string)
 	if not castStartedRemote then
 		return
 	end
@@ -208,11 +244,21 @@ local function broadcastCastStart(caster: Player, techId: string)
 		return
 	end
 	castStartedRemote:FireAllClients({
-		casterId = caster.UserId,
+		casterId = casterId,
 		techId = techId,
 		kind = tech.kind,
 		windup = tech.windup,
 	})
+end
+
+--[[ Health/MaxHealth, published under the same attribute names for a player
+	or a dummy -- interface's nameplate reads them off whichever instance
+	carries them (the Player for a player, the Model for a dummy) with one
+	code path rather than two, which is the entire point of the same-names
+	agreement: nothing here for a future consumer to forget to generalise. ]]
+local function publishHealth(instance: Instance, actor: Combat.Actor)
+	instance:SetAttribute("Health", math.floor(actor.health))
+	instance:SetAttribute("MaxHealth", math.floor(Combat.maxHealth(Config, actor.stageIndex)))
 end
 
 local function publish(player: Player)
@@ -220,17 +266,17 @@ local function publish(player: Player)
 	if not actor then
 		return
 	end
-	player:SetAttribute("Health", math.floor(actor.health))
-	player:SetAttribute("MaxHealth", math.floor(Combat.maxHealth(Config, actor.stageIndex)))
+	publishHealth(player, actor)
 	player:SetAttribute("Madra", math.floor(actor.madra))
 	player:SetAttribute("MaxMadra", math.floor(Combat.maxMadra(Config, actor.stageIndex)))
 end
 
 --[[ The actor is authoritative; the Humanoid is a readout, so the default health
 	bar and death animation reflect it. Nothing reads back from the Humanoid
-	except its Died signal, which covers deaths this service did not cause. ]]
-local function mirrorHumanoid(player: Player, actor: Combat.Actor)
-	local humanoid = humanoidOf(player)
+	except its Died signal, which covers deaths this service did not cause.
+	Takes the Humanoid directly rather than a Player, so a dummy's Humanoid
+	mirrors exactly the same way a player's does. ]]
+local function mirrorHumanoid(humanoid: Humanoid?, actor: Combat.Actor)
 	if not humanoid then
 		return
 	end
@@ -260,9 +306,50 @@ local function ensureActor(player: Player): Combat.Actor?
 	-- this service exists at all.
 	local actor = Combat.newActor(Config, tostring(player.UserId), stageIndex)
 	actors[player.UserId] = actor
-	mirrorHumanoid(player, actor)
+	mirrorHumanoid(humanoidOf(player), actor)
 	publish(player)
 	return actor
+end
+
+--[[ Resolves any instance -- a striker raycast hit, an overlap sweep part,
+	whatever a construct tick finds nearby -- to a `Combatant`, player or
+	dummy, behind one shape. Replaces the old player-only `playerFromInstance`
+	for the reason at the top of this file: a dummy that went through a
+	different lookup would not be measuring anything.
+
+	The player branch routes through `ensureActor` rather than a raw table
+	read, preserving exactly the freshness guarantee it already gave
+	`damagePlayer` -- a stage change rebuilds the actor before it is ever
+	used to resolve damage. This is why `combatantFromInstance` has to live
+	after `ensureActor` in the file rather than replacing `playerFromInstance`
+	in place: it needs to call it. ]]
+local function combatantFromInstance(instance: Instance): Combatant?
+	local model = instance:FindFirstAncestorWhichIsA("Model")
+	while model do
+		local player = Players:GetPlayerFromCharacter(model)
+		if player then
+			local actor = ensureActor(player)
+			local root = rootOf(player)
+			if not actor or not root then
+				return nil
+			end
+			return {
+				kind = "player",
+				combatantId = player.UserId,
+				actor = actor,
+				model = model,
+				root = root,
+				humanoid = humanoidOf(player),
+				player = player,
+			}
+		end
+		local dummy = dummies[model]
+		if dummy then
+			return dummy
+		end
+		model = model:FindFirstAncestorWhichIsA("Model")
+	end
+	return nil
 end
 
 --[[ `attackerActor` is optional and only ever supplied by `damagePlayer` --
@@ -351,43 +438,65 @@ local function handleDeath(player: Player, attackerActor: Combat.Actor?)
 	end
 end
 
---[[ Damage from one actor to one player. Cross-bracket engagements are refused
-	outright here rather than scaled down. ]]
-local function damagePlayer(source: Combat.Actor, target: Player, raw: number, now: number)
-	local targetActor = ensureActor(target)
-	if not targetActor or targetActor.health <= 0 then
+--[[ Damage from one actor to one combatant, player or dummy. Cross-bracket
+	engagements are refused outright here rather than scaled down --
+	`Combat.canEngage` applies to a dummy exactly as it does to a player,
+	which is the entire value of being able to set a dummy's stage: this is
+	the one thing that could never be exercised with a second real player at
+	a different stage, and never has been.
+
+	`source.id` is expected to be `tostring` of a `combatantId` -- a player's
+	`UserId` or a dummy's negative pseudo-id -- so `tonumber(source.id)` below
+	always round-trips. The `math.huge` fallback (never a real fallback in
+	practice, since every registered actor's `id` is always numeric) exists
+	only to retire the `0` collision interface's review caught: `Impact.luau`
+	falls back to `localId = 0` when there is no local player, so a combatant
+	that ever sat at `0` would read as the viewer. `math.huge` can never equal
+	any real id, by construction, not by remembering. ]]
+local function damageCombatant(source: Combat.Actor, target: Combatant, raw: number, now: number)
+	if target.actor.health <= 0 then
 		return
 	end
-	if not Combat.canEngage(source, targetActor) then
+	if not Combat.canEngage(source, target.actor) then
 		return
 	end
 
-	local result = Combat.applyDamage(Config, targetActor, raw, now)
+	local result = Combat.applyDamage(Config, target.actor, raw, now)
 	if result.dealt <= 0 then
 		return
 	end
 
-	mirrorHumanoid(target, targetActor)
-	publish(target)
+	mirrorHumanoid(target.humanoid, target.actor)
+	publishHealth((target.player :: Instance?) or target.model, target.actor)
+	if target.kind == "player" and target.player then
+		-- Madra/MaxMadra are player-only; dummies neither spend nor need to
+		-- show them.
+		publish(target.player)
+	end
 
 	--[[ Every applied hit, from one place, so a Ruler sweep and a construct tick
 		land the same feedback a striker bolt does. Presentation only: the damage
 		above is already final, and read before death is processed so the body is
 		still where it was struck. ]]
-	local impactAt = rootOf(target)
-	if impactRemote and impactAt then
+	if impactRemote then
 		impactRemote:FireAllClients({
-			attackerId = tonumber(source.id) or 0,
-			targetId = target.UserId,
-			position = impactAt.Position,
+			attackerId = tonumber(source.id) or math.huge,
+			targetId = target.combatantId,
+			position = target.root.Position,
 			damage = result.dealt,
-			stageIndex = targetActor.stageIndex,
+			stageIndex = target.actor.stageIndex,
 			died = result.died,
 		})
 	end
 
 	if result.died then
-		handleDeath(target, source)
+		if target.kind == "player" and target.player then
+			handleDeath(target.player, source)
+		end
+		-- A dummy's "death" is not routed anywhere: DummyService holds the
+		-- same `Combat.Actor` table this mutated and polls `health <= 0` on
+		-- its own tick to schedule the reset, rather than CombatService
+		-- needing to know DummyService exists to tell it.
 	end
 end
 
@@ -512,18 +621,21 @@ local function resolveStriker(
 	local hit = Workspace:Raycast(origin, direction, params)
 	local landing = if hit then hit.Position else origin + direction
 
-	local target = if hit then playerFromInstance(hit.Instance) else nil
-	local struck = target ~= nil and target ~= caster
+	local target = if hit then combatantFromInstance(hit.Instance) else nil
+	-- `target.player ~= caster` reads correctly for a dummy target too: its
+	-- `player` field is always nil, and `nil ~= caster` is always true, since
+	-- `caster` is a real Player and never nil.
+	local struck = target ~= nil and target.player ~= caster
 	-- Broadcast before resolving, so a miss still draws. A shot that shows
 	-- nothing when it misses reads as a broken button.
-	broadcastVfx(caster, techId, origin, landing, struck)
+	broadcastVfx(caster.UserId, techId, origin, landing, struck)
 
 	if not struck or not target then
 		return
 	end
 
 	local raw = Combat.outgoingDamage(Config, actor, techId, powerOf(caster), regionOf(caster), now)
-	damagePlayer(actor, target, raw, now)
+	damageCombatant(actor, target, raw, now)
 end
 
 local function resolveRuler(caster: Player, actor: Combat.Actor, techId: string, now: number)
@@ -541,15 +653,17 @@ local function resolveRuler(caster: Player, actor: Combat.Actor, techId: string,
 	-- where the caster stands rather than where each victim happens to be.
 	local raw = Combat.outgoingDamage(Config, actor, techId, powerOf(caster), regionOf(caster), now)
 
-	broadcastVfx(caster, techId, root.Position, nil, false)
+	broadcastVfx(caster.UserId, techId, root.Position, nil, false)
 
-	local seen: { [number]: boolean } = {}
+	-- Deduped by Model rather than UserId, so a dummy (no UserId) dedupes
+	-- exactly the same way a player does.
+	local seen: { [Model]: boolean } = {}
 	local parts = Workspace:GetPartBoundsInRadius(root.Position, Config.Combat.ranges.ruler, params)
 	for _, part in parts do
-		local target = playerFromInstance(part)
-		if target and target ~= caster and not seen[target.UserId] then
-			seen[target.UserId] = true
-			damagePlayer(actor, target, raw, now)
+		local target = combatantFromInstance(part)
+		if target and target.player ~= caster and not seen[target.model] then
+			seen[target.model] = true
+			damageCombatant(actor, target, raw, now)
 		end
 	end
 end

@@ -94,10 +94,16 @@ local GROUND_THICKNESS = 8
 local DECOR_NAME = "ArenaDecor"
 local REGION_FOLDER_NAME = "AuraRegions"
 
---[[ NodeService places nodes within this radius at y = 4, so everything inside
-	it stays flat and walkable: floors, roads and patches are inlaid a fraction
-	of a stud proud of the ground rather than raised, and nothing is built inside
-	the spawn plaza. ]]
+--[[ The inner field: everything inside this radius stays flat and walkable, so
+	floors, roads and patches are inlaid a fraction of a stud proud of the ground
+	rather than raised.
+
+	This used to double as the node spawn radius, and the two facts drifted apart:
+	NodeService scattered nodes over a disc of exactly this size while region
+	lobes reached out to 256, so the outer thirds of the Reach, the Barrens and
+	the Wellspring could never hold a node. Placement is now driven by
+	`landmarkAnchors` rather than by a disc, so this number sizes the *ground*
+	and nothing else, and the mismatch is gone rather than papered over. ]]
 local NODE_FIELD_RADIUS = 220
 local ARENA_RADIUS = NODE_FIELD_RADIUS + 130
 local WALL_RADIUS = 330
@@ -159,9 +165,16 @@ end
 
 --[[ Three lobes on spines 120 degrees apart, leaving three open corridors for
 	the roads. Reward runs inverse to area on purpose: the 2.6x Wellspring is
-	the smallest footprint on the map and the 0.5x Barrens the largest. Spawn
-	sits in `open` (1.0x) with no region within seventy studs of the pad, so
-	there is no such thing as grinding where you respawn. ]]
+	the smallest footprint on the map and the 0.5x Barrens the largest.
+
+	Spawn sits in `open` (1.0x). This comment used to claim "no region within
+	seventy studs of the pad"; that was measured wrong. The nearest region edge
+	is the `barren` lobe at (75, -129.9) r44, which is **31 studs** from
+	SPAWN_POINT (0, -136) -- and from the bottom of the ramp it is 47. That is
+	still far enough that nobody grinds where they respawn, and barren is the
+	0.5x floor so standing there is a punishment rather than a shortcut, but the
+	number in the prose was false and something would eventually have been built
+	on it. ]]
 local REGIONS: { Region } = {
 	{
 		id = "wellspring",
@@ -1417,6 +1430,80 @@ function ArenaService.regionAt(position: Vector3): string
 		end
 	end
 	return "open"
+end
+
+--[[ Where the ground is under a point, or nil if nothing may be placed there.
+
+	Node spawn heights used to be the constant `y = 4`, which was fine only
+	because the arena is one flat plate. The moment the ground varies -- and it
+	will -- a constant floats or buries every node on the map, so placement asks
+	the world instead of assuming it.
+
+	Bare ground only. A hit on decor means the point is inside the Wellspring
+	spire, inside a grove pillar, on a crag or under the terrace deck, and a node
+	there is either invisible or standing on a roof. Those come back nil so the
+	caller re-rolls rather than spawning something unreachable. Inlaid surfaces
+	-- floors, roads, rims -- are `makeInert` and carry no query, so they are
+	already invisible to this ray and the node lands on the plate beneath them,
+	which is the correct answer. ]]
+local PLACEMENT_RAY_TOP = 512
+local PLACEMENT_RAY_LENGTH = 1024
+
+function ArenaService.groundYAt(position: Vector3): number?
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.IgnoreWater = true
+
+	--[[ Exclude the two folders that are themselves spawned content. Without
+		this, nodes stack on each other's ring beds and on live constructs. ]]
+	local excluded: { Instance } = {}
+	for _, name in { "AuraNodes", "Constructs" } do
+		local folder = Workspace:FindFirstChild(name)
+		if folder then
+			table.insert(excluded, folder)
+		end
+	end
+	params.FilterDescendantsInstances = excluded
+
+	local origin = Vector3.new(position.X, PLACEMENT_RAY_TOP, position.Z)
+	local hit = Workspace:Raycast(origin, Vector3.new(0, -PLACEMENT_RAY_LENGTH, 0), params)
+	if not hit then
+		return nil
+	end
+
+	--[[ Reject decor by parentage rather than by name, so this keeps working
+		whether the ground is the plate this service builds or a Baseplate the
+		place already provided. ]]
+	local decor = Workspace:FindFirstChild(DECOR_NAME)
+	if decor and hit.Instance:IsDescendantOf(decor) then
+		return nil
+	end
+	return hit.Position.Y
+end
+
+--[[ Ground a node must never be placed on, regardless of what the ray says.
+
+	The spawn terrace sits at (0, -150) and the old 220-stud spawn disc reached
+	well past it, so a node could spawn *under the deck*: invisible, uncontested,
+	and if it were a Prime its three-hundred-stud shaft would fire up through the
+	floor the players are standing on. The plaza is excluded for the same reason
+	the arena builds nothing in it -- it is the one piece of ground that has to
+	stay readable.
+
+	The anchors happen to clear both already; this exists so that stays true when
+	somebody edits them. ]]
+local TERRACE_KEEPOUT = DECK_RADIUS + 18
+
+function ArenaService.isPlaceable(position: Vector3): boolean
+	local dx = position.X - TERRACE_CENTER.X
+	local dz = position.Z - TERRACE_CENTER.Z
+	if dx * dx + dz * dz <= TERRACE_KEEPOUT * TERRACE_KEEPOUT then
+		return false
+	end
+	if position.X * position.X + position.Z * position.Z <= PLAZA_RADIUS * PLAZA_RADIUS then
+		return false
+	end
+	return true
 end
 
 export type Anchor = {

@@ -168,6 +168,28 @@ for _, slot in Config.LoadoutSlots do
 	check(`slot {slot} has a kind colour`, InterfaceSpec.KindColor[slot] ~= nil)
 end
 
+--[[ Reach, and the absences that are deliberate.
+
+	`forger` and `enforcer` must NOT report reach. A construct dropped with
+	nobody nearby is legitimate zoning and a self-buff has no reach at all, so an
+	"out of reach" state on either would invent a failure that does not exist --
+	and a player seeing it would reasonably conclude the technique was unusable.
+	Asserted rather than left as an omission, because an omission is exactly what
+	a future edit would restore by accident. ]]
+check("a striker's reach can fail", InterfaceSpec.hasReach("striker"))
+check("a ruler's reach can fail", InterfaceSpec.hasReach("ruler"))
+check("a forger has no reach state, deliberately", not InterfaceSpec.hasReach("forger"))
+check("an enforcer has no reach state, deliberately", not InterfaceSpec.hasReach("enforcer"))
+check("an unknown kind claims no reach", not InterfaceSpec.hasReach("nonsense"))
+
+-- Every kind in the live pool resolves, so a new kind cannot crash the slot bar.
+for id, tech in Config.Techniques do
+	check(
+		`technique {id} resolves a reach answer for kind {tech.kind}`,
+		type(InterfaceSpec.hasReach(tech.kind)) == "boolean"
+	)
+end
+
 -- Stage colours must cover the ladder, and must not run out at the top.
 for index = 1, #Config.Stages do
 	check(`stage {index} has a colour`, InterfaceSpec.stageColor(index) ~= nil)

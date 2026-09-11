@@ -361,6 +361,7 @@ type SlotWidget = {
 	name: TextLabel,
 	cost: TextLabel,
 	countdown: TextLabel,
+	reach: Frame,
 	sweep: Frame,
 	gcd: Frame,
 	stripe: Frame,
@@ -465,6 +466,23 @@ for index = 1, slotCount do
 	swap.Size = UDim2.fromOffset(px(14), px(12))
 	swap.Position = UDim2.new(1, -px(16), 0, px(4))
 	swap.TextXAlignment = Enum.TextXAlignment.Right
+
+	--[[ The reach pip, in the corner opposite the swap glyph so it reads as part
+		of the slot rather than as something added to it. Filled when this
+		technique has something to touch, hollow when it does not, and hidden
+		entirely for kinds whose reach cannot fail. ]]
+	local reach = Instance.new("Frame")
+	reach.AnchorPoint = Vector2.new(1, 1)
+	reach.Position = UDim2.new(1, -px(5), 1, -px(SLOT.stripeHeight) - px(4))
+	reach.Size = UDim2.fromOffset(px(SLOT.reachPip), px(SLOT.reachPip))
+	reach.BorderSizePixel = 0
+	reach.BackgroundColor3 = TEXT
+	reach.ZIndex = 4
+	reach.Visible = false
+	reach.Parent = root
+	corner(reach, px(SLOT.reachPip))
+	local reachStroke = outline(reach, TEXT, 1)
+	reachStroke.Transparency = 0.35
 	swap.ZIndex = 4
 	swap.Text = "\u{21C4}"
 
@@ -482,6 +500,7 @@ for index = 1, slotCount do
 		name = name,
 		cost = cost,
 		countdown = countdown,
+		reach = reach,
 		sweep = sweep,
 		gcd = gcd,
 		stripe = stripe,
@@ -863,6 +882,18 @@ end
 --[[ Locally predicted cooldowns. The server still owns every refusal; this only
 	lets a press explain itself, and a desynced prediction costs a wasted
 	keypress rather than a wrong outcome. ]]
+--[[ Soft-target state, declared here rather than beside the targeting code that
+	maintains it, because the slot bar reads it too: a striker slot's reach pip
+	and the reticle are answers to the same question and must not be able to
+	disagree. Maintained by `pollTarget` further down.
+
+	`aimOnTarget` is whether the ray is on a player *right now*, as against the
+	sticky target the frame holds for a few seconds. Both the reticle and the pip
+	want the live answer -- either of them staying lit three seconds after you
+	looked away would be promising a shot you no longer have. ]]
+local currentTarget: Player? = nil
+local aimOnTarget = false
+
 local cooldownUntil: { [string]: number } = {}
 local gcdUntil = 0
 
@@ -874,11 +905,72 @@ local function slotTechnique(slot: string): Config.Technique?
 	return Config.Techniques[techId]
 end
 
+--[[ Is anyone we are allowed to fight standing inside a radius around us.
+
+	The ruler half of the reach question. Bracket is checked as well as distance,
+	because `Combat.canEngage` refuses across stages -- a Truegold standing on
+	your toes is not something your tempest can touch, and a pip that lit for
+	them would be lying in the most expensive possible way.
+
+	Client-side and presentational, like the cooldown prediction beside it: it
+	decides what the slot *says*, never what the server does. A disagreement
+	costs a misleading pip for a frame, never a wrong outcome. ]]
+local function anyEngageableWithin(radius: number): boolean
+	local character = player.Character
+	local root = if character then character:FindFirstChild("HumanoidRootPart") else nil
+	if not root or not root:IsA("BasePart") then
+		return false
+	end
+	local ownStage = player:GetAttribute("StageIndex")
+	if typeof(ownStage) ~= "number" then
+		return false
+	end
+
+	for _, other in Players:GetPlayers() do
+		if other == player then
+			continue
+		end
+		if other:GetAttribute("StageIndex") ~= ownStage then
+			continue
+		end
+		local health = other:GetAttribute("Health")
+		if typeof(health) == "number" and health <= 0 then
+			continue
+		end
+		local otherCharacter = other.Character
+		local otherRoot = if otherCharacter
+			then otherCharacter:FindFirstChild("HumanoidRootPart")
+			else nil
+		if otherRoot and otherRoot:IsA("BasePart") then
+			if (otherRoot.Position - root.Position).Magnitude <= radius then
+				return true
+			end
+		end
+	end
+	return false
+end
+
+--[[ Whether the aim ray is currently on someone we may fight. The striker half,
+	and the same answer the reticle draws, computed once and read by both so the
+	crosshair and the slot can never disagree about the same fact. ]]
+local function strikerInReach(): boolean
+	if not aimOnTarget or not currentTarget then
+		return false
+	end
+	local ownStage = player:GetAttribute("StageIndex")
+	local theirStage = currentTarget:GetAttribute("StageIndex")
+	return typeof(ownStage) == "number" and ownStage == theirStage
+end
+
 local function refreshSlots()
 	local now = os.clock()
 	local madra = player:GetAttribute("Madra") or 0
 	local gcdRemaining = gcdUntil - now
 	local gcdLength = Config.Combat.globalCooldown
+	--[[ Resolved once per frame rather than per slot: a loadout can hold more
+		than one ruler technique later, and walking the player list four times to
+		answer the same question would be four times the work for one answer. ]]
+	local rulerReach: boolean? = nil
 
 	for _, widget in slotWidgets do
 		local tech = slotTechnique(widget.slot)
@@ -917,6 +1009,26 @@ local function refreshSlots()
 			widget.cost.TextColor3 = if affordable then MADRA else UNAFFORDABLE
 		end
 
+		--[[ Reach. Only kinds whose reach can actually fail get a pip; for
+			forger and enforcer its absence is the statement that reach does not
+			apply, rather than an omission. ]]
+		if InterfaceSpec.hasReach(tech.kind) then
+			local inReach: boolean
+			if tech.kind == "striker" then
+				inReach = strikerInReach()
+			else
+				if rulerReach == nil then
+					rulerReach = anyEngageableWithin(Config.Combat.ranges.ruler)
+				end
+				inReach = rulerReach == true
+			end
+			widget.reach.Visible = true
+			-- Filled when there is something to touch, hollow when there is not.
+			widget.reach.BackgroundTransparency = if inReach then 0 else 1
+		else
+			widget.reach.Visible = false
+		end
+
 		if gcdRemaining > 0 and gcdLength > 0 then
 			widget.gcd.Visible = true
 			widget.gcd.Size =
@@ -945,14 +1057,8 @@ end
 -- Soft targeting.
 -- ===================================================================
 
-local currentTarget: Player? = nil
 local targetSeenAt = 0
 local lastPoll = 0
---[[ Whether the aim ray is on a player *right now*, as opposed to the sticky
-	target the frame holds for a few seconds. The reticle needs the live answer;
-	a reticle that stayed lit for three seconds after you looked away would be
-	telling you that you can hit something you cannot. ]]
-local aimOnTarget = false
 
 local function playerFromInstance(instance: Instance): Player?
 	local model = instance:FindFirstAncestorWhichIsA("Model")

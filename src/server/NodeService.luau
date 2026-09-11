@@ -11,6 +11,10 @@ local Workspace = game:GetService("Workspace")
 
 local AuraNodes = require(ReplicatedStorage.Shared.AuraNodes)
 local Config = require(ReplicatedStorage.Shared.Config)
+--[[ Placement asks the arena where the ground is, which region a point is in,
+	and where nodes may not go. One-way: ArenaService requires only Config, so
+	this is not a cycle. ]]
+local ArenaService = require(script.Parent.ArenaService)
 
 local NodeService = {}
 
@@ -101,19 +105,93 @@ local function nextId(): string
 	return `node_{counter}`
 end
 
---[[ Placeholder placement. Real maps should seed this from tagged spawn
-	anchors so static aura geography actually means something. ]]
-local function placer(_tierId: string): (AuraNodes.Vec3, string)
-	local radius = 220
+--[[ Placement, and the one rule that makes aura geography real.
+
+	POSITION IS THE SOURCE OF TRUTH. REGION IS DERIVED FROM IT, NEVER ROLLED.
+
+	This used to scatter uniformly over a 220-stud disc and then draw the region
+	from a literal `{ "open", "open", "rich", "barren", "wellspring" }` -- an
+	independent roll with no relationship to where the node landed. So a node
+	tagged `wellspring` routinely sat on the visible Ember Barrens, and README's
+	claim that map position matters was false. The floor a player stood on and
+	the multiplier on their Ruler technique were two different facts.
+
+	Now: roll a region as *intent*, pick one of that region's anchors, scatter
+	inside it, then ask `ArenaService.regionAt` what the point actually is. If a
+	scatter throws a node past a lobe edge, the node is honestly `open`.
+	Geography wins every disagreement, which is the whole point -- the design
+	intent lives in `Config.Field.regionWeights` and the truth lives on the map.
+
+	Deriving alone would have made things worse, not better: the regions cover
+	only 26.9% of the old spawn disc, so honest area sampling would have pushed
+	`open` from 40% to 69%. Weighting the anchors is what lets intent and truth
+	agree instead of fight.
+
+	Two guards, both of which used to be violated:
+	- `isPlaceable` keeps nodes out of the spawn terrace and the plaza. The old
+	  disc reached 220 studs and the terrace sits at 150, so a node could spawn
+	  *under the deck*.
+	- `groundYAt` returns nil on decor, so a scatter landing inside the
+	  Wellspring spire -- which stands at the exact centre of an anchor -- is
+	  re-rolled rather than spawning a node inside solid marble. ]]
+local PLACEMENT_ATTEMPTS = 24
+
+--[[ Anchors grouped by region. The arena is seeded once and never moves, so
+	this is built on first use and kept. ]]
+local anchorsByRegion: { [string]: { ArenaService.Anchor } }? = nil
+
+local function anchorsFor(regionId: string): { ArenaService.Anchor }
+	if not anchorsByRegion then
+		local grouped: { [string]: { ArenaService.Anchor } } = {}
+		for _, anchor in ArenaService.landmarkAnchors() do
+			local list = grouped[anchor.region]
+			if not list then
+				list = {}
+				grouped[anchor.region] = list
+			end
+			table.insert(list, anchor)
+		end
+		anchorsByRegion = grouped
+	end
+	return (anchorsByRegion :: { [string]: { ArenaService.Anchor } })[regionId] or {}
+end
+
+--[[ Area-uniform scatter inside an anchor, so nodes do not bunch at centres.
+	`sqrt` is what makes it uniform by area rather than by radius. ]]
+local function scatterAround(anchor: ArenaService.Anchor): Vector3
 	local angle = math.random() * math.pi * 2
-	local dist = math.sqrt(math.random()) * radius
-	local regions = { "open", "open", "rich", "barren", "wellspring" }
-	return {
-		x = math.cos(angle) * dist,
-		y = 4,
-		z = math.sin(angle) * dist,
-	},
-		regions[math.random(1, #regions)]
+	local dist = math.sqrt(math.random()) * anchor.radius
+	return Vector3.new(
+		anchor.position.X + math.cos(angle) * dist,
+		0,
+		anchor.position.Z + math.sin(angle) * dist
+	)
+end
+
+local function placer(_tierId: string): (AuraNodes.Vec3, string)
+	for _ = 1, PLACEMENT_ATTEMPTS do
+		local anchors = anchorsFor(AuraNodes.rollRegion(Config, math.random))
+		if #anchors > 0 then
+			local point = scatterAround(anchors[math.random(1, #anchors)])
+			if ArenaService.isPlaceable(point) then
+				local groundY = ArenaService.groundYAt(point)
+				if groundY then
+					local resolved = Vector3.new(point.X, groundY, point.Z)
+					return { x = point.X, y = groundY, z = point.Z },
+						ArenaService.regionAt(resolved)
+				end
+			end
+		end
+	end
+
+	--[[ Every attempt was refused. Reachable only if the arena is missing or
+		entirely built over, so fall back to a known open corridor rather than
+		returning a position nobody can stand on. Still derives its region. ]]
+	local fallback = anchorsFor("open")[1]
+	local point = if fallback then fallback.position else Vector3.new(0, 0, 120)
+	local groundY = ArenaService.groundYAt(point) or 0
+	return { x = point.X, y = groundY, z = point.Z },
+		ArenaService.regionAt(Vector3.new(point.X, groundY, point.Z))
 end
 
 local function ensureFolder(): Folder
@@ -244,13 +322,33 @@ local function addColumn(root: BasePart, spec: TierVisual, groundOffset: number)
 	pulse.Parent = base
 end
 
+--[[ How far the core floats above the ground, on top of its own tier hover.
+
+	Placement used to return the constant `y = 4`, so every core sat 4 studs up
+	plus its hover. `node.position.y` is now the *ground* under the node, which
+	is the honest reading and the one that survives terrain -- so this constant
+	carries the old lift forward and the silhouette is unchanged. ]]
+local NODE_LIFT = 4
+
 local function buildPart(node: AuraNodes.Node): BasePart
 	local spec = TIER_VISUAL[node.tier] or TIER_VISUAL.common
-	local anchor = Vector3.new(node.position.x, node.position.y, node.position.z)
-	local centre = anchor + Vector3.new(0, spec.hover, 0)
+
+	--[[ EVERY ground-contacting piece is built relative to this, not to world
+		zero. The ring bed, the ring, the eye, the shard feet, the Prime shaft
+		and its halo used to be pinned to y = 0.22 / 0.3 / 0.36 / 0 / 0.18
+		regardless of where the node actually was -- fine on one flat plate and
+		silently wrong the moment the ground varies.
+
+		The ring is the piece that matters. Its entire job is to show the player
+		where `Config.Field.captureRadius` reaches, and it is the only thing
+		telling them what "stand in it to cycle" means. On a rise it would have
+		been buried; over a dip it would have hung in the air. A capture ring
+		that lies about the capture radius is worse than no ring. ]]
+	local groundY = node.position.y
+	local centre = Vector3.new(node.position.x, groundY + NODE_LIFT + spec.hover, node.position.z)
 	-- Distance from the floating core down to the ground, for the pieces that
 	-- have to sit on it.
-	local groundOffset = -(centre.Y - 0.35)
+	local groundOffset = -(centre.Y - (groundY + 0.35))
 
 	--[[ The root is the dark half of the core, and it keeps the node's identity:
 		its name, its attributes and a position that still answers for where the
@@ -281,20 +379,20 @@ local function buildPart(node: AuraNodes.Node): BasePart
 	-- The ring *is* the capture radius, so the reach of the node is something
 	-- you can see from outside it rather than a number in a panel.
 	local reach = Config.Field.captureRadius
-	local ringBed = newDisc(reach + 1.6, 0.6, Vector3.new(centre.X, 0.22, centre.Z))
+	local ringBed = newDisc(reach + 1.6, 0.6, Vector3.new(centre.X, groundY + 0.22, centre.Z))
 	ringBed.Name = "RingBed"
 	ringBed.Color = NODE_DARK
 	ringBed.Material = Enum.Material.Slate
 	makeVisual(ringBed, part)
 
-	local ring = newDisc(reach, 0.6, Vector3.new(centre.X, 0.3, centre.Z))
+	local ring = newDisc(reach, 0.6, Vector3.new(centre.X, groundY + 0.3, centre.Z))
 	ring.Name = "Ring"
 	ring.Color = spec.color
 	ring.Material = Enum.Material.Neon
 	ring.Transparency = 0.35
 	makeVisual(ring, part)
 
-	local eye = newDisc(reach * 0.55, 0.6, Vector3.new(centre.X, 0.36, centre.Z))
+	local eye = newDisc(reach * 0.55, 0.6, Vector3.new(centre.X, groundY + 0.36, centre.Z))
 	eye.Name = "RingEye"
 	eye.Color = NODE_DARK
 	eye.Material = Enum.Material.Slate
@@ -306,7 +404,7 @@ local function buildPart(node: AuraNodes.Node): BasePart
 		local angle = (index / spec.shards) * math.pi * 2
 		local foot = Vector3.new(
 			centre.X + math.cos(angle) * (reach * 0.82),
-			0,
+			groundY,
 			centre.Z + math.sin(angle) * (reach * 0.82)
 		)
 		local height = spec.shardHeight
@@ -344,15 +442,19 @@ local function buildPart(node: AuraNodes.Node): BasePart
 		field can occlude it: the tallest thing inside the crag wall is the
 		118-stud Wellspring spire. ]]
 	if spec.shaft > 0 then
-		local shaft = newDisc(9, spec.shaft, Vector3.new(centre.X, spec.shaft / 2, centre.Z))
+		local shaft =
+			newDisc(9, spec.shaft, Vector3.new(centre.X, groundY + spec.shaft / 2, centre.Z))
 		shaft.Name = "PrimeShaft"
 		shaft.Color = spec.color
 		shaft.Material = Enum.Material.Neon
 		shaft.Transparency = 0.55
 		makeVisual(shaft, part)
 
-		local flare =
-			newDisc(22, spec.shaft * 0.72, Vector3.new(centre.X, spec.shaft * 0.36, centre.Z))
+		local flare = newDisc(
+			22,
+			spec.shaft * 0.72,
+			Vector3.new(centre.X, groundY + spec.shaft * 0.36, centre.Z)
+		)
 		flare.Name = "PrimeFlare"
 		flare.Color = spec.color
 		flare.Material = Enum.Material.Neon
@@ -361,7 +463,7 @@ local function buildPart(node: AuraNodes.Node): BasePart
 
 		-- A pool of light at the foot of the shaft, so a Prime reads as a
 		-- *place* from the terrace and from above, not only as a line in the sky.
-		local pool = newDisc(34, 0.5, Vector3.new(centre.X, 0.18, centre.Z))
+		local pool = newDisc(34, 0.5, Vector3.new(centre.X, groundY + 0.18, centre.Z))
 		pool.Name = "PrimeHalo"
 		pool.Color = spec.color
 		pool.Material = Enum.Material.Neon

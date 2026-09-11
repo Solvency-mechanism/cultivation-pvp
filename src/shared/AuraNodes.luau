@@ -56,6 +56,31 @@ function AuraNodes.rollTier(config: any, rng: Rng): string
 	return weights[#weights].tier
 end
 
+--[[ Which region a spawn should aim for. Same shape as `rollTier`.
+
+	This is *intent only*. The caller picks an anchor in this region, scatters
+	inside it, and then asks the map what the resulting point actually is -- so a
+	scatter that lands past a lobe edge is honestly `open`. Region is a property
+	of the ground; this function only decides where to go looking. ]]
+function AuraNodes.rollRegion(config: any, rng: Rng): string
+	local weights = config.Field.regionWeights
+	local total = 0
+	for _, entry in weights do
+		total += entry.weight
+	end
+
+	local pick = rng() * total
+	local cumulative = 0
+	for _, entry in weights do
+		cumulative += entry.weight
+		if pick < cumulative then
+			return entry.region
+		end
+	end
+	-- Only reachable on floating point drift at the very top of the range.
+	return weights[#weights].region
+end
+
 function AuraNodes.create(
 	config: any,
 	id: string,

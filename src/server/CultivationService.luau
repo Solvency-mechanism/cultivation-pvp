@@ -12,6 +12,10 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local AuraNodes = require(ReplicatedStorage.Shared.AuraNodes)
 local Config = require(ReplicatedStorage.Shared.Config)
 local Progression = require(ReplicatedStorage.Shared.Progression)
+--[[ Cycling scales with the ground the player stands on, so this needs to ask
+	the map. One-way: ArenaService requires only Config, so neither this nor
+	NodeService requiring it is a cycle. ]]
+local ArenaService = require(script.Parent.ArenaService)
 local NodeService = require(script.Parent.NodeService)
 
 local CultivationService = {}
@@ -136,7 +140,22 @@ function CultivationService.tick(deltaSeconds: number, now: number)
 			lastRefusalNodeId[player.UserId] = nil
 		end
 
-		local region = "open"
+		--[[ Region is a property of the GROUND, everywhere -- not something that
+			only exists underneath a node.
+
+			This used to read `open` off-node, which meant the 1.8x Verdant Reach
+			and the 0.5x Ember Barrens had no effect on cycling at all unless a
+			node happened to be standing on them. The richest ground on the map
+			was worth exactly as much as the dirt outside the plaza, and the only
+			thing `Config.StaticRegionMultipliers` priced was a label on a node.
+
+			Same order of precedence as `CombatService.regionOf`: the node when
+			you are drawing from one, the ground you stand on otherwise. The two
+			now agree by construction anyway, because a node's region is derived
+			from its own position -- they can only differ for a player standing
+			at the lip of a node that straddles a lobe edge. ]]
+		local groundRegion = ArenaService.regionAt(root.Position)
+		local region = groundRegion
 		if node then
 			region = node.region
 			if occupying[player.UserId] ~= node.id then
@@ -145,13 +164,14 @@ function CultivationService.tick(deltaSeconds: number, now: number)
 					occupying[player.UserId] = node.id
 					lastRefusalNodeId[player.UserId] = nil
 				else
-					-- Refused (full or expired): cycle at bare ground rate.
+					-- Refused (full or expired): cycle at the rate of whatever
+					-- ground they are standing on, which is no longer always 1.0x.
 					if refusalHandler and lastRefusalNodeId[player.UserId] ~= node.id then
 						lastRefusalNodeId[player.UserId] = node.id
 						refusalHandler(player, reason or "refused")
 					end
 					node = nil
-					region = "open"
+					region = groundRegion
 				end
 			end
 		end

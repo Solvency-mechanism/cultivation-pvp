@@ -114,6 +114,86 @@ for _, entry in Config.Field.spawnWeights do
 	)
 end
 
+--[[ Weighted region roll -- placement *intent*, not placement truth.
+
+	Expectations are derived from Config for the same reason rollTier's are: what
+	is under test is that the roll reads its configured weights faithfully, not
+	that any particular distribution is correct. The realised distribution is a
+	different thing entirely and cannot be asserted here, because it depends on
+	`ArenaService.regionAt` resolving a scattered point against the real blob
+	table -- a scatter that lands past a lobe edge is honestly `open`. This suite
+	is pure and has no map. ]]
+local regionTotal = 0
+for _, entry in Config.Field.regionWeights do
+	regionTotal += entry.weight
+end
+
+local regionBands: { { region: string, lo: number, hi: number } } = {}
+local regionCursor = 0
+for _, entry in Config.Field.regionWeights do
+	local lo = regionCursor / regionTotal
+	regionCursor += entry.weight
+	table.insert(regionBands, { region = entry.region, lo = lo, hi = regionCursor / regionTotal })
+end
+
+eq(
+	"low roll picks the first weighted region",
+	AuraNodes.rollRegion(Config, scripted({ 0.0 })),
+	regionBands[1].region
+)
+eq(
+	"top of region range stays valid",
+	AuraNodes.rollRegion(Config, scripted({ 0.999999 })),
+	regionBands[#regionBands].region
+)
+
+for _, band in regionBands do
+	eq(
+		`mid-band roll picks {band.region}`,
+		AuraNodes.rollRegion(Config, scripted({ (band.lo + band.hi) / 2 })),
+		band.region
+	)
+	eq(
+		`just inside {band.region}'s lower edge`,
+		AuraNodes.rollRegion(Config, scripted({ band.lo + 1e-6 })),
+		band.region
+	)
+	eq(
+		`just inside {band.region}'s upper edge`,
+		AuraNodes.rollRegion(Config, scripted({ band.hi - 1e-6 })),
+		band.region
+	)
+end
+
+local regionCounts: { [string]: number } = {}
+for _, entry in Config.Field.regionWeights do
+	regionCounts[entry.region] = 0
+end
+local regionRng = lcg(20260911)
+local regionN = 20000
+for _ = 1, regionN do
+	regionCounts[AuraNodes.rollRegion(Config, regionRng)] += 1
+end
+for _, entry in Config.Field.regionWeights do
+	near(
+		`{entry.region} tracks its configured weight`,
+		regionCounts[entry.region] / regionN,
+		entry.weight / regionTotal,
+		0.02
+	)
+end
+
+--[[ Every region the roll can emit must be priceable and speakable. A weight
+	naming a region with no multiplier would silently cycle at 1.0x, and one with
+	no display name would put a raw key in the most prominent text on screen. ]]
+for _, entry in Config.Field.regionWeights do
+	check(
+		`{entry.region} has a cycle multiplier`,
+		Config.StaticRegionMultipliers[entry.region] ~= nil
+	)
+	check(`{entry.region} has a display name`, Config.RegionNames[entry.region] ~= nil)
+end
+
 -- Lifetime and expiry
 local node = AuraNodes.create(Config, "n1", "common", ORIGIN, "open", 100)
 eq("expiry from tier lifetime", node.expiresAt, 100 + Config.NodeTiers.common.lifetime)
