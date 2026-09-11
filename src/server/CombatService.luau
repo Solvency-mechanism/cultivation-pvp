@@ -76,6 +76,10 @@ local constructs: { Construct } = {}
 local dying: { [number]: boolean } = {}
 local lastRequestAt: { [number]: number } = {}
 
+-- The last refused-cast notice already told to each player, so mashing a
+-- blocked key notifies once rather than once per press. See `onUseTechnique`.
+local lastCastRefusalNotice: { [number]: string } = {}
+
 -- Dummies, keyed by their own Model rather than a UserId they do not have.
 -- `dummyCounter` seeds each new dummy's `combatantId`, negated so it can
 -- never collide with a real UserId.
@@ -353,10 +357,11 @@ local function combatantFromInstance(instance: Instance): Combatant?
 	return nil
 end
 
---[[ `attackerActor` is optional and only ever supplied by `damagePlayer` --
-	the raw `Humanoid.Died` path below has no attacker to give, because a fall
-	has no killer. Everything downstream of it stays silent about a killer
-	that does not exist rather than guessing one. ]]
+--[[ `attackerActor` is optional and only ever supplied by `damageCombatant`,
+	and only when the target killed was a player -- the raw `Humanoid.Died`
+	path below has no attacker to give, because a fall has no killer.
+	Everything downstream of it stays silent about a killer that does not
+	exist rather than guessing one. ]]
 local function handleDeath(player: Player, attackerActor: Combat.Actor?)
 	if dying[player.UserId] then
 		return
@@ -366,9 +371,10 @@ local function handleDeath(player: Player, attackerActor: Combat.Actor?)
 	-- before their state has loaded is charged nothing instead of being charged
 	-- at the wrong stage. Routed through ensureActor, not a raw table read, so
 	-- a death landing in the brief window after a stage change still charges
-	-- the current stage -- the same discipline damagePlayer already applies to
-	-- every combat death. Must run before the dying flag below, since
-	-- ensureActor itself refuses to act once dying[player.UserId] is set.
+	-- the current stage -- the same discipline damageCombatant already applies
+	-- to every combat death against a player target. Must run before the dying
+	-- flag below, since ensureActor itself refuses to act once
+	-- dying[player.UserId] is set.
 	local actor = ensureActor(player)
 	dying[player.UserId] = true
 
@@ -864,18 +870,31 @@ local function onUseTechnique(player: Player, slot: unknown, suppliedAim: unknow
 
 	local result = Combat.use(Config, actor, techId, now)
 	if not result.ok then
-		if result.reason == "cooling_down" then
-			local tech = Config.Techniques[techId]
-			AwarenessService.notify(player, "refused", `{tech.name} is still cooling.`)
-		elseif result.reason ~= "global_cooldown" then
-			AwarenessService.notify(
-				player,
-				"refused",
-				REFUSAL_MESSAGES[result.reason] or result.reason
-			)
+		-- Debounced by (reason, techId) rather than reason alone: cooling_down
+		-- is per-technique, so a different slot also on cooldown is genuinely
+		-- new information and still notifies once, while mashing the *same*
+		-- blocked slot notifies only the first time.
+		if result.reason ~= "global_cooldown" then
+			local noticeKey = if result.reason == "cooling_down"
+				then `cooling_down:{techId}`
+				else result.reason
+			if lastCastRefusalNotice[player.UserId] ~= noticeKey then
+				lastCastRefusalNotice[player.UserId] = noticeKey
+				if result.reason == "cooling_down" then
+					local tech = Config.Techniques[techId]
+					AwarenessService.notify(player, "refused", `{tech.name} is still cooling.`)
+				else
+					AwarenessService.notify(
+						player,
+						"refused",
+						REFUSAL_MESSAGES[result.reason] or result.reason
+					)
+				end
+			end
 		end
 		return
 	end
+	lastCastRefusalNotice[player.UserId] = nil
 
 	publish(player)
 
@@ -995,6 +1014,7 @@ function CombatService.onPlayerRemoving(player: Player)
 	loadouts[player.UserId] = nil
 	dying[player.UserId] = nil
 	lastRequestAt[player.UserId] = nil
+	lastCastRefusalNotice[player.UserId] = nil
 	for i = #constructs, 1, -1 do
 		if constructs[i].ownerId == player.UserId then
 			constructs[i].part:Destroy()
