@@ -268,6 +268,15 @@ Config.Combat = {
 	-- each hardcoding 16 independently.
 	baseWalkSpeed = 16,
 	respawnSeconds = 5,
+	--[[ Cross-bracket combat, per bracket-tone.md. "refuse" (release):
+		Combat.canEngage's silent refusal at damageCombatant, now voiced --
+		combat is refused and the attacker is told why. "notice" (development
+		override below): the hit lands unscaled and the attacker gets a
+		placeholder-marked, deliberately unflattering line instead of a wall.
+		The ratchet, the intra-bracket spread and canEngage itself are
+		unchanged in both modes -- this decides what happens AFTER canEngage
+		disagrees, not whether it can. ]]
+	crossBracket = "refuse" :: "refuse" | "notice",
 	-- Forger constructs damage on an interval rather than continuously, so a
 	-- technique's `damage` reads as damage *per tick*. At 2s, caltrops over its
 	-- full 10s window is 5 ticks (150) and sentry over 12s is 6 (144) -- around
@@ -335,6 +344,17 @@ Config.Combat = {
 	it at 0 the same way a striker carries mitigation at 0, for one uniform
 	shape rather than an optional field only three entries have.
 ]]
+--[[ The gating-metadata contract, COMBAT_VISION (k). Nothing reads it yet;
+	every technique carries `{ kind = "always" }` so that when earned level,
+	aura depth and Paths arrive they gate a technique by editing one field
+	rather than by adding one. An always-true gate on everything that has not
+	earned a real one is the contract, not a placeholder. ]]
+export type UnlockRequirement =
+	{ kind: "always" }
+	| { kind: "auraDepth", aura: "ash" | "verdant" | "lumen", threshold: number }
+	| { kind: "tier", tier: number }
+	| { kind: "path", path: string }
+
 export type Technique = {
 	id: string,
 	name: string,
@@ -353,6 +373,7 @@ export type Technique = {
 	interruptible: boolean,
 	projectile: string?,
 	slow: { walkSpeed: number, duration: number }?,
+	unlockRequirement: UnlockRequirement,
 }
 
 Config.Techniques = {
@@ -373,6 +394,7 @@ Config.Techniques = {
 		targeting = "aim",
 		castTime = 0,
 		interruptible = false,
+		unlockRequirement = { kind = "always" },
 	},
 	volley = {
 		id = "volley",
@@ -390,6 +412,7 @@ Config.Techniques = {
 		targeting = "aim",
 		castTime = 0,
 		interruptible = false,
+		unlockRequirement = { kind = "always" },
 	},
 	pierce = {
 		id = "pierce",
@@ -407,6 +430,7 @@ Config.Techniques = {
 		targeting = "aim",
 		castTime = 0,
 		interruptible = false,
+		unlockRequirement = { kind = "always" },
 	},
 	--[[ WHERE you fire from. A bolt drawn from the ground under the caster:
 		barren 25, open 50, rich 90, wellspring 130. A wellspring Draught
@@ -433,6 +457,7 @@ Config.Techniques = {
 		targeting = "aim",
 		castTime = 0,
 		interruptible = false,
+		unlockRequirement = { kind = "always" },
 	},
 	--[[ WHEN you fire: through their attack, not on their cooldown. The
 		self-buff block fires at press, so 45% mitigation covers the 0.55s
@@ -457,6 +482,7 @@ Config.Techniques = {
 		targeting = "aim",
 		castTime = 0,
 		interruptible = false,
+		unlockRequirement = { kind = "always" },
 	},
 	--[[ WHO you fire at: only someone who cannot leave. 1.6s is a longer
 		telegraph than every ruler but Tempest, and every strider in the pool
@@ -480,6 +506,7 @@ Config.Techniques = {
 		targeting = "aim",
 		castTime = 0,
 		interruptible = false,
+		unlockRequirement = { kind = "always" },
 	},
 	--[[ Instant aim versus a guaranteed hit after a commitment you can be
 		knocked out of. The first lock-and-cast technique: pick a target, hold
@@ -518,6 +545,7 @@ Config.Techniques = {
 		targeting = "lock",
 		castTime = 3.0,
 		interruptible = true,
+		unlockRequirement = { kind = "always" },
 		projectile = "homing",
 		slow = { walkSpeed = 8, duration = 3.0 },
 	},
@@ -552,6 +580,7 @@ Config.Techniques = {
 		targeting = "lock",
 		castTime = 6.0,
 		interruptible = false,
+		unlockRequirement = { kind = "always" },
 	},
 	--[[ The snare: Frostbolt's shape at a twelfth of the commit and a tenth
 		of the damage, for the slow rather than the hit. A quarter-second
@@ -586,6 +615,7 @@ Config.Techniques = {
 		targeting = "lock",
 		castTime = 0.1,
 		interruptible = true,
+		unlockRequirement = { kind = "always" },
 		projectile = "homing",
 		slow = { walkSpeed = 6, duration = 2.0 },
 	},
@@ -616,6 +646,7 @@ Config.Techniques = {
 		targeting = "aim",
 		castTime = 0,
 		interruptible = false,
+		unlockRequirement = { kind = "always" },
 		projectile = "straight",
 	},
 	--[[ The setup hit: aim, instant, hitscan, and a slow -- no projectile, no
@@ -643,6 +674,7 @@ Config.Techniques = {
 		targeting = "aim",
 		castTime = 0,
 		interruptible = false,
+		unlockRequirement = { kind = "always" },
 		slow = { walkSpeed = 10, duration = 3.0 },
 	},
 	--[[ The charged skillshot: Frostbolt's commitment with no lock. An aim
@@ -672,7 +704,70 @@ Config.Techniques = {
 		targeting = "aim",
 		castTime = 1.5,
 		interruptible = true,
+		unlockRequirement = { kind = "always" },
 		projectile = "straight",
+	},
+
+	--[[ FAMILIES ON THE AURA LATTICE -- one per aura, so that when aura
+		farming and unlockRequirement arrive they find content pre-aligned
+		with ground that already exists. ash / Ember Barrens: attrition and
+		denial. verdant / Verdant Reach: tether and sustain. lumen /
+		Wellspring: reveal and pierce. Frost stays the un-aligned starter set.
+		The set is at .agent-reports/families.md; entries land here as the
+		server can dispatch them, data-only ones first. ]]
+
+	--[[ ASH -- scorch, the chase-ender. A charged skillshot whose hit makes
+		the target unable to run: a straight bolt along the aim held at cast,
+		and on arrival WalkSpeed 12 for four seconds. Glacier is the corridor
+		punish -- a line, no slow; Scorch is what you take when the fight is
+		a pursuit. Both projectile kinds land through applySlowIfAny, so the
+		slow on a straight bolt is data today. ]]
+	scorch = {
+		id = "scorch",
+		name = "Scorch",
+		kind = "striker",
+		madraCost = 40,
+		cooldown = 6.0,
+		windup = 0,
+		damage = 100,
+		buffDuration = 0,
+		damageBuff = 0,
+		mitigation = 0,
+		moveSpeed = 0,
+		regionScaled = false,
+		targeting = "aim",
+		castTime = 0.8,
+		interruptible = true,
+		unlockRequirement = { kind = "always" },
+		projectile = "straight",
+		slow = { walkSpeed = 12, duration = 4.0 },
+	},
+	--[[ VERDANT -- thornlash, the aim snare. Cheap, fast, and the reason to
+		take it is the slow, not the 34: WalkSpeed 9 for two seconds on a
+		straight bolt, so a runner who is hit stops being a runner. Shard is
+		the poke you spam at an approach; Thornlash is what you fire at a
+		back. Windup 0.15 rather than 0 so it prices above the 20 tier under
+		the commit-ordering rule; the bar is one frame past the floor and
+		the flight is the real telegraph. ]]
+	thornlash = {
+		id = "thornlash",
+		name = "Thornlash",
+		kind = "striker",
+		madraCost = 20,
+		cooldown = 1.6,
+		windup = 0.15,
+		damage = 34,
+		buffDuration = 0,
+		damageBuff = 0,
+		mitigation = 0,
+		moveSpeed = 0,
+		regionScaled = false,
+		targeting = "aim",
+		castTime = 0,
+		interruptible = false,
+		unlockRequirement = { kind = "always" },
+		projectile = "straight",
+		slow = { walkSpeed = 9, duration = 2.0 },
 	},
 
 	-- Enforcer
@@ -692,6 +787,7 @@ Config.Techniques = {
 		targeting = "aim",
 		castTime = 0,
 		interruptible = false,
+		unlockRequirement = { kind = "always" },
 	},
 	bulwark = {
 		id = "bulwark",
@@ -709,6 +805,7 @@ Config.Techniques = {
 		targeting = "aim",
 		castTime = 0,
 		interruptible = false,
+		unlockRequirement = { kind = "always" },
 	},
 	--[[ WHO is the aggressor. For six seconds you deal +50% and TAKE +35%.
 		Negative mitigation is honoured by Combat.mitigationOf (a -0.35 target
@@ -734,6 +831,57 @@ Config.Techniques = {
 		targeting = "aim",
 		castTime = 0,
 		interruptible = false,
+		unlockRequirement = { kind = "always" },
+	},
+	--[[ ASH -- wildfire, the posture for fighting while MOVING. Faster
+		(WalkSpeed 21), harder-hitting (+25%) and glassier (+15% taken) for
+		five seconds: the kiting posture. Abandon is the same bargain for a
+		player who stands and trades; Wildfire is for one who does not stop.
+		moveSpeed is kind-agnostic since 90acec2, and highest-wins: a live
+		Windstride at 24 outruns it, which is fine -- the sustain is the
+		sustain, this is the fight inside it. ]]
+	wildfire = {
+		id = "wildfire",
+		name = "Wildfire",
+		kind = "enforcer",
+		madraCost = 30,
+		cooldown = 11.0,
+		windup = 0.1,
+		damage = 0,
+		buffDuration = 5.0,
+		damageBuff = 0.25,
+		mitigation = -0.15,
+		moveSpeed = 21,
+		regionScaled = false,
+		targeting = "aim",
+		castTime = 0,
+		interruptible = false,
+		unlockRequirement = { kind = "always" },
+	},
+	--[[ VERDANT -- ironroot, tank in PLACE: the exact inverse of strider.
+		70% mitigation at half WalkSpeed for four seconds. An Ironroot player
+		decides the fight happens HERE and gives up the ability to leave it;
+		a Bulwark player stays mobile. Known and accepted: moveSpeedOf is
+		highest-wins, so a live strider buff un-roots you and keeps the
+		mitigation -- pressing Windstride mid-Ironroot is a choice, not a
+		bug. Held since wave one for the moveSpeed un-gate; joins verdant. ]]
+	ironroot = {
+		id = "ironroot",
+		name = "Ironroot",
+		kind = "enforcer",
+		madraCost = 34,
+		cooldown = 12.0,
+		windup = 0.1,
+		damage = 0,
+		buffDuration = 4.0,
+		damageBuff = 0,
+		mitigation = 0.70,
+		moveSpeed = 8,
+		regionScaled = false,
+		targeting = "aim",
+		castTime = 0,
+		interruptible = false,
+		unlockRequirement = { kind = "always" },
 	},
 
 	-- Forger
@@ -753,6 +901,7 @@ Config.Techniques = {
 		targeting = "aim",
 		castTime = 0,
 		interruptible = false,
+		unlockRequirement = { kind = "always" },
 	},
 	caltrops = {
 		id = "caltrops",
@@ -770,6 +919,7 @@ Config.Techniques = {
 		targeting = "aim",
 		castTime = 0,
 		interruptible = false,
+		unlockRequirement = { kind = "always" },
 	},
 	sentry = {
 		id = "sentry",
@@ -787,6 +937,7 @@ Config.Techniques = {
 		targeting = "aim",
 		castTime = 0,
 		interruptible = false,
+		unlockRequirement = { kind = "always" },
 	},
 	--[[ Stand IN it or leave it. Both forger branches at once: not listed in
 		SELF_BUFF_FORGERS, so it spawns a construct, and it carries positive
@@ -814,6 +965,7 @@ Config.Techniques = {
 		targeting = "aim",
 		castTime = 0,
 		interruptible = false,
+		unlockRequirement = { kind = "always" },
 	},
 
 	-- Ruler -- these are the terrain-dependent ones. Monstrous in a
@@ -834,6 +986,7 @@ Config.Techniques = {
 		targeting = "aim",
 		castTime = 0,
 		interruptible = false,
+		unlockRequirement = { kind = "always" },
 	},
 	siphon = {
 		id = "siphon",
@@ -851,6 +1004,7 @@ Config.Techniques = {
 		targeting = "aim",
 		castTime = 0,
 		interruptible = false,
+		unlockRequirement = { kind = "always" },
 	},
 	tempest = {
 		id = "tempest",
@@ -868,6 +1022,7 @@ Config.Techniques = {
 		targeting = "aim",
 		castTime = 0,
 		interruptible = false,
+		unlockRequirement = { kind = "always" },
 	},
 	--[[ The ruler that works in the Barrens. Flat 45 everywhere: loses to
 		Siphon on rich (99) and wellspring (143), wins on barren (27) and
@@ -892,6 +1047,7 @@ Config.Techniques = {
 		targeting = "aim",
 		castTime = 0,
 		interruptible = false,
+		unlockRequirement = { kind = "always" },
 	},
 
 	--[[ Strider -- self-only WalkSpeed override, no damage path of its own.
@@ -920,6 +1076,7 @@ Config.Techniques = {
 		targeting = "aim",
 		castTime = 0,
 		interruptible = false,
+		unlockRequirement = { kind = "always" },
 	},
 	swiftstep = {
 		id = "swiftstep",
@@ -937,6 +1094,7 @@ Config.Techniques = {
 		targeting = "aim",
 		castTime = 0,
 		interruptible = false,
+		unlockRequirement = { kind = "always" },
 	},
 	windstride = {
 		id = "windstride",
@@ -954,6 +1112,7 @@ Config.Techniques = {
 		targeting = "aim",
 		castTime = 0,
 		interruptible = false,
+		unlockRequirement = { kind = "always" },
 	},
 } :: { [string]: Technique }
 
@@ -1050,6 +1209,14 @@ if Config.Profile == "development" then
 		you want when the job is "press all twelve of these and watch what
 		happens". This is the number the human asked for by name. ]]
 	Config.Combat.madraRegenFraction = 0.60 -- release 0.06
+
+	--[[ Cross-bracket combat, per bracket-tone.md. The human's own words
+		called this temporary; it stays behind the profile rather than
+		becoming a design change nobody asked for. Two friends at different
+		stages can fight tonight, with a placeholder-marked line saying so on
+		every hit rather than a silent wall. Release keeps the bracket design
+		the ratchet and the intra-bracket spread depend on. ]]
+	Config.Combat.crossBracket = "notice" -- release "refuse"
 
 	--[[ Nodes. More primes, more often, because a catalyst is the gate on
 		breakthrough and the breakthrough SUCCESS branch has still never

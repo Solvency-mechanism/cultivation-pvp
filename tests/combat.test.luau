@@ -490,6 +490,21 @@ for id, tech in Config.Techniques do
 	check(`{id} declares a targeting idiom`, tech.targeting == "aim" or tech.targeting == "lock")
 end
 
+--[[ The gating-metadata contract: every technique carries an unlockRequirement
+	of a kind the contract names, today always "always". Nothing reads it yet;
+	the point is that a technique without one is the same hazard as a remote
+	with an optional field on the read side, and the build that finally gates
+	should find every entry already carrying an answer. ]]
+local UNLOCK_KINDS: { [string]: boolean } =
+	{ always = true, auraDepth = true, tier = true, path = true }
+for id, tech in Config.Techniques do
+	local requirement = tech.unlockRequirement
+	check(
+		`{id} carries an unlock requirement of a known kind`,
+		type(requirement) == "table" and UNLOCK_KINDS[requirement.kind] == true
+	)
+end
+
 --[[ A projectile value is a dispatch key CombatService branches on, the way
 	it branches on kind. One it does not know is not an error there -- it
 	falls through to the hitscan landing and the technique silently plays as
