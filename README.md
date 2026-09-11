@@ -21,7 +21,13 @@ Xianxia-inspired PvP cultivation game for Roblox. All names are placeholders.
 - **The spawner is the content pipeline.** With AI and encounters deferred,
   node spawn logic does the job level and encounter design do elsewhere.
 - **Two node layers.** Static aura geography (permanent terrain richness) under
-  a dynamic field (ephemeral, decaying, telegraphed by tier).
+  a dynamic field (ephemeral, decaying, telegraphed by tier). Both layers are
+  live: a node's region is derived from where it actually lands via
+  `ArenaService.regionAt`, placement is weighted toward real landmark anchors,
+  and cycling and Ruler damage both read the ground you are standing on. For a
+  long time this was the one claim on this page that was false -- region was
+  rolled from a literal table unrelated to position, so a node labelled
+  `wellspring` routinely sat on the visible Ember Barrens.
 - **Capacity caps are the anti-zerg valve.** A node feeds three; a ten-player
   clan gains nothing from bringing ten.
 - **Prime nodes must be held to the drain** to yield their catalyst, which
@@ -74,8 +80,9 @@ to what was written.
 
 ```sh
 lune run tests/progression.test     # 58 assertions
-lune run tests/auranodes.test       # 56 assertions
+lune run tests/auranodes.test       # 88 assertions
 lune run tests/combat.test          # 119 assertions
+lune run tests/interface.test       # 97 assertions -- HUD geometry, no Studio needed
 selene src tests                    # lint
 stylua src tests                    # format
 rojo build default.project.json --output starter-game.rbxlx
@@ -103,9 +110,35 @@ Keys **1-4** fire the four loadout slots (striker, enforcer, forger, ruler). The
 client sends only the slot name; the server resolves it against the loadout it
 holds and owns every cost, cooldown and damage decision.
 
+**Hold Shift and a slot key** (or right-click the slot) to swap that slot to a
+different technique of the same kind. Without it every character is identical
+and eight of the twelve techniques are unreachable, which is how it shipped to
+the first playtest group.
+
+**Combat dummies**, for testing anything without a second player:
+
+```
+/dummy stationary|moving|caster [stage] [techId]
+/dummy clear
+```
+
+They go through the same combatant resolution and damage path as players --
+deliberately, because a dummy that has its own path stops being a measuring
+instrument and becomes a second thing to debug. A `caster` dummy loops a
+telegraphed technique, which is the only way to watch a cast bar from the
+defending side; a staged dummy is the cheapest way to exercise bracket
+refusal.
+
 `ArenaService` builds ground and a spawn pad when the place lacks them, so any
 Studio place works and a Baseplate place will not end up with two floors. Nodes
-spawn within 220 studs of the origin.
+are placed from its landmark anchors rather than scattered over a disc, so they
+appear at the places worth walking to.
+
+**Before publishing, run `.\publish-build.ps1`.** It deletes the place file and
+rebuilds it, rather than inspecting the one that is there. A place saved out of
+Studio is code of unknown vintage wearing the right filename -- neither its size
+nor its timestamp tells you which commit is inside it -- and this has already
+nearly shipped a build with an entire subsystem silently absent.
 
 Press **B** at the refinement ceiling to break through. Progress saves on leave,
 on shutdown and every 90 seconds — but DataStores are unavailable in an
