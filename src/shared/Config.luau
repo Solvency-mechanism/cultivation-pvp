@@ -174,6 +174,33 @@ Config.Field = {
 		{ tier = "rare", weight = 25 },
 		{ tier = "prime", weight = 5 },
 	},
+
+	--[[ Which region a node should *aim* for, as design intent.
+
+		This is a target, not a fact. Placement picks a region by these weights,
+		picks one of that region's anchors, scatters inside it, and then asks
+		`ArenaService.regionAt` what the resulting point actually is. If a scatter
+		throws a node past a lobe edge it is honestly `open`, and geography wins
+		the disagreement. Intent lives here; truth lives on the map.
+
+		The previous behaviour was a literal five-element table -- open, open,
+		rich, barren, wellspring -- drawn independently of where the node landed,
+		so a node tagged `wellspring` routinely sat on the visible Ember Barrens.
+		It also made 40% of nodes `open`, which is the one region that is
+		affinity-inactive and farms no aura, so two fifths of the field was
+		progression-dead.
+
+		`open` ground stays abundant -- it is most of the map, and it is the
+		corridors and the travel. What is cut is open *nodes*, because a node is
+		the unit of contested value and one with nothing to contest is a decoy.
+		If `open` is later promoted to a real farmable aura, this is the one
+		number that has to move. ]]
+	regionWeights = {
+		{ region = "wellspring", weight = 28 },
+		{ region = "rich", weight = 30 },
+		{ region = "barren", weight = 30 },
+		{ region = "open", weight = 12 },
+	},
 }
 
 --[[ How a region is spoken about. Announcements read "surfaced in the Ember
@@ -444,54 +471,74 @@ Config.LoadoutSlots = { "striker", "enforcer", "forger", "ruler" }
 Config.DefaultLoadout =
 	{ striker = "lance", enforcer = "surge", forger = "barrier", ruler = "siphon" }
 
---============================================================================
--- PLAYTEST-ONLY PACING OVERRIDE -- Remi's group, single-session playtest,
--- 2026-09-10 ~18:00. Ordered by gamelead. DELETE THIS ENTIRE BLOCK TOMORROW
--- to revert every number below to its permanent value defined above.
--- Persistence is deferred for this session by human decision, so there is no
--- save to protect -- these values are deliberately aggressive and are NOT a
--- balance ruling. Foundation/Copper/Iron/Jade are untouched on purpose:
--- CultivationService.newPlayerState starts everyone at Lowgold tonight, so
--- nobody will ever see those stages.
---============================================================================
-Config.Stages[5].perTierProgress = 350 -- lowgold, permanent value 9000
-Config.Stages[6].perTierProgress = 950 -- highgold, permanent value 24000
-Config.Stages[7].perTierProgress = 1750 -- truegold, permanent value 45000
+--[[
+	=========================== TUNING PROFILE ===========================
 
-Config.Field.spawnWeights = {
-	{ tier = "common", weight = 62 },
-	{ tier = "rare", weight = 30 },
-	{ tier = "prime", weight = 8 },
-}
-Config.Field.spawnIntervalSeconds = 15 -- permanent value 20
-Config.Field.maxActiveNodes = 7 -- permanent value 12
+	Everything above this line is the RELEASE tuning: the numbers the shipped
+	game is balanced around. Everything below is a named profile that overrides
+	some of them, and `Config.Profile` is the single switch that decides whether
+	any of it applies.
 
--- interface's cast-bar telegraph will not draw a bar under 0.15s -- a bar
--- that lives two frames trains the eye to distrust it. Lance sat exactly on
--- that line; without this it would cast with no visible windup tonight.
--- Windup only -- no projectile speed/landingRadius/d_cross/falloff tonight.
-Config.Techniques.lance.windup = 0.28 -- permanent value 0.15
-Config.Techniques.volley.windup = 0.50 -- permanent value 0.35
+	This began as a block of bare assignments written for one evening and
+	labelled "delete this tomorrow". It outlived the evening, which is what such
+	blocks always do, and a block of unlabelled assignments at the bottom of
+	Config is how a development curve eventually ships to players by accident.
+	So it is a profile now: one flag, obvious at a glance which way it is set,
+	announced at boot, and stamped into the release receipt.
 
---[[ Tonight's saves go to their own store, and this line is the reason the
-	rest of this block is allowed to be as aggressive as it is.
+	TO SHIP TO PLAYERS: set `Config.Profile = "release"`. That is the whole
+	procedure -- nothing below needs deleting, and nothing above ever changed.
 
-	Every number above was chosen on the premise that persistence was deferred,
-	so nothing survived the session and there was no save to protect. Publishing
-	the place invalidates that premise: it switches on the DataStore branch that
-	has never once executed, and from that moment these values are writing real,
-	permanent saves. A tier is 350 tonight against a true 9000, so a tester
-	advances roughly twenty-six times too fast -- and because `AllowStageDemotion`
-	is false, the ratchet makes every stage they gain permanent. Four people
-	would be left sitting in the production store at stages they were never
-	meant to reach, on a curve that stops existing tomorrow morning.
+	`development` exists to make TESTING fast, not to be balanced. It is not a
+	balance ruling and no number in it should be read as one.
+]]
+Config.Profile = "development" :: "development" | "release"
 
-	Bumping the store is this codebase's own documented answer to exactly this
-	("Bump storeName rather than migrating"), and it costs nothing tonight
-	because nobody has a save to be cut off from -- the DataStore path has never
-	successfully run. Deleting this block tomorrow returns everyone to a
-	`Cultivation_v1` that tonight never touched. ]]
-Config.Persistence.storeName = "Cultivation_playtest_20260910" -- permanent value "Cultivation_v1"
---======================= END PLAYTEST-ONLY OVERRIDE =======================
+if Config.Profile == "development" then
+	--[[ Refinement. Kept at the values Remi's session actually ran on rather
+		than cut further, deliberately: landscape is about to make cycling read
+		the ground instead of the node, which moves this curve on its own. Two
+		simultaneous changes to the same curve would confound each other, so
+		these are re-aimed once that lands and its effect is measured. ]]
+	Config.Stages[5].perTierProgress = 350 -- release 9000
+	Config.Stages[6].perTierProgress = 950 -- release 24000
+	Config.Stages[7].perTierProgress = 1750 -- release 45000
+
+	--[[ Madra regen is the single biggest limit on testing throughput. At the
+		release 6%/sec a tester spends most of their time waiting on a pool
+		rather than exercising techniques; at 60% the pool refills in under two
+		seconds and COOLDOWNS BECOME THE ONLY CONSTRAINT, which is exactly what
+		you want when the job is "press all twelve of these and watch what
+		happens". This is the number the human asked for by name. ]]
+	Config.Combat.madraRegenFraction = 0.60 -- release 0.06
+
+	--[[ Nodes. More primes, more often, because a catalyst is the gate on
+		breakthrough and the breakthrough SUCCESS branch has still never
+		executed in this project's life. maxActiveNodes stays low so testers
+		still collide over the same ground. ]]
+	Config.Field.spawnWeights = {
+		{ tier = "common", weight = 50 },
+		{ tier = "rare", weight = 30 },
+		{ tier = "prime", weight = 20 },
+	}
+	Config.Field.spawnIntervalSeconds = 10 -- release 20
+	Config.Field.maxActiveNodes = 7 -- release 12
+
+	--[[ Windups, so all three strikers clear interface's 0.15s cast-bar floor
+		and are visibly telegraphed. A bar that lives two frames trains the eye
+		to distrust it. These are a legibility fix rather than a testing speed-up
+		and they are a candidate to promote into release. ]]
+	Config.Techniques.lance.windup = 0.28 -- release 0.15
+	Config.Techniques.volley.windup = 0.50 -- release 0.35
+
+	--[[ A separate store, so a 26x-accelerated curve never writes into the
+		release save. Kept at the playtest name rather than renamed to something
+		tidier for one specific reason: THIS STORE HOLDS THE ONLY EVIDENCE THAT
+		PERSISTENCE HAS EVER WORKED. Remi's session wrote to it -- the first
+		time the DataStore path has executed at all -- and if any of that group
+		rejoins with their tier intact, that is the confirmation we never got.
+		Renaming would orphan it for a tidier name, which is a bad trade. ]]
+	Config.Persistence.storeName = "Cultivation_playtest_20260910" -- release "Cultivation_v1"
+end
 
 return Config

@@ -219,11 +219,26 @@ end)
 	A pixel read is a bad instrument for "am I running my own code"; a line in
 	the output window is a good one.
 
-	The per-tier figure is the fingerprint because it is the value the playtest
-	override changes most visibly (350 tonight against a permanent 9000), so it
-	distinguishes a build with the override from one without it at a glance. ]]
+	The per-tier figure is the fingerprint because it is the value the tuning
+	profile changes most visibly (350 in development against a release 9000), so
+	it distinguishes one from the other at a glance.
+
+	The profile itself is announced through `warn` rather than `print` when it is
+	anything but release. A development profile is a correct and useful thing to
+	be running -- right up until it is running in front of players, at which
+	point it is the most expensive mistake available, because every number in it
+	is deliberately wrong for balance. Output-window yellow is cheap insurance
+	against the one build nobody meant to ship. ]]
 local lowgold = Config.Stages[5]
 print(
 	`[cultivation] online -- {#Config.Stages} stages, cap at {Config.Stages[#Config.Stages].name}`
 )
 print(`[cultivation] build check -- {lowgold.name} tier = {lowgold.perTierProgress} progress`)
+
+if Config.Profile == "release" then
+	print("[cultivation] profile: release")
+else
+	warn(
+		`[cultivation] PROFILE: {string.upper(Config.Profile)} -- tuning is deliberately wrong for balance. NOT FOR PLAYERS.`
+	)
+end

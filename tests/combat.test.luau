@@ -165,13 +165,24 @@ local okDead, reasonDead = Combat.canUse(Config, deadActor, "lance", 0)
 check("the dead cannot act", not okDead)
 eq("dead reason", reasonDead, "dead")
 
--- Madra regen
+--[[ Madra regen. The expectation is DERIVED from Config rather than written as
+	a literal: what this proves is that `Combat.regen` applies the configured
+	fraction of the pool per second, not that the fraction holds any particular
+	value. The development tuning profile legitimately raises it to 0.60 so that
+	cooldowns become the only constraint while testing, and a literal here turned
+	that into a test failure when nothing was broken. ]]
 local g = Combat.newActor(Config, "p7", LOWGOLD)
+local pool = Combat.maxMadra(Config, LOWGOLD)
 g.madra = 0
 Combat.regen(Config, g, 1)
-near("regen is 6% of pool per second", g.madra, 200 * 0.06, 1e-9)
+near(
+	"regen is the configured fraction of the pool per second",
+	g.madra,
+	math.min(pool, pool * Config.Combat.madraRegenFraction),
+	1e-9
+)
 Combat.regen(Config, g, 9999)
-near("regen never exceeds the pool", g.madra, 200, 1e-9)
+near("regen never exceeds the pool", g.madra, pool, 1e-9)
 
 -- Brackets
 local low = Combat.newActor(Config, "low", LOWGOLD)

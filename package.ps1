@@ -61,6 +61,17 @@ $out = "dist/cultivation-pvp-$Version.rbxlx"
 rojo build default.project.json --output $out
 if ($LASTEXITCODE -ne 0) { throw "rojo build failed" }
 
+# The tuning profile is part of the artifact's identity. A development build
+# is a legitimate thing to package; one that ships to players by accident is
+# not, so the receipt says which it is and the console says so loudly.
+$profileLine = (Select-String -Path "src/shared/Config.luau" -Pattern '^Config\.Profile\s*=\s*"([a-z]+)"' | Select-Object -First 1)
+$profile = if ($profileLine) { $profileLine.Matches[0].Groups[1].Value } else { "unknown" }
+if ($profile -ne "release") {
+    Write-Output ""
+    Write-Output "  !! PROFILE: $($profile.ToUpper()) -- tuning is deliberately wrong for balance."
+    Write-Output "  !! This artifact is NOT FOR PLAYERS. Set Config.Profile = `"release`" to ship."
+}
+
 $hash = (Get-FileHash $out -Algorithm SHA256).Hash
 $size = [math]::Round((Get-Item $out).Length / 1KB)
 
@@ -71,6 +82,7 @@ built:   $(Get-Date -Format "yyyy-MM-dd HH:mm:ss K")
 file:    $(Split-Path $out -Leaf)
 size:    $size KB
 sha256:  $hash
+profile: $profile$(if ($profile -ne "release") { "  -- NOT FOR PLAYERS" })
 gate:    $(if ($SkipGate) { "SKIPPED -- not a release build" } else { "passed" })
 "@ | Set-Content -Path "dist/$([System.IO.Path]::GetFileNameWithoutExtension($out)).txt" -Encoding utf8
 
