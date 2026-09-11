@@ -729,7 +729,7 @@ do
 	targetFrame.Name = "TargetFrame"
 	targetFrame.AnchorPoint = Vector2.new(0.5, 0)
 	targetFrame.Position = UDim2.new(0.5, 0, 0, px(TARGET.top))
-	targetFrame.Size = UDim2.fromOffset(targetWidth, px(52))
+	targetFrame.Size = UDim2.fromOffset(targetWidth, px(InterfaceSpec.targetFrameHeight()))
 	targetFrame.BackgroundColor3 = PANEL
 	targetFrame.BackgroundTransparency = 0.12
 	targetFrame.BorderSizePixel = 0
@@ -739,17 +739,19 @@ do
 	local targetStroke = outline(targetFrame, EDGE, px(TARGET.borderThickness))
 
 	local targetName = caption(targetFrame, text(TARGET.nameTextSize), TEXT, true)
-	targetName.Size = UDim2.new(0.6, -px(8), 0, px(18))
-	targetName.Position = UDim2.fromOffset(px(8), px(3))
+	targetName.Size = UDim2.new(0.6, -px(8), 0, px(TARGET.nameHeight))
+	targetName.Position = UDim2.fromOffset(px(8), px(TARGET.padTop))
 
 	local targetStage = caption(targetFrame, text(TARGET.stageTextSize), TEXT_DIM, true)
-	targetStage.Size = UDim2.new(0.4, -px(8), 0, px(18))
-	targetStage.Position = UDim2.new(0.6, 0, 0, px(3))
+	targetStage.Size = UDim2.new(0.4, -px(8), 0, px(TARGET.nameHeight))
+	targetStage.Position = UDim2.new(0.6, 0, 0, px(TARGET.padTop))
 	targetStage.TextXAlignment = Enum.TextXAlignment.Right
 
 	local targetHealthRow = Instance.new("Frame")
 	targetHealthRow.Size = UDim2.new(1, -px(16), 0, px(TARGET.healthHeight))
-	targetHealthRow.Position = UDim2.fromOffset(px(8), px(22))
+	local healthTop = px(TARGET.padTop) + px(TARGET.nameHeight) + px(TARGET.nameToHealthGap)
+	local thirdTop = healthTop + px(TARGET.healthHeight) + px(TARGET.healthToThirdGap)
+	targetHealthRow.Position = UDim2.fromOffset(px(8), healthTop)
 	targetHealthRow.BackgroundTransparency = 1
 	targetHealthRow.Parent = targetFrame
 	local _targetBack, targetHealthFill = bar(targetHealthRow, px(TARGET.healthHeight), HEALTH)
@@ -766,7 +768,7 @@ do
 		arrived instantaneously from the defender's side. ]]
 	local targetCast = Instance.new("Frame")
 	targetCast.Size = UDim2.new(1, -px(16), 0, px(CASTSPEC.targetHeight))
-	targetCast.Position = UDim2.fromOffset(px(8), px(22) + px(TARGET.healthHeight) + px(3))
+	targetCast.Position = UDim2.fromOffset(px(8), thirdTop)
 	targetCast.BackgroundColor3 = TROUGH
 	targetCast.BackgroundTransparency = 0.1
 	targetCast.BorderSizePixel = 0
@@ -801,14 +803,14 @@ do
 		than left to be inferred. ]]
 	local targetLockTag = caption(targetFrame, text(TARGET.stageTextSize), LOCK, true)
 	targetLockTag.Size = UDim2.fromOffset(px(56), px(18))
-	targetLockTag.Position = UDim2.new(0.6, -px(60), 0, px(3))
+	targetLockTag.Position = UDim2.new(0.6, -px(60), 0, px(TARGET.padTop))
 	targetLockTag.TextXAlignment = Enum.TextXAlignment.Right
 	targetLockTag.Text = "LOCKED"
 	targetLockTag.Visible = false
 
 	local targetRefusal = caption(targetFrame, text(TARGET.stageTextSize), DANGER, true)
-	targetRefusal.Size = UDim2.new(1, -px(16), 0, px(14))
-	targetRefusal.Position = UDim2.fromOffset(px(8), px(22) + px(TARGET.healthHeight) + px(3))
+	targetRefusal.Size = UDim2.new(1, -px(16), 0, px(TARGET.thirdRowHeight))
+	targetRefusal.Position = UDim2.fromOffset(px(8), thirdTop)
 	targetRefusal.TextXAlignment = Enum.TextXAlignment.Center
 	targetRefusal.Visible = false
 	targetUi = {

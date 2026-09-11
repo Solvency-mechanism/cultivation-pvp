@@ -449,7 +449,37 @@ InterfaceSpec.Target = {
 	-- human reads a few times a second.
 	pollSeconds = 0.08,
 	borderThickness = 1,
+
+	--[[ The frame's rows, so its height is summed rather than written.
+
+		The height was a literal, 52, and the third row -- the cast bar or the
+		bracket refusal, which share it -- outgrew it: the refusal sat at 41
+		with 14 of height, bottom at 55, three pixels of descenders under the
+		frame's edge and more at scale. Seen live on a locked dummy, the first
+		time the frame had a real target in it. A literal height is a claim
+		about contents it does not look at; summing the rows makes the claim
+		true by construction and keeps it true when a row changes. ]]
+	padTop = 3,
+	nameHeight = 18,
+	nameToHealthGap = 1,
+	healthToThirdGap = 3,
+	thirdRowHeight = 14,
+	padBottom = 3,
 }
+
+--[[ The target frame's height, from its rows. The third row is the taller of
+	the cast bar and the refusal caption, since they occupy the same band. ]]
+function InterfaceSpec.targetFrameHeight(): number
+	local t = InterfaceSpec.Target
+	local third = math.max(t.thirdRowHeight, InterfaceSpec.Cast.targetHeight)
+	return t.padTop
+		+ t.nameHeight
+		+ t.nameToHealthGap
+		+ t.healthHeight
+		+ t.healthToThirdGap
+		+ third
+		+ t.padBottom
+end
 
 --[[ The refinement rail.
 

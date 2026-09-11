@@ -284,6 +284,27 @@ check(
 	`{topLevelLocals} top-level locals, ceiling {SOFT_CEILING}, hard limit 200`
 )
 
+--[[ The target frame holds its third row. The height was a literal that its
+	contents outgrew -- the refusal caption's descenders ran three pixels under
+	the frame's edge, seen live the first time the frame had a real target. Now
+	summed from the rows, and asserted so a row that grows fails here rather
+	than clips on a screen. ]]
+do
+	local t = InterfaceSpec.Target
+	local thirdBottom = t.padTop
+		+ t.nameHeight
+		+ t.nameToHealthGap
+		+ t.healthHeight
+		+ t.healthToThirdGap
+		+ math.max(t.thirdRowHeight, InterfaceSpec.Cast.targetHeight)
+	check(
+		"the target frame is tall enough for its third row",
+		InterfaceSpec.targetFrameHeight() >= thirdBottom + t.padBottom,
+		`third row ends at {thirdBottom}, frame is {InterfaceSpec.targetFrameHeight()}`
+	)
+	check("the refusal caption fits the third row", t.thirdRowHeight >= 14)
+end
+
 -- Cooldown countdowns, in the shape an icon prints them.
 eq("a sub-second cooldown shows a decimal", InterfaceSpec.countdown(0.8), "0.8")
 eq("a long cooldown rounds up to whole seconds", InterfaceSpec.countdown(15.2), "16")
