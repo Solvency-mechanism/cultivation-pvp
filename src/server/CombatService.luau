@@ -729,6 +729,28 @@ end
 	ruling seam decided in Combat.luau. Converting here, at the one call
 	site, keeps the authoring convenience without teaching the pure module
 	two representations. ]]
+--[[ The one place a technique's slow is ever applied, per the projectile-
+	variations finding that it was previously load-bearing on castTime > 0:
+	only landEffect read tech.slow, so an instant (non-channel) technique
+	carrying a slow -- Chill Touch -- silently dropped it. Called from every
+	resolver that lands a hit, channelled or not, so slow is a property of
+	landing a hit, not of any one path to landing one. ]]
+local function applySlowIfAny(
+	techId: string,
+	tech: Config.Technique,
+	target: Combatant,
+	now: number
+)
+	if tech.slow and target.actor.health > 0 then
+		local multiplier = tech.slow.walkSpeed / Config.Combat.baseWalkSpeed
+		Combat.applySlow(target.actor, techId, multiplier, tech.slow.duration, now)
+		mirrorMoveSpeed(target.humanoid, target.actor, now)
+		if target.kind == "player" and target.player then
+			publish(target.player)
+		end
+	end
+end
+
 local function landEffect(
 	player: Player,
 	actor: Combat.Actor,
@@ -744,15 +766,7 @@ local function landEffect(
 
 	local raw = Combat.outgoingDamage(Config, actor, techId, powerOf(player), regionOf(player), now)
 	damageCombatant(actor, target, raw, now)
-
-	if tech.slow and target.actor.health > 0 then
-		local multiplier = tech.slow.walkSpeed / Config.Combat.baseWalkSpeed
-		Combat.applySlow(target.actor, techId, multiplier, tech.slow.duration, now)
-		mirrorMoveSpeed(target.humanoid, target.actor, now)
-		if target.kind == "player" and target.player then
-			publish(target.player)
-		end
-	end
+	applySlowIfAny(techId, tech, target, now)
 end
 
 --[[ A server-driven homing bolt, per Layer 5 and interface's own tagging
@@ -1184,6 +1198,10 @@ local function resolveStriker(
 
 	local raw = Combat.outgoingDamage(Config, actor, techId, powerOf(caster), regionOf(caster), now)
 	damageCombatant(actor, target, raw, now)
+	-- Item (1) of the projectile-variations set: the instant aim path never
+	-- read a technique's slow before this, which Chill Touch (aim, instant,
+	-- no projectile, slow) exists to prove closed.
+	applySlowIfAny(techId, Config.Techniques[techId], target, now)
 end
 
 local function resolveRuler(caster: Player, actor: Combat.Actor, techId: string, now: number)
