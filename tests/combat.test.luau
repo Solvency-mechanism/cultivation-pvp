@@ -465,6 +465,22 @@ for id, tech in Config.Techniques do
 	check(`{id} declares a targeting idiom`, tech.targeting == "aim" or tech.targeting == "lock")
 end
 
+--[[ A projectile value is a dispatch key CombatService branches on, the way
+	it branches on kind. One it does not know is not an error there -- it
+	falls through to the hitscan landing and the technique silently plays as
+	something else. So the set of values the server dispatches is listed HERE,
+	owned by the test, and grows only in the same commit as the resolver
+	branch that reads the new value. ]]
+local DISPATCHED_PROJECTILES: { [string]: boolean } = { homing = true }
+for id, tech in Config.Techniques do
+	if tech.projectile ~= nil then
+		check(
+			`{id}'s projectile "{tech.projectile}" is one the server dispatches`,
+			DISPATCHED_PROJECTILES[tech.projectile] == true
+		)
+	end
+end
+
 print(`\n  passed: {passed}   failed: {failed}`)
 if failed > 0 then
 	for _, f in failures do

@@ -522,6 +522,38 @@ Config.Techniques = {
 		slow = { walkSpeed = 8, duration = 3.0 },
 	},
 
+	--[[ PROJECTILE VARIATIONS -- the roster as an instrument. Each of these
+		differs from Frostbolt in a DIFFERENT field, so a failure names the
+		field. The set and its falsifiable checks live in
+		.agent-reports/projectile-variations.md; argue with it by edit. ]]
+
+	--[[ The execute: twice Frostbolt's channel and it CANNOT be interrupted
+		-- `interruptible = false` is read in damageCombatant, so a hit taken
+		mid-channel does nothing to the bar. Only range, line of sight or the
+		target's death can stop it, and there is no projectile: the damage is
+		hitscan at completion. A Rime player fires it at someone who has
+		nowhere to go; a Frostbolt player fires it at someone who cannot
+		reach them. Six seconds is the longest commit in the pool, so by the
+		commit-ordering rule it is also the heaviest hit. Tests: the
+		uninterruptible flag, a long channel, a channel with no projectile. ]]
+	rime = {
+		id = "rime",
+		name = "Rime",
+		kind = "striker",
+		madraCost = 90,
+		cooldown = 20.0,
+		windup = 0,
+		damage = 320,
+		buffDuration = 0,
+		damageBuff = 0,
+		mitigation = 0,
+		moveSpeed = 0,
+		regionScaled = false,
+		targeting = "lock",
+		castTime = 6.0,
+		interruptible = false,
+	},
+
 	-- Enforcer
 	surge = {
 		id = "surge",
