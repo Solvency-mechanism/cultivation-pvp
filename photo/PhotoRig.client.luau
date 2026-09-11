@@ -27,6 +27,7 @@
 ]]
 
 local Lighting = game:GetService("Lighting")
+local TextChatService = game:GetService("TextChatService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
@@ -44,6 +45,18 @@ local Workspace = game:GetService("Workspace")
 	camera        { position: Vector3, lookAt: Vector3, fov: number }
 	              Scriptable camera, held every frame for the shot's duration so
 	              a respawn or a Roblox camera reset cannot take it back.
+	character     Vector3? place the character's root here, BEFORE the settle,
+	              facing fire.target if there is one and camera.lookAt otherwise.
+	              Without this the character stands where it spawned -- the
+	              22-stud deck at z = -136, the exact surface the brief says not
+	              to photograph -- and every impact could only happen there.
+	              A LocalScript may set its own root's CFrame; the client owns
+	              its character, and the move replicates well inside a settle.
+	dummy         string?  the /dummy argument line -- "stationary lowgold ahead"
+	              -- sent by the rig itself through TextChatService after the
+	              character is placed, so "ahead" is ahead of where the shot
+	              wants and the manual chat step and its replication race go
+	              away. Omit for a shot with no target.
 	settle        number?  seconds to wait after the camera is placed before
 	              anything fires. Lets the character finish loading, the HUD
 	              receive its attributes, and a placed dummy exist. Default 3.
@@ -94,6 +107,8 @@ local Workspace = game:GetService("Workspace")
 type Shot = {
 	name: string,
 	camera: { position: Vector3, lookAt: Vector3, fov: number },
+	character: Vector3?,
+	dummy: string?,
 	settle: number?,
 	hud: { [string]: boolean }?,
 	hideChildren: { string }?,
@@ -124,6 +139,8 @@ local SHOTS: { Shot } = {
 			lookAt = Vector3.new(0, 4, -60),
 			fov = 62,
 		},
+		character = Vector3.new(-5, 3, -60),
+		dummy = "stationary lowgold ahead",
 		settle = 3,
 		hud = { CultivationHud = true, CultivationReticle = false, ImpactFeedback = true },
 		hideChildren = {
@@ -277,6 +294,57 @@ local function applyLighting(shot: Shot): () -> ()
 	end
 end
 
+--[[ Stand the character where the shot wants it, facing what it will fire at.
+	Done before the settle so the move has replicated by the time anything
+	else looks. Facing the fire target rather than the camera's subject when
+	both exist, because "ahead" -- where a summoned dummy lands -- has to be
+	where the aim is going, and those two rays only sometimes agree. ]]
+local function placeCharacter(shot: Shot)
+	local at = shot.character
+	if not at then
+		return
+	end
+	local character = player.Character
+	local root = if character then character:FindFirstChild("HumanoidRootPart") else nil
+	if not root or not root:IsA("BasePart") then
+		log(`{shot.name}: no root to place`)
+		return
+	end
+	local facing = if shot.fire and shot.fire.target then shot.fire.target else shot.camera.lookAt
+	-- Level the look so the character does not pitch; roots are upright.
+	local flat = Vector3.new(facing.X, at.Y, facing.Z)
+	if (flat - at).Magnitude < 1e-3 then
+		flat = at + Vector3.new(0, 0, 1)
+	end
+	root.CFrame = CFrame.lookAt(at, flat)
+	log(`{shot.name}: character at {at}`)
+end
+
+--[[ Send the /dummy line through TextChatService, which is what a person
+	typing it does -- the server's TextChatCommand fires on it exactly as it
+	would on a keyboard. Sent after the character is placed, so "ahead" means
+	ahead of the shot's character and not of the spawn deck. ]]
+local function summonDummy(shot: Shot)
+	local line = shot.dummy
+	if not line then
+		return
+	end
+	local channel = TextChatService:FindFirstChild("TextChannels")
+	local general = if channel then channel:FindFirstChild("RBXGeneral") else nil
+	if not general or not general:IsA("TextChannel") then
+		log(`{shot.name}: no RBXGeneral channel; place the dummy by hand`)
+		return
+	end
+	local ok, err = pcall(function()
+		general:SendAsync(`/dummy {line}`)
+	end)
+	if ok then
+		log(`{shot.name}: sent /dummy {line}`)
+	else
+		log(`{shot.name}: /dummy failed: {err}`)
+	end
+end
+
 local function fire(shot: Shot)
 	local spec = shot.fire
 	if not spec then
@@ -311,6 +379,8 @@ local function runShot(shot: Shot)
 	local release = holdCamera(shot)
 	local restoreLighting = applyLighting(shot)
 	applyHud(shot)
+	placeCharacter(shot)
+	summonDummy(shot)
 
 	task.wait(shot.settle or 3)
 	fire(shot)
