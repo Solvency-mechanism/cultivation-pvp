@@ -84,3 +84,8 @@ Write-Output "                no numeric refinement caption and does have a cent
 Write-Output "  which world : this build is seconds old and Studio has not saved over it"
 Write-Output ""
 Write-Output "If Studio writes to $place, throw it away and run this again."
+Write-Output ""
+Write-Output "Better still: never open this file in Studio at all. Copy it, confirm the"
+Write-Output "copy's SHA256 matches, and run the document gate ON THE COPY. rojo is"
+Write-Output "deterministic, so what you gated is what you publish -- and the question"
+Write-Output "'did Studio touch it' becomes unaskable, because nothing ever had the chance."
