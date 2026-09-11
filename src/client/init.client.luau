@@ -1454,6 +1454,248 @@ local castStarted = remotes:WaitForChild("CastStarted") :: RemoteEvent
 	nothing; present, it works. Nothing else in this file depends on it. ]]
 local setLoadout = remotes:FindFirstChild("SetLoadout")
 
+--[[ Loadout cycling, without a picker.
+
+	Every player has been running the identical character -- `CombatService`
+	clones `Config.DefaultLoadout` once and nothing ever writes to that table
+	again -- so eight of the twelve finished techniques have never been in
+	anyone's hands. `Config`'s own comment calls 81 loadouts the point of the
+	shared pool, and that entire axis was dead.
+
+	A picker panel is the obvious answer and the wrong one this afternoon: it is
+	a new screen, a new focus state and a new thing to explain to four people who
+	have never played. Instead the action bar *is* the picker -- Shift and a slot
+	key steps that slot to the next technique of its kind, and the slot relabels
+	itself off the `Slot_<slot>` attribute the server publishes back. No new
+	screen at all.
+
+	Options are enumerated from the replicated `Config`, ordered by madra cost so
+	cycling reads cheap-to-dear rather than in hash order. That client-side guess
+	only decides what to *ask for*; the server validates the slot, the technique,
+	the kind match, and whether the technique being swapped away is mid-cooldown
+	-- otherwise swapping would be a free cooldown reset. ]]
+local optionsBySlot: { [string]: { string } } = {}
+for _, slot in slotNames do
+	local options: { string } = {}
+	for id, tech in Config.Techniques do
+		if tech.kind == slot then
+			table.insert(options, id)
+		end
+	end
+	table.sort(options, function(a: string, b: string): boolean
+		local left, right = Config.Techniques[a], Config.Techniques[b]
+		if left.madraCost ~= right.madraCost then
+			return left.madraCost < right.madraCost
+		end
+		-- Ties broken by id so the order is stable across clients and sessions.
+		return a < b
+	end)
+	optionsBySlot[slot] = options
+end
+
+--[[ Request a slot change. One place that talks to `SetLoadout`, so the cycle
+	chord and the picker cannot drift apart about what a swap is. ]]
+local function requestLoadout(slot: string, techId: string)
+	local current = player:GetAttribute("Slot_" .. slot)
+	if techId == current then
+		return
+	end
+	if setLoadout and setLoadout:IsA("RemoteEvent") then
+		(setLoadout :: RemoteEvent):FireServer(slot, techId)
+	end
+end
+
+local function cycleSlot(slot: string)
+	local options = optionsBySlot[slot]
+	if not options or #options < 2 then
+		return
+	end
+	local current = player:GetAttribute("Slot_" .. slot)
+	local index = 0
+	for position, id in options do
+		if id == current then
+			index = position
+			break
+		end
+	end
+	local nextId = options[(index % #options) + 1]
+	if nextId then
+		requestLoadout(slot, nextId)
+	end
+end
+
+-- ===================================================================
+-- The loadout picker. Development profile only.
+-- ===================================================================
+
+--[[ The whole pool, visible and swappable, behind a toggle.
+
+	Gated on `Config.Profile` exactly as the tuning numbers are: the ask was
+	"just for testing purposes for right now", and that is a lifetime this
+	project already has a place for. It cannot ship by accident, and setting the
+	profile to release removes it with no deletion and nothing to remember.
+
+	**Grouped by kind, because the grouping is the rule.** One slot per kind is
+	what makes a loadout a loadout, and a flat list of fifteen names hides it. A
+	row per kind with the current pick marked says, by its shape, that choosing a
+	new striker replaces your striker and touches nothing else.
+
+	**The client offers; the server still refuses.** Only same-kind techniques
+	appear in a slot's row, because offering an illegal choice is a bad
+	affordance -- but that filter carries no authority. `CombatService.onSetLoadout`
+	validates the slot, the technique, the kind match, that the player is alive
+	and that the outgoing technique is not mid-cooldown, exactly as it did before
+	this panel existed. A picker makes swapping fast and comfortable, which makes
+	it the natural way to try to dodge a cooldown -- so that last check gets *more*
+	load-bearing here, not less. ]]
+local PICKER = InterfaceSpec.Picker
+local pickerEnabled = Config.Profile == "development"
+
+type ChipWidget = {
+	button: TextButton,
+	stroke: UIStroke,
+	label: TextLabel,
+	slot: string,
+	techId: string,
+}
+
+local pickerChips: { ChipWidget } = {}
+local pickerFrame: Frame? = nil
+
+local function buildPicker()
+	if not pickerEnabled then
+		return
+	end
+
+	local rows = #slotNames
+	local height = PICKER.padding * 2
+		+ PICKER.headerHeight
+		+ rows * PICKER.rowHeight
+		+ (rows - 1) * PICKER.rowGap
+		+ px(16)
+
+	local frame = Instance.new("Frame")
+	frame.Name = "LoadoutPicker"
+	frame.AnchorPoint = Vector2.new(0.5, 1)
+	-- Above the bottom cluster, so the panel never covers the bar it edits.
+	frame.Position = UDim2.new(0.5, 0, 1, -(px(SLOT.bottomMargin) + clusterHeight + px(30)))
+	frame.Size = UDim2.fromOffset(px(PICKER.width), px(height))
+	frame.BackgroundColor3 = PANEL
+	frame.BackgroundTransparency = 0.06
+	frame.BorderSizePixel = 0
+	frame.Visible = false
+	frame.Parent = screen
+	corner(frame, 4)
+	outline(frame, EDGE, 1).Transparency = 0.3
+	pickerFrame = frame
+
+	local title = caption(frame, text(PICKER.titleTextSize), CEILING, true)
+	title.Size = UDim2.new(1, -px(PICKER.padding) * 2, 0, px(PICKER.headerHeight))
+	title.Position = UDim2.fromOffset(px(PICKER.padding), px(PICKER.padding))
+	title.Text = "LOADOUT"
+
+	local hint = caption(frame, text(PICKER.footTextSize), TEXT_FAINT, false)
+	hint.Size = UDim2.new(1, -px(PICKER.padding) * 2, 0, px(PICKER.headerHeight))
+	hint.Position = UDim2.fromOffset(px(PICKER.padding), px(PICKER.padding))
+	hint.TextXAlignment = Enum.TextXAlignment.Right
+	hint.Text = "[L] close    ·    one per kind"
+
+	for rowIndex, slot in slotNames do
+		local top = px(PICKER.padding)
+			+ px(PICKER.headerHeight)
+			+ (rowIndex - 1) * (px(PICKER.rowHeight) + px(PICKER.rowGap))
+
+		local kindLabel = caption(frame, text(PICKER.kindTextSize), TEXT_DIM, true)
+		kindLabel.Size = UDim2.fromOffset(px(PICKER.kindLabelWidth), px(PICKER.rowHeight))
+		kindLabel.Position = UDim2.fromOffset(px(PICKER.padding), top)
+		kindLabel.Text = string.upper(slot)
+		kindLabel.TextColor3 = color(InterfaceSpec.kindColor(slot))
+
+		local options: { string } = optionsBySlot[slot] or {}
+		local available = px(PICKER.width) - px(PICKER.padding) * 2 - px(PICKER.kindLabelWidth)
+		local count = math.max(#options, 1)
+		local chipWidth = math.floor((available - (count - 1) * px(PICKER.chipGap)) / count)
+
+		for chipIndex, techId in options do
+			local tech = Config.Techniques[techId]
+			local button = Instance.new("TextButton")
+			button.Size = UDim2.fromOffset(chipWidth, px(PICKER.chipHeight))
+			button.Position = UDim2.fromOffset(
+				px(PICKER.padding)
+					+ px(PICKER.kindLabelWidth)
+					+ (chipIndex - 1) * (chipWidth + px(PICKER.chipGap)),
+				top + math.floor((px(PICKER.rowHeight) - px(PICKER.chipHeight)) / 2)
+			)
+			button.BackgroundColor3 = TROUGH
+			button.BackgroundTransparency = 0.15
+			button.BorderSizePixel = 0
+			button.AutoButtonColor = false
+			button.Text = ""
+			button.Parent = frame
+			corner(button, 3)
+			local stroke = outline(button, EDGE, 1)
+
+			local label = caption(button, text(PICKER.chipTextSize), TEXT, true)
+			label.Size = UDim2.fromScale(1, 1)
+			label.TextXAlignment = Enum.TextXAlignment.Center
+			label.Text = if tech then `{tech.name}  {tech.madraCost}` else techId
+
+			button.Activated:Connect(function()
+				requestLoadout(slot, techId)
+			end)
+
+			table.insert(pickerChips, {
+				button = button,
+				stroke = stroke,
+				label = label,
+				slot = slot,
+				techId = techId,
+			})
+		end
+	end
+end
+
+--[[ Marks the equipped technique in each row, and dims anything a swap would
+	currently be refused for -- dimmed rather than hidden, so the panel explains
+	the refusal instead of appearing to lose an option. ]]
+local function refreshPicker()
+	if not pickerFrame or not pickerFrame.Visible then
+		return
+	end
+	local now = os.clock()
+	for _, chip in pickerChips do
+		local equipped = player:GetAttribute("Slot_" .. chip.slot) == chip.techId
+		local tech = Config.Techniques[chip.techId]
+		local kind = color(InterfaceSpec.kindColor(chip.slot))
+
+		-- The outgoing technique being mid-cooldown is what the server refuses
+		-- on, so that is what the panel reflects.
+		local outgoing = player:GetAttribute("Slot_" .. chip.slot)
+		local outgoingCooling = typeof(outgoing) == "string"
+			and (cooldownUntil[outgoing] or 0) > now
+		local blocked = outgoingCooling and not equipped
+
+		chip.stroke.Color = if equipped then kind elseif blocked then COOLING else EDGE
+		chip.stroke.Thickness = if equipped then 2 else 1
+		chip.button.BackgroundTransparency = if equipped then 0 else 0.15
+		chip.button.BackgroundColor3 = if equipped then PANEL else TROUGH
+		chip.label.TextTransparency = if blocked then PICKER.unavailableTransparency else 0
+		chip.label.TextColor3 = if equipped then TEXT else TEXT_DIM
+		if tech then
+			chip.label.Text = `{tech.name}  {tech.madraCost}`
+		end
+	end
+end
+
+local function togglePicker()
+	local frame = pickerFrame
+	if not frame then
+		return
+	end
+	frame.Visible = not frame.Visible
+	refreshPicker()
+end
+
 local latest: { any } = {}
 sensed.OnClientEvent:Connect(function(nodes: { any })
 	latest = nodes
@@ -1571,6 +1813,7 @@ end
 
 startSubsystem("Impact", require(script.Impact).start)
 startSubsystem("Nameplates", Nameplates.start)
+startSubsystem("LoadoutPicker", buildPicker)
 
 --[[ The card waits for cultivation state rather than firing at load, so it can
 	name the stage the player actually spawned into. ]]
@@ -1604,6 +1847,7 @@ local function renderStep()
 	end
 	refreshTarget()
 	refreshReticle()
+	refreshPicker()
 end
 
 -- pcall's result arity follows its callee, and this returns nothing, so the
@@ -1646,64 +1890,6 @@ local function fireSlot(slot: string)
 		input listener inside Vfx. There is one input owner, so there is nothing
 		to keep in agreement about what a press with Shift held means. ]]
 	Vfx.predictWindup(slot)
-end
-
---[[ Loadout cycling, without a picker.
-
-	Every player has been running the identical character -- `CombatService`
-	clones `Config.DefaultLoadout` once and nothing ever writes to that table
-	again -- so eight of the twelve finished techniques have never been in
-	anyone's hands. `Config`'s own comment calls 81 loadouts the point of the
-	shared pool, and that entire axis was dead.
-
-	A picker panel is the obvious answer and the wrong one this afternoon: it is
-	a new screen, a new focus state and a new thing to explain to four people who
-	have never played. Instead the action bar *is* the picker -- Shift and a slot
-	key steps that slot to the next technique of its kind, and the slot relabels
-	itself off the `Slot_<slot>` attribute the server publishes back. No new
-	screen at all.
-
-	Options are enumerated from the replicated `Config`, ordered by madra cost so
-	cycling reads cheap-to-dear rather than in hash order. That client-side guess
-	only decides what to *ask for*; the server validates the slot, the technique,
-	the kind match, and whether the technique being swapped away is mid-cooldown
-	-- otherwise swapping would be a free cooldown reset. ]]
-local optionsBySlot: { [string]: { string } } = {}
-for _, slot in slotNames do
-	local options: { string } = {}
-	for id, tech in Config.Techniques do
-		if tech.kind == slot then
-			table.insert(options, id)
-		end
-	end
-	table.sort(options, function(a: string, b: string): boolean
-		local left, right = Config.Techniques[a], Config.Techniques[b]
-		if left.madraCost ~= right.madraCost then
-			return left.madraCost < right.madraCost
-		end
-		-- Ties broken by id so the order is stable across clients and sessions.
-		return a < b
-	end)
-	optionsBySlot[slot] = options
-end
-
-local function cycleSlot(slot: string)
-	local options = optionsBySlot[slot]
-	if not options or #options < 2 then
-		return
-	end
-	local current = player:GetAttribute("Slot_" .. slot)
-	local index = 0
-	for position, id in options do
-		if id == current then
-			index = position
-			break
-		end
-	end
-	local nextId = options[(index % #options) + 1]
-	if nextId and nextId ~= current and setLoadout and setLoadout:IsA("RemoteEvent") then
-		(setLoadout :: RemoteEvent):FireServer(slot, nextId)
-	end
 end
 
 local SLOT_KEYS: { [Enum.KeyCode]: string } = {}
@@ -1750,5 +1936,9 @@ UserInputService.InputBegan:Connect(function(input: InputObject, processed: bool
 		end
 	elseif input.KeyCode == Enum.KeyCode.B then
 		breakthrough:FireServer()
+	elseif input.KeyCode == Enum.KeyCode.L then
+		-- Absent outside the development profile: buildPicker made no frame,
+		-- so the toggle is a no-op rather than a key that seems dead.
+		togglePicker()
 	end
 end)

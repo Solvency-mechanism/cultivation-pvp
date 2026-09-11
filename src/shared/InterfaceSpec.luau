@@ -489,6 +489,49 @@ InterfaceSpec.Sense = {
 	columnTextSize = 10,
 }
 
+--[[ The loadout picker: the whole pool, visible, swappable.
+
+	A development affordance, gated on `Config.Profile` exactly as the tuning
+	numbers are. The ask was "just for testing purposes for right now", which is
+	a lifetime, and this project now has a place to put things with that
+	lifetime -- so it cannot ship by accident and it disappears on release with
+	no deletion and nothing to remember.
+
+	**Grouped by kind rather than listed flat, because the grouping is the rule.**
+	One slot per kind is the constraint that makes a loadout a loadout, and a flat
+	list of fifteen names hides it. Laid out as a row per kind with the current
+	pick marked, the panel explains the system by its shape: picking a new striker
+	visibly replaces your striker and touches nothing else. That is worth more
+	than a tidier list.
+
+	**A toggle rather than furniture.** Fifteen techniques is not a small panel,
+	there are no corners left, and the HUD's job during a fight is to stay
+	readable. It opens, it is used, it closes.
+
+	What it quietly fixes: the playtest brief had to spend a paragraph warning
+	that the swap is the one nobody finds on their own, and that four friends who
+	never press Shift all play the identical character. That was a documentation
+	patch over a discoverability hole. Nobody *chooses* to be unaware the pool
+	exists -- that is an accident, not a decision, so the right fix removes it
+	rather than explaining it. ]]
+InterfaceSpec.Picker = {
+	width = 470,
+	rowHeight = 34,
+	rowGap = 6,
+	padding = 12,
+	headerHeight = 22,
+	kindLabelWidth = 74,
+	chipGap = 5,
+	chipHeight = 26,
+	titleTextSize = 13,
+	kindTextSize = 11,
+	chipTextSize = 11,
+	footTextSize = 10,
+	-- Dimmed rather than hidden when a swap would be refused, so the panel
+	-- explains the refusal instead of appearing to lose an option.
+	unavailableTransparency = 0.55,
+}
+
 InterfaceSpec.Notice = {
 	width = 460,
 	top = 14,
