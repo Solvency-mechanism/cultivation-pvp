@@ -255,6 +255,35 @@ for id, tech in Config.Techniques do
 	end
 end
 
+--[[ The top-level local count of the client, held well under the compiler's
+	limit.
+
+	Luau caps a function at 200 local registers, and a script's top-level chunk
+	is a function. init.client.luau crossed 200 in 74f3c2b, the compiler refused
+	the whole file, and nothing in it ran -- while every suite and linter stayed
+	green, since none of them compile a client script. tests/compile.test is the
+	hard gate now and fails at exactly 200. This is the soft one: it fails at a
+	number that leaves room, so the count is caught a commit early rather than
+	at the moment it breaks. Read from the source under Lune, because that is
+	the one place this file can be read outside Studio.
+
+	If this fails, do not raise the ceiling: scope a section into a do-block
+	and export its handles through a record, as the rest of the file does. ]]
+local fs = require("@lune/fs")
+local clientSource = fs.readFile("src/client/init.client.luau")
+local topLevelLocals = 0
+for line in string.gmatch(clientSource, "[^\n]+") do
+	if string.match(line, "^local ") then
+		topLevelLocals += 1
+	end
+end
+local SOFT_CEILING = 175
+check(
+	"the client stays under the local-register soft ceiling",
+	topLevelLocals <= SOFT_CEILING,
+	`{topLevelLocals} top-level locals, ceiling {SOFT_CEILING}, hard limit 200`
+)
+
 -- Cooldown countdowns, in the shape an icon prints them.
 eq("a sub-second cooldown shows a decimal", InterfaceSpec.countdown(0.8), "0.8")
 eq("a long cooldown rounds up to whole seconds", InterfaceSpec.countdown(15.2), "16")

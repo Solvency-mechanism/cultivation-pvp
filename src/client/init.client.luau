@@ -23,7 +23,22 @@
 
 	Tuning lives in `src/shared/InterfaceSpec.luau`, in the shape `ImpactSpec`
 	established, so the numbers behind the layout are testable outside Studio and
-	sit next to the impact numbers they have to agree with. ]]
+	sit next to the impact numbers they have to agree with.
+
+	**Sections are scoped, and the reason is a compiler limit that no lint sees.**
+	Luau allows a function at most 200 local registers, and the top-level chunk
+	of a script is a function. This file crossed 200 top-level locals in
+	74f3c2b, the compiler refused it, and NOTHING in it ran -- no vitals, no
+	action bar, no reticle -- while four test suites and three linters stayed
+	green, because none of them compile a client script. So each UI section
+	builds its elements inside a `do ... end` block and exports the handles other
+	code needs through ONE record (`targetUi`, `vitalsUi`, ...), and everything
+	else stays inside the block and off the top-level count.
+
+	`tests/compile.test` is the hard gate; `tests/interface.test` holds a soft
+	ceiling well under 200 so the count is caught a commit early rather than at
+	the moment it breaks. When you add a top-level local here, ask whether it
+	belongs inside a section's block first. ]]
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -228,60 +243,78 @@ vitals.Parent = cluster
 --[[ The header line: who you are, in the two facts that decide what you may do.
 	Stage decides your PvP bracket -- `Combat.canEngage` refuses across it -- and
 	tier decides where you sit inside it. ]]
-local stageLabel = caption(vitals, text(VITALS.headerTextSize), CEILING, true)
-stageLabel.Size = UDim2.new(0.6, 0, 0, headerHeight)
-stageLabel.Text = "--"
+local vitalsUi: {
+	stageLabel: TextLabel,
+	powerLabel: TextLabel,
+	healthFill: Frame,
+	healthValue: TextLabel,
+	madraFill: Frame,
+	madraValue: TextLabel,
+}
+do
+	local stageLabel = caption(vitals, text(VITALS.headerTextSize), CEILING, true)
+	stageLabel.Size = UDim2.new(0.6, 0, 0, headerHeight)
+	stageLabel.Text = "--"
 
-local powerLabel = caption(vitals, text(VITALS.labelTextSize), TEXT_FAINT, false)
-powerLabel.Size = UDim2.new(0.4, 0, 0, headerHeight)
-powerLabel.Position = UDim2.fromScale(0.6, 0)
-powerLabel.TextXAlignment = Enum.TextXAlignment.Right
+	local powerLabel = caption(vitals, text(VITALS.labelTextSize), TEXT_FAINT, false)
+	powerLabel.Size = UDim2.new(0.4, 0, 0, headerHeight)
+	powerLabel.Position = UDim2.fromScale(0.6, 0)
+	powerLabel.TextXAlignment = Enum.TextXAlignment.Right
 
-local healthRow = Instance.new("Frame")
-healthRow.Size = UDim2.new(1, 0, 0, healthHeight)
-healthRow.Position = UDim2.fromOffset(0, headerHeight)
-healthRow.BackgroundTransparency = 1
-healthRow.Parent = vitals
-local _healthBack, healthFill = bar(healthRow, healthHeight, HEALTH)
+	local healthRow = Instance.new("Frame")
+	healthRow.Size = UDim2.new(1, 0, 0, healthHeight)
+	healthRow.Position = UDim2.fromOffset(0, headerHeight)
+	healthRow.BackgroundTransparency = 1
+	healthRow.Parent = vitals
+	local _healthBack, healthFill = bar(healthRow, healthHeight, HEALTH)
 
-local healthValue = caption(healthRow, text(VITALS.valueTextSize), TEXT, true)
-healthValue.Size = UDim2.new(1, -px(6), 1, 0)
-healthValue.Position = UDim2.fromOffset(px(6), 0)
-healthValue.TextXAlignment = Enum.TextXAlignment.Right
-healthValue.ZIndex = 3
+	local healthValue = caption(healthRow, text(VITALS.valueTextSize), TEXT, true)
+	healthValue.Size = UDim2.new(1, -px(6), 1, 0)
+	healthValue.Position = UDim2.fromOffset(px(6), 0)
+	healthValue.TextXAlignment = Enum.TextXAlignment.Right
+	healthValue.ZIndex = 3
 
-local madraRow = Instance.new("Frame")
-madraRow.Size = UDim2.new(1, 0, 0, madraHeight)
-madraRow.Position = UDim2.fromOffset(0, headerHeight + healthHeight + rowGap)
-madraRow.BackgroundTransparency = 1
-madraRow.Parent = vitals
-local _madraBack, madraFill = bar(madraRow, madraHeight, MADRA)
+	local madraRow = Instance.new("Frame")
+	madraRow.Size = UDim2.new(1, 0, 0, madraHeight)
+	madraRow.Position = UDim2.fromOffset(0, headerHeight + healthHeight + rowGap)
+	madraRow.BackgroundTransparency = 1
+	madraRow.Parent = vitals
+	local _madraBack, madraFill = bar(madraRow, madraHeight, MADRA)
 
---[[ The resource is named, and health is not.
+	--[[ The resource is named, and health is not.
 
-	Moving the numbers to the ends of the bars dropped the word the old HUD
-	carried -- it read `madra 174 / 200`, this read `174 / 200` -- and that was a
-	real loss rather than a tidy-up. A red bar that empties when you are hit
-	needs no label in any game anyone has played. "Madra" is a word from this
-	game's own fiction, on an unlabelled blue bar, with the cost on every slot a
-	bare number in the same blue: colour was carrying the entire meaning of a
-	term nobody arrives knowing.
+		Moving the numbers to the ends of the bars dropped the word the old HUD
+		carried -- it read `madra 174 / 200`, this read `174 / 200` -- and that was a
+		real loss rather than a tidy-up. A red bar that empties when you are hit
+		needs no label in any game anyone has played. "Madra" is a word from this
+		game's own fiction, on an unlabelled blue bar, with the cost on every slot a
+		bare number in the same blue: colour was carrying the entire meaning of a
+		term nobody arrives knowing.
 
-	So the bar is labelled and the slot cost is not. Once the bar says MADRA in
-	this blue, the blue number on a technique is joined to it by colour, which is
-	the association the palette was built to make -- and a unit printed four
-	times across the action bar would cost more room than it buys. ]]
-local madraLabel = caption(madraRow, text(VITALS.valueTextSize) - 1, TEXT_DIM, true)
-madraLabel.Size = UDim2.new(1, -px(12), 1, 0)
-madraLabel.Position = UDim2.fromOffset(px(6), 0)
-madraLabel.ZIndex = 3
-madraLabel.Text = "MADRA"
+		So the bar is labelled and the slot cost is not. Once the bar says MADRA in
+		this blue, the blue number on a technique is joined to it by colour, which is
+		the association the palette was built to make -- and a unit printed four
+		times across the action bar would cost more room than it buys. ]]
+	local madraLabel = caption(madraRow, text(VITALS.valueTextSize) - 1, TEXT_DIM, true)
+	madraLabel.Size = UDim2.new(1, -px(12), 1, 0)
+	madraLabel.Position = UDim2.fromOffset(px(6), 0)
+	madraLabel.ZIndex = 3
+	madraLabel.Text = "MADRA"
 
-local madraValue = caption(madraRow, text(VITALS.valueTextSize) - 1, TEXT_DIM, true)
-madraValue.Size = UDim2.new(1, -px(6), 1, 0)
-madraValue.Position = UDim2.fromOffset(px(6), 0)
-madraValue.TextXAlignment = Enum.TextXAlignment.Right
-madraValue.ZIndex = 3
+	local madraValue = caption(madraRow, text(VITALS.valueTextSize) - 1, TEXT_DIM, true)
+	madraValue.Size = UDim2.new(1, -px(6), 1, 0)
+	madraValue.Position = UDim2.fromOffset(px(6), 0)
+	madraValue.TextXAlignment = Enum.TextXAlignment.Right
+	madraValue.ZIndex = 3
+	vitalsUi = {
+		stageLabel = stageLabel,
+		powerLabel = powerLabel,
+		healthFill = healthFill,
+		healthValue = healthValue,
+		madraFill = madraFill,
+		madraValue = madraValue,
+	}
+end
 
 --[[ Your own cast bar, immediately above the action bar.
 
@@ -290,37 +323,41 @@ madraValue.ZIndex = 3
 	windup is a *commitment* -- aim is sampled at cast and the technique resolves
 	wherever you were pointing -- and until now nothing on screen said that the
 	commitment was in progress. ]]
-local castFrame = Instance.new("Frame")
-castFrame.Name = "CastBar"
-castFrame.AnchorPoint = Vector2.new(0.5, 0)
-castFrame.Position =
-	UDim2.new(0.5, 0, 0, headerHeight + healthHeight + rowGap + madraHeight + stackGap)
-castFrame.Size = UDim2.fromOffset(px(CASTSPEC.width), castHeight)
-castFrame.BackgroundColor3 = TROUGH
-castFrame.BackgroundTransparency = 0.1
-castFrame.BorderSizePixel = 0
-castFrame.Visible = false
-castFrame.Parent = cluster
-corner(castFrame, 2)
-outline(castFrame, BLACK, 1).Transparency = 0.4
+local castUi: { frame: Frame, fill: Frame, name: TextLabel, timer: TextLabel }
+do
+	local castFrame = Instance.new("Frame")
+	castFrame.Name = "CastBar"
+	castFrame.AnchorPoint = Vector2.new(0.5, 0)
+	castFrame.Position =
+		UDim2.new(0.5, 0, 0, headerHeight + healthHeight + rowGap + madraHeight + stackGap)
+	castFrame.Size = UDim2.fromOffset(px(CASTSPEC.width), castHeight)
+	castFrame.BackgroundColor3 = TROUGH
+	castFrame.BackgroundTransparency = 0.1
+	castFrame.BorderSizePixel = 0
+	castFrame.Visible = false
+	castFrame.Parent = cluster
+	corner(castFrame, 2)
+	outline(castFrame, BLACK, 1).Transparency = 0.4
 
-local castFill = Instance.new("Frame")
-castFill.Size = UDim2.fromScale(0, 1)
-castFill.BackgroundColor3 = READY
-castFill.BorderSizePixel = 0
-castFill.Parent = castFrame
-corner(castFill, 2)
+	local castFill = Instance.new("Frame")
+	castFill.Size = UDim2.fromScale(0, 1)
+	castFill.BackgroundColor3 = READY
+	castFill.BorderSizePixel = 0
+	castFill.Parent = castFrame
+	corner(castFill, 2)
 
-local castName = caption(castFrame, text(CASTSPEC.textSize), TEXT, true)
-castName.Size = UDim2.new(1, -px(12), 1, 0)
-castName.Position = UDim2.fromOffset(px(6), 0)
-castName.ZIndex = 3
+	local castName = caption(castFrame, text(CASTSPEC.textSize), TEXT, true)
+	castName.Size = UDim2.new(1, -px(12), 1, 0)
+	castName.Position = UDim2.fromOffset(px(6), 0)
+	castName.ZIndex = 3
 
-local castTimer = caption(castFrame, text(CASTSPEC.textSize), TEXT, true)
-castTimer.Size = UDim2.new(1, -px(12), 1, 0)
-castTimer.Position = UDim2.fromOffset(px(6), 0)
-castTimer.TextXAlignment = Enum.TextXAlignment.Right
-castTimer.ZIndex = 3
+	local castTimer = caption(castFrame, text(CASTSPEC.textSize), TEXT, true)
+	castTimer.Size = UDim2.new(1, -px(12), 1, 0)
+	castTimer.Position = UDim2.fromOffset(px(6), 0)
+	castTimer.TextXAlignment = Enum.TextXAlignment.Right
+	castTimer.ZIndex = 3
+	castUi = { frame = castFrame, fill = castFill, name = castName, timer = castTimer }
+end
 
 -- ===================================================================
 -- The action bar.
@@ -598,41 +635,45 @@ end
 	visibly changes between two that change constantly, which teaches the eye to
 	skip the whole region. Ambient is the correct register for it -- always
 	available, never competing. ]]
-local railHeight = px(InterfaceSpec.Rail.height)
-local rail = Instance.new("Frame")
-rail.Name = "RefinementRail"
-rail.AnchorPoint = Vector2.new(0.5, 1)
-rail.Position = UDim2.fromScale(0.5, 1)
-rail.Size = UDim2.new(1, 0, 0, railHeight)
-rail.BackgroundColor3 = TROUGH
-rail.BackgroundTransparency = 0.3
-rail.BorderSizePixel = 0
-rail.Parent = screen
+local progressUi: { railFill: Frame, promptFrame: Frame, promptLabel: TextLabel }
+do
+	local railHeight = px(InterfaceSpec.Rail.height)
+	local rail = Instance.new("Frame")
+	rail.Name = "RefinementRail"
+	rail.AnchorPoint = Vector2.new(0.5, 1)
+	rail.Position = UDim2.fromScale(0.5, 1)
+	rail.Size = UDim2.new(1, 0, 0, railHeight)
+	rail.BackgroundColor3 = TROUGH
+	rail.BackgroundTransparency = 0.3
+	rail.BorderSizePixel = 0
+	rail.Parent = screen
 
-local railFill = Instance.new("Frame")
-railFill.Size = UDim2.fromScale(0, 1)
-railFill.BackgroundColor3 = REFINEMENT
-railFill.BorderSizePixel = 0
-railFill.Parent = rail
+	local railFill = Instance.new("Frame")
+	railFill.Size = UDim2.fromScale(0, 1)
+	railFill.BackgroundColor3 = REFINEMENT
+	railFill.BorderSizePixel = 0
+	railFill.Parent = rail
 
---[[ The breakthrough prompt. Hidden until the ceiling is actually reached,
-	which is the progressive-disclosure rule applied to the loudest thing the
-	interface ever needs to say. ]]
-local promptFrame = Instance.new("Frame")
-promptFrame.AnchorPoint = Vector2.new(0.5, 1)
-promptFrame.Position = UDim2.new(0.5, 0, 1, -(px(SLOT.bottomMargin) + clusterHeight + px(8)))
-promptFrame.Size = UDim2.fromOffset(px(320), px(24))
-promptFrame.BackgroundColor3 = PANEL
-promptFrame.BackgroundTransparency = 0.15
-promptFrame.BorderSizePixel = 0
-promptFrame.Visible = false
-promptFrame.Parent = screen
-corner(promptFrame, 3)
-outline(promptFrame, CEILING, 1).Transparency = 0.4
+	--[[ The breakthrough prompt. Hidden until the ceiling is actually reached,
+		which is the progressive-disclosure rule applied to the loudest thing the
+		interface ever needs to say. ]]
+	local promptFrame = Instance.new("Frame")
+	promptFrame.AnchorPoint = Vector2.new(0.5, 1)
+	promptFrame.Position = UDim2.new(0.5, 0, 1, -(px(SLOT.bottomMargin) + clusterHeight + px(8)))
+	promptFrame.Size = UDim2.fromOffset(px(320), px(24))
+	promptFrame.BackgroundColor3 = PANEL
+	promptFrame.BackgroundTransparency = 0.15
+	promptFrame.BorderSizePixel = 0
+	promptFrame.Visible = false
+	promptFrame.Parent = screen
+	corner(promptFrame, 3)
+	outline(promptFrame, CEILING, 1).Transparency = 0.4
 
-local promptLabel = caption(promptFrame, text(12), CEILING, true)
-promptLabel.Size = UDim2.fromScale(1, 1)
-promptLabel.TextXAlignment = Enum.TextXAlignment.Center
+	local promptLabel = caption(promptFrame, text(12), CEILING, true)
+	promptLabel.Size = UDim2.fromScale(1, 1)
+	promptLabel.TextXAlignment = Enum.TextXAlignment.Center
+	progressUi = { railFill = railFill, promptFrame = promptFrame, promptLabel = promptLabel }
+end
 
 -- ===================================================================
 -- The target frame, top centre.
@@ -650,141 +691,176 @@ promptLabel.TextXAlignment = Enum.TextXAlignment.Center
 	near the reticle, and putting their frame in the same vertical column as
 	their body means a telegraph and its resolution are read in one glance. ]]
 local TARGET = InterfaceSpec.Target
-local targetWidth = px(TARGET.width)
+local targetUi: {
+	frame: Frame,
+	stroke: UIStroke,
+	nameLabel: TextLabel,
+	stageLabel: TextLabel,
+	healthFill: Frame,
+	healthValue: TextLabel,
+	castBar: Frame,
+	castBarFill: Frame,
+	castBarName: TextLabel,
+	castBarTimer: TextLabel,
+	lockTag: TextLabel,
+	refusal: TextLabel,
+}
+do
+	local targetWidth = px(TARGET.width)
 
-local targetFrame = Instance.new("Frame")
-targetFrame.Name = "TargetFrame"
-targetFrame.AnchorPoint = Vector2.new(0.5, 0)
-targetFrame.Position = UDim2.new(0.5, 0, 0, px(TARGET.top))
-targetFrame.Size = UDim2.fromOffset(targetWidth, px(52))
-targetFrame.BackgroundColor3 = PANEL
-targetFrame.BackgroundTransparency = 0.12
-targetFrame.BorderSizePixel = 0
-targetFrame.Visible = false
-targetFrame.Parent = screen
-corner(targetFrame, 3)
-local targetStroke = outline(targetFrame, EDGE, px(TARGET.borderThickness))
+	local targetFrame = Instance.new("Frame")
+	targetFrame.Name = "TargetFrame"
+	targetFrame.AnchorPoint = Vector2.new(0.5, 0)
+	targetFrame.Position = UDim2.new(0.5, 0, 0, px(TARGET.top))
+	targetFrame.Size = UDim2.fromOffset(targetWidth, px(52))
+	targetFrame.BackgroundColor3 = PANEL
+	targetFrame.BackgroundTransparency = 0.12
+	targetFrame.BorderSizePixel = 0
+	targetFrame.Visible = false
+	targetFrame.Parent = screen
+	corner(targetFrame, 3)
+	local targetStroke = outline(targetFrame, EDGE, px(TARGET.borderThickness))
 
-local targetName = caption(targetFrame, text(TARGET.nameTextSize), TEXT, true)
-targetName.Size = UDim2.new(0.6, -px(8), 0, px(18))
-targetName.Position = UDim2.fromOffset(px(8), px(3))
+	local targetName = caption(targetFrame, text(TARGET.nameTextSize), TEXT, true)
+	targetName.Size = UDim2.new(0.6, -px(8), 0, px(18))
+	targetName.Position = UDim2.fromOffset(px(8), px(3))
 
-local targetStage = caption(targetFrame, text(TARGET.stageTextSize), TEXT_DIM, true)
-targetStage.Size = UDim2.new(0.4, -px(8), 0, px(18))
-targetStage.Position = UDim2.new(0.6, 0, 0, px(3))
-targetStage.TextXAlignment = Enum.TextXAlignment.Right
+	local targetStage = caption(targetFrame, text(TARGET.stageTextSize), TEXT_DIM, true)
+	targetStage.Size = UDim2.new(0.4, -px(8), 0, px(18))
+	targetStage.Position = UDim2.new(0.6, 0, 0, px(3))
+	targetStage.TextXAlignment = Enum.TextXAlignment.Right
 
-local targetHealthRow = Instance.new("Frame")
-targetHealthRow.Size = UDim2.new(1, -px(16), 0, px(TARGET.healthHeight))
-targetHealthRow.Position = UDim2.fromOffset(px(8), px(22))
-targetHealthRow.BackgroundTransparency = 1
-targetHealthRow.Parent = targetFrame
-local _targetBack, targetHealthFill = bar(targetHealthRow, px(TARGET.healthHeight), HEALTH)
+	local targetHealthRow = Instance.new("Frame")
+	targetHealthRow.Size = UDim2.new(1, -px(16), 0, px(TARGET.healthHeight))
+	targetHealthRow.Position = UDim2.fromOffset(px(8), px(22))
+	targetHealthRow.BackgroundTransparency = 1
+	targetHealthRow.Parent = targetFrame
+	local _targetBack, targetHealthFill = bar(targetHealthRow, px(TARGET.healthHeight), HEALTH)
 
-local targetHealthValue = caption(targetHealthRow, text(TARGET.valueTextSize), TEXT, true)
-targetHealthValue.Size = UDim2.new(1, -px(6), 1, 0)
-targetHealthValue.Position = UDim2.fromOffset(px(6), 0)
-targetHealthValue.TextXAlignment = Enum.TextXAlignment.Right
-targetHealthValue.ZIndex = 3
+	local targetHealthValue = caption(targetHealthRow, text(TARGET.valueTextSize), TEXT, true)
+	targetHealthValue.Size = UDim2.new(1, -px(6), 1, 0)
+	targetHealthValue.Position = UDim2.fromOffset(px(6), 0)
+	targetHealthValue.TextXAlignment = Enum.TextXAlignment.Right
+	targetHealthValue.ZIndex = 3
 
---[[ The target's cast bar. The whole reason this frame exists tonight: an
-	opponent's windup was, until now, completely invisible -- the server
-	broadcast nothing until the technique had already resolved, so a 1.8s Tempest
-	arrived instantaneously from the defender's side. ]]
-local targetCast = Instance.new("Frame")
-targetCast.Size = UDim2.new(1, -px(16), 0, px(CASTSPEC.targetHeight))
-targetCast.Position = UDim2.fromOffset(px(8), px(22) + px(TARGET.healthHeight) + px(3))
-targetCast.BackgroundColor3 = TROUGH
-targetCast.BackgroundTransparency = 0.1
-targetCast.BorderSizePixel = 0
-targetCast.Visible = false
-targetCast.Parent = targetFrame
-corner(targetCast, 2)
+	--[[ The target's cast bar. The whole reason this frame exists tonight: an
+		opponent's windup was, until now, completely invisible -- the server
+		broadcast nothing until the technique had already resolved, so a 1.8s Tempest
+		arrived instantaneously from the defender's side. ]]
+	local targetCast = Instance.new("Frame")
+	targetCast.Size = UDim2.new(1, -px(16), 0, px(CASTSPEC.targetHeight))
+	targetCast.Position = UDim2.fromOffset(px(8), px(22) + px(TARGET.healthHeight) + px(3))
+	targetCast.BackgroundColor3 = TROUGH
+	targetCast.BackgroundTransparency = 0.1
+	targetCast.BorderSizePixel = 0
+	targetCast.Visible = false
+	targetCast.Parent = targetFrame
+	corner(targetCast, 2)
 
-local targetCastFill = Instance.new("Frame")
-targetCastFill.Size = UDim2.fromScale(0, 1)
-targetCastFill.BackgroundColor3 = READY
-targetCastFill.BorderSizePixel = 0
-targetCastFill.Parent = targetCast
-corner(targetCastFill, 2)
+	local targetCastFill = Instance.new("Frame")
+	targetCastFill.Size = UDim2.fromScale(0, 1)
+	targetCastFill.BackgroundColor3 = READY
+	targetCastFill.BorderSizePixel = 0
+	targetCastFill.Parent = targetCast
+	corner(targetCastFill, 2)
 
-local targetCastName = caption(targetCast, text(CASTSPEC.textSize), TEXT, true)
-targetCastName.Size = UDim2.new(1, -px(12), 1, 0)
-targetCastName.Position = UDim2.fromOffset(px(6), 0)
-targetCastName.ZIndex = 3
+	local targetCastName = caption(targetCast, text(CASTSPEC.textSize), TEXT, true)
+	targetCastName.Size = UDim2.new(1, -px(12), 1, 0)
+	targetCastName.Position = UDim2.fromOffset(px(6), 0)
+	targetCastName.ZIndex = 3
 
-local targetCastTimer = caption(targetCast, text(CASTSPEC.textSize), TEXT, true)
-targetCastTimer.Size = UDim2.new(1, -px(12), 1, 0)
-targetCastTimer.Position = UDim2.fromOffset(px(6), 0)
-targetCastTimer.TextXAlignment = Enum.TextXAlignment.Right
-targetCastTimer.ZIndex = 3
+	local targetCastTimer = caption(targetCast, text(CASTSPEC.textSize), TEXT, true)
+	targetCastTimer.Size = UDim2.new(1, -px(12), 1, 0)
+	targetCastTimer.Position = UDim2.fromOffset(px(6), 0)
+	targetCastTimer.TextXAlignment = Enum.TextXAlignment.Right
+	targetCastTimer.ZIndex = 3
 
---[[ The bracket line. `Combat.canEngage` refuses cross-stage fights outright,
-	and until now a player discovered that by attacking someone and having
-	nothing whatsoever happen -- indistinguishable from a miss, from lag, or from
-	a broken button. Saying it on the frame turns a mystery into a rule. ]]
---[[ Says "LOCKED" beside the stage when the frame is showing a lock rather
-	than the aim, so the two idioms are told apart by a word and a border rather
-	than left to be inferred. ]]
-local targetLockTag = caption(targetFrame, text(TARGET.stageTextSize), LOCK, true)
-targetLockTag.Size = UDim2.fromOffset(px(56), px(18))
-targetLockTag.Position = UDim2.new(0.6, -px(60), 0, px(3))
-targetLockTag.TextXAlignment = Enum.TextXAlignment.Right
-targetLockTag.Text = "LOCKED"
-targetLockTag.Visible = false
+	--[[ The bracket line. `Combat.canEngage` refuses cross-stage fights outright,
+		and until now a player discovered that by attacking someone and having
+		nothing whatsoever happen -- indistinguishable from a miss, from lag, or from
+		a broken button. Saying it on the frame turns a mystery into a rule. ]]
+	--[[ Says "LOCKED" beside the stage when the frame is showing a lock rather
+		than the aim, so the two idioms are told apart by a word and a border rather
+		than left to be inferred. ]]
+	local targetLockTag = caption(targetFrame, text(TARGET.stageTextSize), LOCK, true)
+	targetLockTag.Size = UDim2.fromOffset(px(56), px(18))
+	targetLockTag.Position = UDim2.new(0.6, -px(60), 0, px(3))
+	targetLockTag.TextXAlignment = Enum.TextXAlignment.Right
+	targetLockTag.Text = "LOCKED"
+	targetLockTag.Visible = false
 
-local targetRefusal = caption(targetFrame, text(TARGET.stageTextSize), DANGER, true)
-targetRefusal.Size = UDim2.new(1, -px(16), 0, px(14))
-targetRefusal.Position = UDim2.fromOffset(px(8), px(22) + px(TARGET.healthHeight) + px(3))
-targetRefusal.TextXAlignment = Enum.TextXAlignment.Center
-targetRefusal.Visible = false
+	local targetRefusal = caption(targetFrame, text(TARGET.stageTextSize), DANGER, true)
+	targetRefusal.Size = UDim2.new(1, -px(16), 0, px(14))
+	targetRefusal.Position = UDim2.fromOffset(px(8), px(22) + px(TARGET.healthHeight) + px(3))
+	targetRefusal.TextXAlignment = Enum.TextXAlignment.Center
+	targetRefusal.Visible = false
+	targetUi = {
+		frame = targetFrame,
+		stroke = targetStroke,
+		nameLabel = targetName,
+		stageLabel = targetStage,
+		healthFill = targetHealthFill,
+		healthValue = targetHealthValue,
+		castBar = targetCast,
+		castBarFill = targetCastFill,
+		castBarName = targetCastName,
+		castBarTimer = targetCastTimer,
+		lockTag = targetLockTag,
+		refusal = targetRefusal,
+	}
+end
 
 -- ===================================================================
 -- Sense tracker, top right. Out-of-combat navigation, so it lives at an edge.
 -- ===================================================================
 
 local SENSE = InterfaceSpec.Sense
-local senseWidth = px(SENSE.width)
-local senseRowHeight = px(SENSE.rowHeight)
+local senseUi: { rows: { TextLabel }, foot: TextLabel }
+do
+	local senseWidth = px(SENSE.width)
+	local senseRowHeight = px(SENSE.rowHeight)
 
-local sensePanel = Instance.new("Frame")
-sensePanel.Name = "Sense"
-sensePanel.AnchorPoint = Vector2.new(0, 0.5)
-sensePanel.Position = UDim2.new(0, px(SENSE.side), 0.5, 0)
-local senseRowsTop = px(18) + px(SENSE.columnHeight)
-sensePanel.Size = UDim2.fromOffset(senseWidth, senseRowsTop + senseRowHeight * SENSE.rows + px(16))
-sensePanel.BackgroundColor3 = PANEL
-sensePanel.BackgroundTransparency = 0.25
-sensePanel.BorderSizePixel = 0
-sensePanel.Parent = screen
-corner(sensePanel, 3)
+	local sensePanel = Instance.new("Frame")
+	sensePanel.Name = "Sense"
+	sensePanel.AnchorPoint = Vector2.new(0, 0.5)
+	sensePanel.Position = UDim2.new(0, px(SENSE.side), 0.5, 0)
+	local senseRowsTop = px(18) + px(SENSE.columnHeight)
+	sensePanel.Size =
+		UDim2.fromOffset(senseWidth, senseRowsTop + senseRowHeight * SENSE.rows + px(16))
+	sensePanel.BackgroundColor3 = PANEL
+	sensePanel.BackgroundTransparency = 0.25
+	sensePanel.BorderSizePixel = 0
+	sensePanel.Parent = screen
+	corner(sensePanel, 3)
 
-local senseHeader = caption(sensePanel, text(SENSE.headerTextSize), TEXT_FAINT, true)
-senseHeader.Size = UDim2.new(1, -px(16), 0, px(16))
-senseHeader.Position = UDim2.fromOffset(px(8), px(2))
-senseHeader.Text = "AURA SENSE"
+	local senseHeader = caption(sensePanel, text(SENSE.headerTextSize), TEXT_FAINT, true)
+	senseHeader.Size = UDim2.new(1, -px(16), 0, px(16))
+	senseHeader.Position = UDim2.fromOffset(px(8), px(2))
+	senseHeader.Text = "AURA SENSE"
 
---[[ Column names, in the same monospaced font and the same format string as the
-	rows, so the labels sit over the columns they describe rather than merely
-	near them. Dimmer than the rows: it is read once and then never again. ]]
-local senseColumns = caption(sensePanel, text(SENSE.columnTextSize), TEXT_FAINT, false)
-senseColumns.Size = UDim2.new(1, -px(16), 0, px(SENSE.columnHeight))
-senseColumns.Position = UDim2.fromOffset(px(8), px(18))
-senseColumns.Font = Enum.Font.RobotoMono
-senseColumns.Text = string.format("%s %-6s %4s  %s", " ", "aura", "away", "held")
+	--[[ Column names, in the same monospaced font and the same format string as the
+		rows, so the labels sit over the columns they describe rather than merely
+		near them. Dimmer than the rows: it is read once and then never again. ]]
+	local senseColumns = caption(sensePanel, text(SENSE.columnTextSize), TEXT_FAINT, false)
+	senseColumns.Size = UDim2.new(1, -px(16), 0, px(SENSE.columnHeight))
+	senseColumns.Position = UDim2.fromOffset(px(8), px(18))
+	senseColumns.Font = Enum.Font.RobotoMono
+	senseColumns.Text = string.format("%s %-6s %4s  %s", " ", "aura", "away", "held")
 
-local senseRows: { TextLabel } = {}
-for index = 1, SENSE.rows do
-	local row = caption(sensePanel, text(SENSE.rowTextSize), TEXT_DIM, false)
-	row.Size = UDim2.new(1, -px(16), 0, senseRowHeight)
-	row.Position = UDim2.fromOffset(px(8), senseRowsTop + (index - 1) * senseRowHeight)
-	row.Font = Enum.Font.RobotoMono
-	senseRows[index] = row
+	local senseRows: { TextLabel } = {}
+	for index = 1, SENSE.rows do
+		local row = caption(sensePanel, text(SENSE.rowTextSize), TEXT_DIM, false)
+		row.Size = UDim2.new(1, -px(16), 0, senseRowHeight)
+		row.Position = UDim2.fromOffset(px(8), senseRowsTop + (index - 1) * senseRowHeight)
+		row.Font = Enum.Font.RobotoMono
+		senseRows[index] = row
+	end
+
+	local senseFoot = caption(sensePanel, text(SENSE.footTextSize), TEXT_FAINT, false)
+	senseFoot.Size = UDim2.new(1, -px(16), 0, px(14))
+	senseFoot.Position = UDim2.fromOffset(px(8), senseRowsTop + senseRowHeight * SENSE.rows)
+	senseUi = { rows = senseRows, foot = senseFoot }
 end
-
-local senseFoot = caption(sensePanel, text(SENSE.footTextSize), TEXT_FAINT, false)
-senseFoot.Size = UDim2.new(1, -px(16), 0, px(14))
-senseFoot.Position = UDim2.fromOffset(px(8), senseRowsTop + senseRowHeight * SENSE.rows)
 
 -- ===================================================================
 -- Notices, top centre above the target frame.
@@ -792,42 +868,46 @@ senseFoot.Position = UDim2.fromOffset(px(8), senseRowsTop + senseRowHeight * SEN
 
 local NOTICE = InterfaceSpec.Notice
 
-local noticeFrame = Instance.new("Frame")
-noticeFrame.AnchorPoint = Vector2.new(0.5, 0)
-noticeFrame.Position = UDim2.new(0.5, 0, 0, px(NOTICE.top))
---[[ The notice grows to fit rather than clipping.
+local noticeUi: { frame: Frame, label: TextLabel }
+do
+	local noticeFrame = Instance.new("Frame")
+	noticeFrame.AnchorPoint = Vector2.new(0.5, 0)
+	noticeFrame.Position = UDim2.new(0.5, 0, 0, px(NOTICE.top))
+	--[[ The notice grows to fit rather than clipping.
 
-	It was a fixed 460x26 with a single unwrapped line, which was fine while
-	every notice was a short authored sentence. The kill and death copy makes
-	that unsafe: a death line carries a player's name *and* the refinement
-	number, at 1.34x weight, and a long display name pushes it past the width
-	with no wrap and no truncation -- so the one message the player most needs to
-	read is the one that would have run off the panel.
+		It was a fixed 460x26 with a single unwrapped line, which was fine while
+		every notice was a short authored sentence. The kill and death copy makes
+		that unsafe: a death line carries a player's name *and* the refinement
+		number, at 1.34x weight, and a long display name pushes it past the width
+		with no wrap and no truncation -- so the one message the player most needs to
+		read is the one that would have run off the panel.
 
-	Wrapped, with the frame sized from its contents. The longest realistic death
-	line takes two rows and the panel grows by one row to hold it; every ordinary
-	notice is unchanged, because one line still measures as one line. ]]
-noticeFrame.Size = UDim2.fromOffset(px(NOTICE.width), 0)
-noticeFrame.AutomaticSize = Enum.AutomaticSize.Y
-noticeFrame.BackgroundColor3 = PANEL
-noticeFrame.BackgroundTransparency = 0.2
-noticeFrame.BorderSizePixel = 0
-noticeFrame.Visible = false
-noticeFrame.Parent = screen
-corner(noticeFrame, 3)
+		Wrapped, with the frame sized from its contents. The longest realistic death
+		line takes two rows and the panel grows by one row to hold it; every ordinary
+		notice is unchanged, because one line still measures as one line. ]]
+	noticeFrame.Size = UDim2.fromOffset(px(NOTICE.width), 0)
+	noticeFrame.AutomaticSize = Enum.AutomaticSize.Y
+	noticeFrame.BackgroundColor3 = PANEL
+	noticeFrame.BackgroundTransparency = 0.2
+	noticeFrame.BorderSizePixel = 0
+	noticeFrame.Visible = false
+	noticeFrame.Parent = screen
+	corner(noticeFrame, 3)
 
-local noticePadding = Instance.new("UIPadding")
-noticePadding.PaddingTop = UDim.new(0, px(5))
-noticePadding.PaddingBottom = UDim.new(0, px(5))
-noticePadding.PaddingLeft = UDim.new(0, px(10))
-noticePadding.PaddingRight = UDim.new(0, px(10))
-noticePadding.Parent = noticeFrame
+	local noticePadding = Instance.new("UIPadding")
+	noticePadding.PaddingTop = UDim.new(0, px(5))
+	noticePadding.PaddingBottom = UDim.new(0, px(5))
+	noticePadding.PaddingLeft = UDim.new(0, px(10))
+	noticePadding.PaddingRight = UDim.new(0, px(10))
+	noticePadding.Parent = noticeFrame
 
-local noticeLabel = caption(noticeFrame, text(NOTICE.textSize), CEILING, true)
-noticeLabel.Size = UDim2.fromScale(1, 0)
-noticeLabel.AutomaticSize = Enum.AutomaticSize.Y
-noticeLabel.TextWrapped = true
-noticeLabel.TextXAlignment = Enum.TextXAlignment.Center
+	local noticeLabel = caption(noticeFrame, text(NOTICE.textSize), CEILING, true)
+	noticeLabel.Size = UDim2.fromScale(1, 0)
+	noticeLabel.AutomaticSize = Enum.AutomaticSize.Y
+	noticeLabel.TextWrapped = true
+	noticeLabel.TextXAlignment = Enum.TextXAlignment.Center
+	noticeUi = { frame = noticeFrame, label = noticeLabel }
+end
 
 -- ===================================================================
 -- Guidance: the one line that says what to do next.
@@ -850,84 +930,88 @@ noticeLabel.TextXAlignment = Enum.TextXAlignment.Center
 	use: spare, declarative, present tense. This game says "surfaced in the Ember
 	Barrens", not "A rare node has spawned!". ]]
 local GUIDANCE = InterfaceSpec.Guidance
-local guidanceLabel = caption(screen, text(GUIDANCE.textSize), TEXT_DIM, false)
-guidanceLabel.AnchorPoint = Vector2.new(0.5, 1)
-guidanceLabel.Position =
-	UDim2.new(0.5, 0, 1, -(px(SLOT.bottomMargin) + clusterHeight + px(GUIDANCE.gap)))
-guidanceLabel.Size = UDim2.fromOffset(px(GUIDANCE.width), px(GUIDANCE.height))
-guidanceLabel.TextXAlignment = Enum.TextXAlignment.Center
+local cardUi: { guidance: TextLabel, dismiss: () -> (), show: () -> () }
+do
+	local guidanceLabel = caption(screen, text(GUIDANCE.textSize), TEXT_DIM, false)
+	guidanceLabel.AnchorPoint = Vector2.new(0.5, 1)
+	guidanceLabel.Position =
+		UDim2.new(0.5, 0, 1, -(px(SLOT.bottomMargin) + clusterHeight + px(GUIDANCE.gap)))
+	guidanceLabel.Size = UDim2.fromOffset(px(GUIDANCE.width), px(GUIDANCE.height))
+	guidanceLabel.TextXAlignment = Enum.TextXAlignment.Center
 
---[[ The first-run card.
+	--[[ The first-run card.
 
-	Shown once, on spawn, and gone twelve seconds later or on the first input --
-	whichever comes first, because a player who has already started doing things
-	does not need to be told to start doing things.
+		Shown once, on spawn, and gone twelve seconds later or on the first input --
+		whichever comes first, because a player who has already started doing things
+		does not need to be told to start doing things.
 
-	Three lines, and the third is the one doing real work: four friends who are
-	not told they are rivals will very plausibly spend an hour cooperating
-	politely, and we will learn nothing about the PvP this entire game is built
-	on. Stage and the key range are read from live state rather than hardcoded,
-	so the card stays true if either changes. ]]
-local cardFrame = Instance.new("Frame")
-cardFrame.AnchorPoint = Vector2.new(0.5, 0.5)
-cardFrame.Position = UDim2.fromScale(0.5, 0.34)
-cardFrame.Size = UDim2.fromOffset(px(468), px(120))
-cardFrame.BackgroundColor3 = PANEL
-cardFrame.BackgroundTransparency = 0.18
-cardFrame.BorderSizePixel = 0
-cardFrame.Visible = false
-cardFrame.Parent = screen
-corner(cardFrame, 4)
-local cardStroke = outline(cardFrame, EDGE, 1)
-cardStroke.Transparency = 0.4
+		Three lines, and the third is the one doing real work: four friends who are
+		not told they are rivals will very plausibly spend an hour cooperating
+		politely, and we will learn nothing about the PvP this entire game is built
+		on. Stage and the key range are read from live state rather than hardcoded,
+		so the card stays true if either changes. ]]
+	local cardFrame = Instance.new("Frame")
+	cardFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+	cardFrame.Position = UDim2.fromScale(0.5, 0.34)
+	cardFrame.Size = UDim2.fromOffset(px(468), px(120))
+	cardFrame.BackgroundColor3 = PANEL
+	cardFrame.BackgroundTransparency = 0.18
+	cardFrame.BorderSizePixel = 0
+	cardFrame.Visible = false
+	cardFrame.Parent = screen
+	corner(cardFrame, 4)
+	local cardStroke = outline(cardFrame, EDGE, 1)
+	cardStroke.Transparency = 0.4
 
-local cardLines: { TextLabel } = {}
-for index = 1, 4 do
-	local line = caption(cardFrame, text(if index == 1 then 15 else 13), TEXT, index == 1)
-	line.Size = UDim2.new(1, -px(24), 0, px(22))
-	line.Position = UDim2.fromOffset(px(12), px(14) + (index - 1) * px(24))
-	line.TextXAlignment = Enum.TextXAlignment.Center
-	line.TextColor3 = if index == 1 then TEXT else TEXT_DIM
-	cardLines[index] = line
-end
-
-local cardDismissed = false
-
-local function dismissCard()
-	if cardDismissed or not cardFrame.Visible then
-		return
+	local cardLines: { TextLabel } = {}
+	for index = 1, 4 do
+		local line = caption(cardFrame, text(if index == 1 then 15 else 13), TEXT, index == 1)
+		line.Size = UDim2.new(1, -px(24), 0, px(22))
+		line.Position = UDim2.fromOffset(px(12), px(14) + (index - 1) * px(24))
+		line.TextXAlignment = Enum.TextXAlignment.Center
+		line.TextColor3 = if index == 1 then TEXT else TEXT_DIM
+		cardLines[index] = line
 	end
-	cardDismissed = true
-	-- Faded rather than cut, so it reads as receding rather than as a glitch.
-	task.spawn(function()
-		local steps = 18
-		for step = 1, steps do
-			local t = step / steps
-			cardFrame.BackgroundTransparency = 0.18 + 0.82 * t
-			cardStroke.Transparency = 0.4 + 0.6 * t
-			for _, line in cardLines do
-				line.TextTransparency = t
-			end
-			task.wait(0.03)
+
+	local cardDismissed = false
+
+	local function dismissCard()
+		if cardDismissed or not cardFrame.Visible then
+			return
 		end
-		cardFrame.Visible = false
-	end)
-end
-
-local function showCard()
-	if cardDismissed then
-		return
+		cardDismissed = true
+		-- Faded rather than cut, so it reads as receding rather than as a glitch.
+		task.spawn(function()
+			local steps = 18
+			for step = 1, steps do
+				local t = step / steps
+				cardFrame.BackgroundTransparency = 0.18 + 0.82 * t
+				cardStroke.Transparency = 0.4 + 0.6 * t
+				for _, line in cardLines do
+					line.TextTransparency = t
+				end
+				task.wait(0.03)
+			end
+			cardFrame.Visible = false
+		end)
 	end
-	local stage = player:GetAttribute("Stage")
-	cardLines[1].Text = if typeof(stage) == "string"
-		then `You are a {stage} cultivator.`
-		else "You are a cultivator."
-	cardLines[2].Text =
-		`Stand inside an aura node to cycle. Keys 1-{slotCount} are your techniques.`
-	cardLines[3].Text = "Hold Shift and a technique key to swap it. The kit is yours to choose."
-	cardLines[4].Text = "Every cultivator at your stage is a rival. There is no safe ground."
-	cardFrame.Visible = true
-	task.delay(12, dismissCard)
+
+	local function showCard()
+		if cardDismissed then
+			return
+		end
+		local stage = player:GetAttribute("Stage")
+		cardLines[1].Text = if typeof(stage) == "string"
+			then `You are a {stage} cultivator.`
+			else "You are a cultivator."
+		cardLines[2].Text =
+			`Stand inside an aura node to cycle. Keys 1-{slotCount} are your techniques.`
+		cardLines[3].Text = "Hold Shift and a technique key to swap it. The kit is yours to choose."
+		cardLines[4].Text = "Every cultivator at your stage is a rival. There is no safe ground."
+		cardFrame.Visible = true
+		task.delay(12, dismissCard)
+	end
+	cardUi = { guidance = guidanceLabel, dismiss = dismissCard, show = showCard }
 end
 
 -- ===================================================================
@@ -944,23 +1028,25 @@ local function refreshCultivation()
 	local atCeiling = player:GetAttribute("AtCeiling") == true
 	local stageIndex = player:GetAttribute("StageIndex")
 
-	stageLabel.Text = `{stage}  ·  {tier}`
+	vitalsUi.stageLabel.Text = `{stage}  ·  {tier}`
 	if typeof(stageIndex) == "number" then
-		stageLabel.TextColor3 = color(InterfaceSpec.stageColor(stageIndex))
+		vitalsUi.stageLabel.TextColor3 = color(InterfaceSpec.stageColor(stageIndex))
 	end
 
-	powerLabel.Text = if catalysts > 0 then `power {power}   ◆{catalysts}` else `power {power}`
+	vitalsUi.powerLabel.Text = if catalysts > 0
+		then `power {power}   ◆{catalysts}`
+		else `power {power}`
 
-	railFill.Size = UDim2.fromScale(InterfaceSpec.fraction(progress, goal), 1)
-	railFill.BackgroundColor3 = if atCeiling then CEILING else REFINEMENT
+	progressUi.railFill.Size = UDim2.fromScale(InterfaceSpec.fraction(progress, goal), 1)
+	progressUi.railFill.BackgroundColor3 = if atCeiling then CEILING else REFINEMENT
 
 	--[[ The prompt is now *only* the actionable case. The ceiling-without-a-
 		catalyst message moved to the guidance line below, because two surfaces
 		saying the same thing in different words is worse than either alone --
 		and because "you cannot act yet" is guidance, while "[B]" is a command. ]]
-	promptFrame.Visible = atCeiling and catalysts > 0
-	if promptFrame.Visible then
-		promptLabel.Text = "[B]  BREAK THROUGH"
+	progressUi.promptFrame.Visible = atCeiling and catalysts > 0
+	if progressUi.promptFrame.Visible then
+		progressUi.promptLabel.Text = "[B]  BREAK THROUGH"
 	end
 end
 
@@ -971,14 +1057,14 @@ local function refreshVitals()
 	local maxMadra = player:GetAttribute("MaxMadra") or 0
 
 	local healthFraction = InterfaceSpec.fraction(health, maxHealth)
-	healthFill.Size = UDim2.fromScale(healthFraction, 1)
-	healthFill.BackgroundColor3 = if healthFraction <= VITALS.lowHealthFraction
+	vitalsUi.healthFill.Size = UDim2.fromScale(healthFraction, 1)
+	vitalsUi.healthFill.BackgroundColor3 = if healthFraction <= VITALS.lowHealthFraction
 		then HEALTH_LOW
 		else HEALTH
-	healthValue.Text = `{InterfaceSpec.commas(health)} / {InterfaceSpec.commas(maxHealth)}`
+	vitalsUi.healthValue.Text = `{InterfaceSpec.commas(health)} / {InterfaceSpec.commas(maxHealth)}`
 
-	madraFill.Size = UDim2.fromScale(InterfaceSpec.fraction(madra, maxMadra), 1)
-	madraValue.Text = `{InterfaceSpec.commas(madra)} / {InterfaceSpec.commas(maxMadra)}`
+	vitalsUi.madraFill.Size = UDim2.fromScale(InterfaceSpec.fraction(madra, maxMadra), 1)
+	vitalsUi.madraValue.Text = `{InterfaceSpec.commas(madra)} / {InterfaceSpec.commas(maxMadra)}`
 end
 
 --[[ Locally predicted cooldowns. The server still owns every refusal; this only
@@ -1498,77 +1584,81 @@ onUnlock = restoreAura
 	It also carries the one fact that decides whether a fight is even legal.
 	`Combat.canEngage` refuses across brackets, and the reticle is where a player
 	is already looking, so that refusal is cheapest to read here. ]]
-local RETICLE_GAP = px(5)
-local RETICLE_LEN = px(6)
-local RETICLE_THICK = math.max(px(2), 2)
-
---[[ The reticle lives in its own ScreenGui, and the reason is a bug that was
-	live in the deployed build.
-
-	The HUD's ScreenGui respects Roblox's top inset -- correctly, so notices and
-	the target frame sit below the engine's own chrome. But that means its
-	(0.5, 0.5) is not the viewport's centre; it is half an inset below it, which
-	at a high-DPI display was measured at 27 pixels. The aim ray follows the
-	camera's optical axis, which IS the viewport centre, and so does the
-	hitmarker in `Impact`, whose ScreenGui ignores the inset. So the reticle
-	sat 27 pixels under where the shot actually went and under the X it is
-	meant to be concentric with. A tester who knew exactly where to look
-	cropped the true centre at 4x and 12x and found hair.
-
-	Its own ScreenGui with the inset ignored puts it in the same space as the
-	ray and the hitmarker, with no arithmetic to drift when the inset does. ]]
-local reticleScreen = Instance.new("ScreenGui")
-reticleScreen.Name = "CultivationReticle"
-reticleScreen.ResetOnSpawn = false
-reticleScreen.IgnoreGuiInset = true
-reticleScreen.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
-reticleScreen.Parent = player:WaitForChild("PlayerGui")
-
-local reticle = Instance.new("Frame")
-reticle.Name = "Reticle"
-reticle.AnchorPoint = Vector2.new(0.5, 0.5)
-reticle.Position = UDim2.fromScale(0.5, 0.5)
-reticle.Size = UDim2.fromOffset(px(40), px(40))
-reticle.BackgroundTransparency = 1
-reticle.Parent = reticleScreen
-
-local reticleTicks: { Frame } = {}
-for _, spec in
-	{
-		{ x = 0, y = -1, vertical = true },
-		{ x = 0, y = 1, vertical = true },
-		{ x = -1, y = 0, vertical = false },
-		{ x = 1, y = 0, vertical = false },
-	}
+local reticleUi: { ticks: { Frame } }
 do
-	local tick = Instance.new("Frame")
-	tick.AnchorPoint = Vector2.new(0.5, 0.5)
-	tick.Position = UDim2.new(
-		0.5,
-		spec.x * (RETICLE_GAP + RETICLE_LEN / 2),
-		0.5,
-		spec.y * (RETICLE_GAP + RETICLE_LEN / 2)
-	)
-	tick.Size = if spec.vertical
-		then UDim2.fromOffset(RETICLE_THICK, RETICLE_LEN)
-		else UDim2.fromOffset(RETICLE_LEN, RETICLE_THICK)
-	tick.BorderSizePixel = 0
-	tick.BackgroundColor3 = TEXT
-	tick.BackgroundTransparency = InterfaceSpec.Reticle.idleTransparency
-	tick.Parent = reticle
-	table.insert(reticleTicks, tick)
+	local RETICLE_GAP = px(5)
+	local RETICLE_LEN = px(6)
+	local RETICLE_THICK = math.max(px(2), 2)
 
-	-- A hairline of black under each tick, so the reticle survives a bright
-	-- wall or a pale sky. The same value-contrast rule the impact grammar uses.
-	local shadow = Instance.new("Frame")
-	shadow.AnchorPoint = Vector2.new(0.5, 0.5)
-	shadow.Position = UDim2.fromScale(0.5, 0.5)
-	shadow.Size = UDim2.new(1, 2, 1, 2)
-	shadow.BackgroundColor3 = BLACK
-	shadow.BackgroundTransparency = 0.5
-	shadow.BorderSizePixel = 0
-	shadow.ZIndex = tick.ZIndex - 1
-	shadow.Parent = tick
+	--[[ The reticle lives in its own ScreenGui, and the reason is a bug that was
+		live in the deployed build.
+
+		The HUD's ScreenGui respects Roblox's top inset -- correctly, so notices and
+		the target frame sit below the engine's own chrome. But that means its
+		(0.5, 0.5) is not the viewport's centre; it is half an inset below it, which
+		at a high-DPI display was measured at 27 pixels. The aim ray follows the
+		camera's optical axis, which IS the viewport centre, and so does the
+		hitmarker in `Impact`, whose ScreenGui ignores the inset. So the reticle
+		sat 27 pixels under where the shot actually went and under the X it is
+		meant to be concentric with. A tester who knew exactly where to look
+		cropped the true centre at 4x and 12x and found hair.
+
+		Its own ScreenGui with the inset ignored puts it in the same space as the
+		ray and the hitmarker, with no arithmetic to drift when the inset does. ]]
+	local reticleScreen = Instance.new("ScreenGui")
+	reticleScreen.Name = "CultivationReticle"
+	reticleScreen.ResetOnSpawn = false
+	reticleScreen.IgnoreGuiInset = true
+	reticleScreen.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
+	reticleScreen.Parent = player:WaitForChild("PlayerGui")
+
+	local reticle = Instance.new("Frame")
+	reticle.Name = "Reticle"
+	reticle.AnchorPoint = Vector2.new(0.5, 0.5)
+	reticle.Position = UDim2.fromScale(0.5, 0.5)
+	reticle.Size = UDim2.fromOffset(px(40), px(40))
+	reticle.BackgroundTransparency = 1
+	reticle.Parent = reticleScreen
+
+	local reticleTicks: { Frame } = {}
+	for _, spec in
+		{
+			{ x = 0, y = -1, vertical = true },
+			{ x = 0, y = 1, vertical = true },
+			{ x = -1, y = 0, vertical = false },
+			{ x = 1, y = 0, vertical = false },
+		}
+	do
+		local tick = Instance.new("Frame")
+		tick.AnchorPoint = Vector2.new(0.5, 0.5)
+		tick.Position = UDim2.new(
+			0.5,
+			spec.x * (RETICLE_GAP + RETICLE_LEN / 2),
+			0.5,
+			spec.y * (RETICLE_GAP + RETICLE_LEN / 2)
+		)
+		tick.Size = if spec.vertical
+			then UDim2.fromOffset(RETICLE_THICK, RETICLE_LEN)
+			else UDim2.fromOffset(RETICLE_LEN, RETICLE_THICK)
+		tick.BorderSizePixel = 0
+		tick.BackgroundColor3 = TEXT
+		tick.BackgroundTransparency = InterfaceSpec.Reticle.idleTransparency
+		tick.Parent = reticle
+		table.insert(reticleTicks, tick)
+
+		-- A hairline of black under each tick, so the reticle survives a bright
+		-- wall or a pale sky. The same value-contrast rule the impact grammar uses.
+		local shadow = Instance.new("Frame")
+		shadow.AnchorPoint = Vector2.new(0.5, 0.5)
+		shadow.Position = UDim2.fromScale(0.5, 0.5)
+		shadow.Size = UDim2.new(1, 2, 1, 2)
+		shadow.BackgroundColor3 = BLACK
+		shadow.BackgroundTransparency = 0.5
+		shadow.BorderSizePixel = 0
+		shadow.ZIndex = tick.ZIndex - 1
+		shadow.Parent = tick
+	end
+	reticleUi = { ticks = reticleTicks }
 end
 
 local function refreshReticle()
@@ -1586,7 +1676,7 @@ local function refreshReticle()
 		transparency = if sameBracket then 0 else 0.25
 	end
 
-	for _, tick in reticleTicks do
+	for _, tick in reticleUi.ticks do
 		tick.BackgroundColor3 = tint
 		tick.BackgroundTransparency = transparency
 	end
@@ -1597,27 +1687,27 @@ local function refreshTarget()
 	-- frame stays on them however the reticle wanders.
 	local target = lockedTarget or currentTarget
 	if not target or not Nameplates.isLive(target) then
-		targetFrame.Visible = false
+		targetUi.frame.Visible = false
 		return
 	end
 
-	targetFrame.Visible = true
-	targetName.Text = target.name
+	targetUi.frame.Visible = true
+	targetUi.nameLabel.Text = target.name
 	--[[ The frame says which idiom it is showing. A locked target is a choice
 		the player made and the border is the lock colour, solid; a soft target
 		is a readout of the aim and the border is the ordinary edge. ]]
 	local locked = lockedTarget ~= nil
-	targetLockTag.Visible = locked
+	targetUi.lockTag.Visible = locked
 
 	local stage = target.source:GetAttribute("Stage")
 	local tier = target.source:GetAttribute("Tier")
 	local stageIndex = target.source:GetAttribute("StageIndex")
-	targetStage.Text = if typeof(stage) == "string" and typeof(tier) == "number"
+	targetUi.stageLabel.Text = if typeof(stage) == "string" and typeof(tier) == "number"
 		then `{stage}  ·  {tier}`
 		elseif typeof(stage) == "string" then stage
 		else "--"
 	if typeof(stageIndex) == "number" then
-		targetName.TextColor3 = color(InterfaceSpec.stageColor(stageIndex))
+		targetUi.nameLabel.TextColor3 = color(InterfaceSpec.stageColor(stageIndex))
 	end
 
 	local health = target.source:GetAttribute("Health")
@@ -1625,11 +1715,11 @@ local function refreshTarget()
 	local numericHealth = if typeof(health) == "number" then health else 0
 	local numericMax = if typeof(maxHealth) == "number" then maxHealth else 0
 	local fraction = InterfaceSpec.fraction(numericHealth, numericMax)
-	targetHealthFill.Size = UDim2.fromScale(fraction, 1)
-	targetHealthFill.BackgroundColor3 = if fraction <= VITALS.lowHealthFraction
+	targetUi.healthFill.Size = UDim2.fromScale(fraction, 1)
+	targetUi.healthFill.BackgroundColor3 = if fraction <= VITALS.lowHealthFraction
 		then HEALTH_LOW
 		else HEALTH
-	targetHealthValue.Text =
+	targetUi.healthValue.Text =
 		`{InterfaceSpec.commas(numericHealth)} / {InterfaceSpec.commas(numericMax)}`
 
 	-- Bracket check, mirroring Combat.canEngage's only rule.
@@ -1642,33 +1732,36 @@ local function refreshTarget()
 	local drawingCast = cast ~= nil and InterfaceSpec.telegraphs(cast.duration)
 
 	if not sameBracket then
-		targetStroke.Color = DANGER
-		targetRefusal.Visible = not drawingCast
-		targetRefusal.Text = "different bracket — neither of you can hit the other"
+		targetUi.stroke.Color = DANGER
+		targetUi.refusal.Visible = not drawingCast
+		targetUi.refusal.Text = "different bracket — neither of you can hit the other"
 	else
-		targetStroke.Color = if locked then LOCK else EDGE
-		targetRefusal.Visible = false
+		targetUi.stroke.Color = if locked then LOCK else EDGE
+		targetUi.refusal.Visible = false
 	end
 
 	if cast and drawingCast then
-		targetCast.Visible = true
+		targetUi.castBar.Visible = true
 		local tech = Config.Techniques[cast.techId]
-		targetCastName.Text = if tech then string.upper(tech.name) else string.upper(cast.techId)
+		targetUi.castBarName.Text = if tech
+			then string.upper(tech.name)
+			else string.upper(cast.techId)
 		if Nameplates.isSnapped(cast) then
 			-- Broken, not finished: the whole bar in the danger hue for a beat,
 			-- and no timer, because there is no time left to count.
-			targetCastFill.Size = UDim2.fromScale(1, 1)
-			targetCastFill.BackgroundColor3 = DANGER
-			targetCastTimer.Text = ""
+			targetUi.castBarFill.Size = UDim2.fromScale(1, 1)
+			targetUi.castBarFill.BackgroundColor3 = DANGER
+			targetUi.castBarTimer.Text = ""
 		else
 			local elapsed = os.clock() - cast.startedAt
 			local remaining = math.max(cast.duration - elapsed, 0)
-			targetCastFill.Size = UDim2.fromScale(math.clamp(elapsed / cast.duration, 0, 1), 1)
-			targetCastFill.BackgroundColor3 = color(InterfaceSpec.kindColor(cast.kind))
-			targetCastTimer.Text = string.format("%.1f", remaining)
+			targetUi.castBarFill.Size =
+				UDim2.fromScale(math.clamp(elapsed / cast.duration, 0, 1), 1)
+			targetUi.castBarFill.BackgroundColor3 = color(InterfaceSpec.kindColor(cast.kind))
+			targetUi.castBarTimer.Text = string.format("%.1f", remaining)
 		end
 	else
-		targetCast.Visible = false
+		targetUi.castBar.Visible = false
 	end
 end
 
@@ -1681,7 +1774,7 @@ local ownCast: Nameplates.Cast? = nil
 local function refreshOwnCast()
 	local cast = ownCast
 	if not cast then
-		castFrame.Visible = false
+		castUi.frame.Visible = false
 		return
 	end
 	--[[ The registry owns the record's lifetime, including the snap. Reading
@@ -1690,26 +1783,26 @@ local function refreshOwnCast()
 	local live = Nameplates.castOf(player.UserId)
 	if not live or live ~= cast then
 		ownCast = nil
-		castFrame.Visible = false
+		castUi.frame.Visible = false
 		return
 	end
 	if not InterfaceSpec.telegraphs(cast.duration) then
-		castFrame.Visible = false
+		castUi.frame.Visible = false
 		return
 	end
 
 	local tech = Config.Techniques[cast.techId]
-	castFrame.Visible = true
-	castName.Text = if tech then string.upper(tech.name) else string.upper(cast.techId)
+	castUi.frame.Visible = true
+	castUi.name.Text = if tech then string.upper(tech.name) else string.upper(cast.techId)
 	if Nameplates.isSnapped(cast) then
-		castFill.Size = UDim2.fromScale(1, 1)
-		castFill.BackgroundColor3 = DANGER
-		castTimer.Text = ""
+		castUi.fill.Size = UDim2.fromScale(1, 1)
+		castUi.fill.BackgroundColor3 = DANGER
+		castUi.timer.Text = ""
 	else
 		local elapsed = os.clock() - cast.startedAt
-		castFill.Size = UDim2.fromScale(math.clamp(elapsed / cast.duration, 0, 1), 1)
-		castFill.BackgroundColor3 = color(InterfaceSpec.kindColor(cast.kind))
-		castTimer.Text = string.format("%.1f", math.max(cast.duration - elapsed, 0))
+		castUi.fill.Size = UDim2.fromScale(math.clamp(elapsed / cast.duration, 0, 1), 1)
+		castUi.fill.BackgroundColor3 = color(InterfaceSpec.kindColor(cast.kind))
+		castUi.timer.Text = string.format("%.1f", math.max(cast.duration - elapsed, 0))
 	end
 end
 
@@ -1755,7 +1848,7 @@ local function arrowTo(x: number, z: number): string
 end
 
 local function refreshSense(nodes: { any })
-	for index, row in senseRows do
+	for index, row in senseUi.rows do
 		local entry = nodes[index]
 		if not entry then
 			row.Text = ""
@@ -1773,10 +1866,10 @@ local function refreshSense(nodes: { any })
 	end
 
 	local senseRange = player:GetAttribute("SenseRange") or 0
-	senseFoot.Text = if senseRange <= 0
+	senseUi.foot.Text = if senseRange <= 0
 		then "no aura sense at this stage"
 		elseif #nodes == 0 then "nothing within range"
-		elseif #nodes > #senseRows then `+{#nodes - #senseRows} more`
+		elseif #nodes > #senseUi.rows then `+{#nodes - #senseUi.rows} more`
 		else ""
 end
 
@@ -1800,14 +1893,14 @@ local function showNotice(kind: string, message: string)
 	noticePriority = weight.priority
 	noticeFloorUntil = now + weight.floor
 
-	noticeLabel.TextColor3 = NOTICE_COLOR[kind] or CEILING
-	noticeLabel.TextSize = text(NOTICE.textSize * weight.scale)
-	noticeLabel.Text = message
-	noticeFrame.Visible = true
+	noticeUi.label.TextColor3 = NOTICE_COLOR[kind] or CEILING
+	noticeUi.label.TextSize = text(NOTICE.textSize * weight.scale)
+	noticeUi.label.Text = message
+	noticeUi.frame.Visible = true
 
 	task.delay(weight.seconds, function()
 		if noticeToken == token then
-			noticeFrame.Visible = false
+			noticeUi.frame.Visible = false
 			noticePriority = -1
 		end
 	end)
@@ -2298,7 +2391,7 @@ local function guidanceText(): string
 end
 
 local function refreshGuidance()
-	guidanceLabel.Text = guidanceText()
+	cardUi.guidance.Text = guidanceText()
 end
 
 --[[ Fault-isolated, for the reason `init.server.luau` learned the hard way: one
@@ -2335,7 +2428,7 @@ task.spawn(function()
 		end
 		task.wait(0.1)
 	end
-	showCard()
+	cardUi.show()
 end)
 
 --[[ Guarded, and the warning throttled, for the same reason the server tick is.
@@ -2421,14 +2514,14 @@ end
 
 for _, widget in slotWidgets do
 	widget.root.Activated:Connect(function()
-		dismissCard()
+		cardUi.dismiss()
 		fireSlot(widget.slot)
 	end)
 	--[[ Right-click cycles the slot, as a second route to the same thing the
 		Shift chord does. Two ways in, because a player who never finds either
 		concludes every character in this game is identical. ]]
 	widget.root.MouseButton2Click:Connect(function()
-		dismissCard()
+		cardUi.dismiss()
 		cycleSlot(widget.slot)
 	end)
 end
@@ -2438,7 +2531,7 @@ UserInputService.InputBegan:Connect(function(input: InputObject, processed: bool
 		ahead of every other check. A player who has started doing things does
 		not need to be told to start doing things, and the card outstaying its
 		welcome is the one way a non-interactive overlay can still annoy. ]]
-	dismissCard()
+	cardUi.dismiss()
 	if processed then
 		return
 	end
