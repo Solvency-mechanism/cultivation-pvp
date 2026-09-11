@@ -289,7 +289,7 @@ end
 	everything else, per the frostbolt ruling's addendum. A technique never
 	carries both -- roster's own invariant test in tests/combat.test.luau
 	refuses one that does -- so this has no ambiguous case to resolve. ]]
-local function commitOf(tech): number
+local function commitOf(tech: Config.Technique): number
 	if tech.castTime > 0 then
 		return tech.castTime
 	end
@@ -519,7 +519,7 @@ end
 	or "no_target" for the cases before that -- an unresolvable id or a
 	caster with no root to measure from. ]]
 local function validateLockTarget(
-	tech,
+	tech: Config.Technique,
 	player: Player,
 	actor: Combat.Actor,
 	targetCombatantId: number
@@ -733,7 +733,7 @@ local function landEffect(
 	player: Player,
 	actor: Combat.Actor,
 	techId: string,
-	tech,
+	tech: Config.Technique,
 	target: Combatant,
 	now: number
 )
@@ -822,7 +822,11 @@ local function launchHomingProjectile(
 	part:SetAttribute("CasterId", player.UserId)
 
 	table.insert(projectiles, {
-		part = part,
+		-- Widened explicitly: table.insert's generic signature wants an
+		-- exact match against `{Projectile}`'s element type, and the
+		-- literal's own inferred shape is `Part` (from Instance.new
+		-- itself), narrower than the field's declared `BasePart`.
+		part = part :: BasePart,
 		techId = techId,
 		player = player,
 		casterActor = actor,
