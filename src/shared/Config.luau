@@ -641,6 +641,35 @@ Config.Techniques = {
 		interruptible = false,
 		slow = { walkSpeed = 10, duration = 3.0 },
 	},
+	--[[ The charged skillshot: Frostbolt's commitment with no lock. An aim
+		channel -- the aim is sampled at press and stored on the cast, and
+		completion fires a straight bolt along THAT aim, not where the
+		camera points 1.5s later (the windup rule, extended to channels).
+		You commit to a line, not a person: a dash sideways beats it where
+		nothing beats Frostbolt but a hit. A Glacier player fires it down a
+		corridor at someone who has to come through; a Frostbolt player
+		fires it at someone who cannot reach them. Tests: aim-channel
+		completion with no target id, along the stored aim; interrupt mid-
+		channel snaps the bar and launches nothing. Priced by the rule:
+		between Pierce at 0.9 and Verdict at 1.6. ]]
+	glacier = {
+		id = "glacier",
+		name = "Glacier",
+		kind = "striker",
+		madraCost = 44,
+		cooldown = 8.0,
+		windup = 0,
+		damage = 160,
+		buffDuration = 0,
+		damageBuff = 0,
+		mitigation = 0,
+		moveSpeed = 0,
+		regionScaled = false,
+		targeting = "aim",
+		castTime = 1.5,
+		interruptible = true,
+		projectile = "straight",
+	},
 
 	-- Enforcer
 	surge = {
