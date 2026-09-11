@@ -407,6 +407,47 @@ Config.Techniques = {
 		moveSpeed = 0,
 		regionScaled = true,
 	},
+	--[[ WHEN you fire: through their attack, not on their cooldown. The
+		self-buff block fires at press, so 45% mitigation covers the 0.55s
+		windup and 0.65s after it. Every other striker's windup is its most
+		dangerous moment; this one's is its safest. A Brace player casts while
+		being shot; a Pierce player waits for the opponent's cooldown. Not
+		assemblable from Bulwark, which is six seconds on eleven -- this is
+		1.2s tied to every cast on three. ]]
+	brace = {
+		id = "brace",
+		name = "Brace",
+		kind = "striker",
+		madraCost = 32,
+		cooldown = 3.0,
+		windup = 0.55,
+		damage = 72,
+		buffDuration = 1.2,
+		damageBuff = 0,
+		mitigation = 0.45,
+		moveSpeed = 0,
+		regionScaled = false,
+	},
+	--[[ WHO you fire at: only someone who cannot leave. 1.6s is a longer
+		telegraph than every ruler but Tempest, and every strider in the pool
+		escapes it -- so it lands on a target mid-Tempest windup, standing in
+		their own Bastion, or cycling a node they will not give up, and on
+		nobody else. 220 is over half a Lowgold pool. A Verdict player's
+		entire skill is target selection; a Lance player fires at anyone. ]]
+	verdict = {
+		id = "verdict",
+		name = "Verdict",
+		kind = "striker",
+		madraCost = 60,
+		cooldown = 14.0,
+		windup = 1.6,
+		damage = 220,
+		buffDuration = 0,
+		damageBuff = 0,
+		mitigation = 0,
+		moveSpeed = 0,
+		regionScaled = false,
+	},
 
 	-- Enforcer
 	surge = {
@@ -572,6 +613,27 @@ Config.Techniques = {
 		mitigation = 0,
 		moveSpeed = 0,
 		regionScaled = true,
+	},
+	--[[ The ruler that works in the Barrens. Flat 45 everywhere: loses to
+		Siphon on rich (99) and wellspring (143), wins on barren (27) and
+		matches it on open. A Pulse player takes fights on poor ground -- a
+		contested Barrens node, the open corridors -- where a Siphon player's
+		ruler slot is switched off; a Siphon player picks the ground first and
+		the fight second. The first ruler whose decision is about where NOT
+		to need rich ground. ]]
+	pulse = {
+		id = "pulse",
+		name = "Pulse",
+		kind = "ruler",
+		madraCost = 40,
+		cooldown = 8.0,
+		windup = 0.6,
+		damage = 45,
+		buffDuration = 0,
+		damageBuff = 0,
+		mitigation = 0,
+		moveSpeed = 0,
+		regionScaled = false,
 	},
 
 	--[[ Strider -- self-only WalkSpeed override, no damage path of its own.
