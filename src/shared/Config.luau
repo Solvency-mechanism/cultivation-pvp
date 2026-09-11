@@ -585,6 +585,62 @@ Config.Techniques = {
 		projectile = "homing",
 		slow = { walkSpeed = 6, duration = 2.0 },
 	},
+	--[[ The skillshot poke: aim, instant, a straight bolt along the sampled
+		aim, no slow, no channel. The first technique whose telegraph is the
+		FLIGHT rather than a bar -- windup 0, no cast bar at all, and you
+		dodge the bolt, which is what skillshot means; interface's telegraph
+		rule accepts a projectile as the second shape of telegraph. Cheap and
+		spammable; punishes a predictable approach, loses to a juke. A Shard
+		player leads the target; a Lance player puts the reticle on them.
+		Tests: aim + projectile on the instant path, and the hit X sitting on
+		the reticle -- the concentricity check, on a keyboard. Priced by the
+		rule: commit 0 is the shortest in the pool, so nothing lighter may
+		commit longer -- it matches Chill at 20 rather than out-hitting it. ]]
+	shard = {
+		id = "shard",
+		name = "Shard",
+		kind = "striker",
+		madraCost = 14,
+		cooldown = 0.9,
+		windup = 0,
+		damage = 20,
+		buffDuration = 0,
+		damageBuff = 0,
+		mitigation = 0,
+		moveSpeed = 0,
+		regionScaled = false,
+		targeting = "aim",
+		castTime = 0,
+		interruptible = false,
+		projectile = "straight",
+	},
+	--[[ The setup hit: aim, instant, hitscan, and a slow -- no projectile, no
+		channel. Proves the slow is separable from both: it rides
+		resolveStriker's hit through applySlowIfAny (combat's item 1), the
+		same call a channel's landing makes. Trades damage for WalkSpeed 10
+		for three seconds -- the opener before a Glacier or a Rime. Windup
+		0.15 is the smallest bar interface draws, and it is drawn: an
+		instant hitscan with neither bar nor bolt is exactly what the
+		telegraph rule exists to refuse. A Chill player opens with it; a
+		Lance player never slows anyone. ]]
+	chill = {
+		id = "chill",
+		name = "Chill",
+		kind = "striker",
+		madraCost = 16,
+		cooldown = 4.0,
+		windup = 0.15,
+		damage = 20,
+		buffDuration = 0,
+		damageBuff = 0,
+		mitigation = 0,
+		moveSpeed = 0,
+		regionScaled = false,
+		targeting = "aim",
+		castTime = 0,
+		interruptible = false,
+		slow = { walkSpeed = 10, duration = 3.0 },
+	},
 
 	-- Enforcer
 	surge = {

@@ -496,7 +496,7 @@ end
 	something else. So the set of values the server dispatches is listed HERE,
 	owned by the test, and grows only in the same commit as the resolver
 	branch that reads the new value. ]]
-local DISPATCHED_PROJECTILES: { [string]: boolean } = { homing = true }
+local DISPATCHED_PROJECTILES: { [string]: boolean } = { homing = true, straight = true }
 for id, tech in Config.Techniques do
 	if tech.projectile ~= nil then
 		check(
