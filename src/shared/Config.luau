@@ -553,6 +553,36 @@ Config.Techniques = {
 		castTime = 6.0,
 		interruptible = false,
 	},
+	--[[ The snare: Frostbolt's shape at a twelfth of the commit and a tenth
+		of the damage, for the slow rather than the hit. A quarter-second
+		lock channel, a homing bolt, WalkSpeed 6 for two seconds on arrival
+		-- taken to set up Rime, or to land Glacier on a target that cannot
+		sidestep it. 0.25 is above interface's 0.15 floor so the bar draws;
+		what this exposes is the SNAP -- interface's 0.35s break is fixed on
+		purpose and outlasts a channel this short that gets interrupted,
+		because the snap is the event of the break, not the time spent in
+		red. Tests: a quick homing channel, a load-bearing slow, and that
+		snap. Priced by the rule: at 0.25 it must hit no harder than lance
+		under release-profile windups. ]]
+	hoarfrost = {
+		id = "hoarfrost",
+		name = "Hoarfrost",
+		kind = "striker",
+		madraCost = 20,
+		cooldown = 5.0,
+		windup = 0,
+		damage = 24,
+		buffDuration = 0,
+		damageBuff = 0,
+		mitigation = 0,
+		moveSpeed = 0,
+		regionScaled = false,
+		targeting = "lock",
+		castTime = 0.25,
+		interruptible = true,
+		projectile = "homing",
+		slow = { walkSpeed = 6, duration = 2.0 },
+	},
 
 	-- Enforcer
 	surge = {
