@@ -675,6 +675,7 @@ do
 		which is the progressive-disclosure rule applied to the loudest thing the
 		interface ever needs to say. ]]
 	local promptFrame = Instance.new("Frame")
+	promptFrame.Name = "BreakthroughPrompt"
 	promptFrame.AnchorPoint = Vector2.new(0.5, 1)
 	promptFrame.Position = UDim2.new(0.5, 0, 1, -(px(SLOT.bottomMargin) + clusterHeight + px(8)))
 	promptFrame.Size = UDim2.fromOffset(px(320), px(24))
@@ -890,6 +891,7 @@ local NOTICE = InterfaceSpec.Notice
 local noticeUi: { frame: Frame, label: TextLabel }
 do
 	local noticeFrame = Instance.new("Frame")
+	noticeFrame.Name = "Notice"
 	noticeFrame.AnchorPoint = Vector2.new(0.5, 0)
 	noticeFrame.Position = UDim2.new(0.5, 0, 0, px(NOTICE.top))
 	--[[ The notice grows to fit rather than clipping.
@@ -952,6 +954,7 @@ local GUIDANCE = InterfaceSpec.Guidance
 local cardUi: { guidance: TextLabel, dismiss: () -> (), show: () -> () }
 do
 	local guidanceLabel = caption(screen, text(GUIDANCE.textSize), TEXT_DIM, false)
+	guidanceLabel.Name = "Guidance"
 	guidanceLabel.AnchorPoint = Vector2.new(0.5, 1)
 	guidanceLabel.Position =
 		UDim2.new(0.5, 0, 1, -(px(SLOT.bottomMargin) + clusterHeight + px(GUIDANCE.gap)))
@@ -970,6 +973,7 @@ do
 		on. Stage and the key range are read from live state rather than hardcoded,
 		so the card stays true if either changes. ]]
 	local cardFrame = Instance.new("Frame")
+	cardFrame.Name = "FirstRunCard"
 	cardFrame.AnchorPoint = Vector2.new(0.5, 0.5)
 	cardFrame.Position = UDim2.fromScale(0.5, 0.34)
 	cardFrame.Size = UDim2.fromOffset(px(468), px(120))
