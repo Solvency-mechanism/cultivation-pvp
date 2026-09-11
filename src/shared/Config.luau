@@ -481,6 +481,46 @@ Config.Techniques = {
 		castTime = 0,
 		interruptible = false,
 	},
+	--[[ Instant aim versus a guaranteed hit after a commitment you can be
+		knocked out of. The first lock-and-cast technique: pick a target, hold
+		three seconds, and if you are still standing, still in range and still
+		have line of sight when the channel completes, a homing bolt leaves
+		that cannot be aimed away from. Any hit taken during the channel
+		breaks it. On arrival it halves the target's WalkSpeed for three
+		seconds -- the same target Verdict wants and Cataclysm needs.
+
+		A Frostbolt player fires only when the opponent cannot reach them
+		for three seconds -- from outside their range, from a corner, while
+		they are busy; a Lance player fires whenever the reticle is on
+		someone. The cast bar is castTime; windup is 0 by the one-timer rule
+		and the pool invariant that enforces it.
+
+		Priced by that same rule's other half: a harder hit never commits
+		SHORTER, so the longest commit in the striker pool must also be its
+		heaviest hit or the assertion refuses it. That floor is right --
+		three seconds interruptible by any hit is the most expensive commit
+		in the game -- so this sits just above Verdict, and the two stay
+		distinct on everything else: Verdict is aimed, dodgeable and cannot be
+		interrupted; Frostbolt is locked, undodgeable and can. ]]
+	frostbolt = {
+		id = "frostbolt",
+		name = "Frostbolt",
+		kind = "striker",
+		madraCost = 60,
+		cooldown = 12.0,
+		windup = 0,
+		damage = 230,
+		buffDuration = 0,
+		damageBuff = 0,
+		mitigation = 0,
+		moveSpeed = 0,
+		regionScaled = false,
+		targeting = "lock",
+		castTime = 3.0,
+		interruptible = true,
+		projectile = "homing",
+		slow = { walkSpeed = 8, duration = 3.0 },
+	},
 
 	-- Enforcer
 	surge = {
