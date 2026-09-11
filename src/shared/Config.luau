@@ -270,12 +270,12 @@ Config.Combat = {
 	respawnSeconds = 5,
 	-- Forger constructs damage on an interval rather than continuously, so a
 	-- technique's `damage` reads as damage *per tick*. At 2s, caltrops over its
-	-- 10s window lands 4 ticks (120) and sentry over 12s lands 5 (120), not
-	-- the 5 and 6 a division suggests: `stepConstructs` expires a construct
-	-- before checking whether it is due to tick, so the tick that would fall
-	-- exactly on expiry never fires. Either way it is around a third of a
-	-- Lowgold pool for standing still in a hazard you can walk out of. Zoning
-	-- pressure, not a kill button.
+	-- full 10s window is 5 ticks (150) and sentry over 12s is 6 (144) -- around
+	-- a third of a Lowgold pool for standing still in a hazard you can walk out
+	-- of. Zoning pressure, not a kill button. The tick that lands exactly on
+	-- expiry does fire: `Combat.stepConstructTimer` decides tick before
+	-- expiry, so a round duration delivers `duration / tick` ticks and no
+	-- construct below needs to pad past a multiple to get its last one.
 	constructTickSeconds = 2.0,
 }
 
@@ -313,12 +313,22 @@ Config.Combat = {
 	- A forger not listed in CombatService's SELF_BUFF_FORGERS spawns a
 	  construct; if it also carries positive mitigation it self-buffs too.
 	  buffDuration is then read twice: the construct's lifetime and the buff's.
-	- Constructs tick every constructTickSeconds and are expired BEFORE the
-	  tick check on the step they lapse, so a duration that is an exact
-	  multiple of the tick loses its last tick. Durations below sit a half
-	  second past a multiple on purpose.
+	- Constructs tick every constructTickSeconds, tick-before-expiry, so a
+	  round duration delivers exactly duration / tick ticks.
 	- Windup on an enforcer only delays the presentation; the buff is live at
-	  press. moveSpeed is mirrored to the Humanoid only for strider today.
+	  press. moveSpeed is mirrored to the Humanoid for ANY kind that carries
+	  it, and Combat.moveSpeedOf is highest-wins, so a value below
+	  baseWalkSpeed is a self-slow only while no faster override is live.
+
+	Frostbolt's fields (targeting, castTime, interruptible, projectile,
+	slow) are the seam for lock-and-cast channelled techniques. targeting,
+	castTime and interruptible are carried uniformly -- "aim", 0 and false on
+	every technique that is not one -- the same way moveSpeed is carried at
+	0. projectile and slow are optional: they are dispatch payloads that only
+	mean something on a technique whose resolver reads them, and a default
+	would have to invent a semantics for every existing striker. Config
+	holds the data; CombatService dispatches on it the way it already
+	dispatches on kind.
 
 	moveSpeed is the absolute Humanoid.WalkSpeed to hold for buffDuration
 	seconds, 0 meaning "not applicable" -- every non-strider technique carries
@@ -338,6 +348,11 @@ export type Technique = {
 	mitigation: number,
 	moveSpeed: number,
 	regionScaled: boolean,
+	targeting: "aim" | "lock",
+	castTime: number,
+	interruptible: boolean,
+	projectile: string?,
+	slow: { walkSpeed: number, duration: number }?,
 }
 
 Config.Techniques = {
@@ -355,6 +370,9 @@ Config.Techniques = {
 		mitigation = 0,
 		moveSpeed = 0,
 		regionScaled = false,
+		targeting = "aim",
+		castTime = 0,
+		interruptible = false,
 	},
 	volley = {
 		id = "volley",
@@ -369,6 +387,9 @@ Config.Techniques = {
 		mitigation = 0,
 		moveSpeed = 0,
 		regionScaled = false,
+		targeting = "aim",
+		castTime = 0,
+		interruptible = false,
 	},
 	pierce = {
 		id = "pierce",
@@ -383,6 +404,9 @@ Config.Techniques = {
 		mitigation = 0,
 		moveSpeed = 0,
 		regionScaled = false,
+		targeting = "aim",
+		castTime = 0,
+		interruptible = false,
 	},
 	--[[ WHERE you fire from. A bolt drawn from the ground under the caster:
 		barren 25, open 50, rich 90, wellspring 130. A wellspring Draught
@@ -406,6 +430,9 @@ Config.Techniques = {
 		mitigation = 0,
 		moveSpeed = 0,
 		regionScaled = true,
+		targeting = "aim",
+		castTime = 0,
+		interruptible = false,
 	},
 	--[[ WHEN you fire: through their attack, not on their cooldown. The
 		self-buff block fires at press, so 45% mitigation covers the 0.55s
@@ -427,6 +454,9 @@ Config.Techniques = {
 		mitigation = 0.45,
 		moveSpeed = 0,
 		regionScaled = false,
+		targeting = "aim",
+		castTime = 0,
+		interruptible = false,
 	},
 	--[[ WHO you fire at: only someone who cannot leave. 1.6s is a longer
 		telegraph than every ruler but Tempest, and every strider in the pool
@@ -447,6 +477,9 @@ Config.Techniques = {
 		mitigation = 0,
 		moveSpeed = 0,
 		regionScaled = false,
+		targeting = "aim",
+		castTime = 0,
+		interruptible = false,
 	},
 
 	-- Enforcer
@@ -463,6 +496,9 @@ Config.Techniques = {
 		mitigation = 0,
 		moveSpeed = 0,
 		regionScaled = false,
+		targeting = "aim",
+		castTime = 0,
+		interruptible = false,
 	},
 	bulwark = {
 		id = "bulwark",
@@ -477,6 +513,9 @@ Config.Techniques = {
 		mitigation = 0.40,
 		moveSpeed = 0,
 		regionScaled = false,
+		targeting = "aim",
+		castTime = 0,
+		interruptible = false,
 	},
 	--[[ WHO is the aggressor. For six seconds you deal +50% and TAKE +35%.
 		Negative mitigation is honoured by Combat.mitigationOf (a -0.35 target
@@ -499,6 +538,9 @@ Config.Techniques = {
 		mitigation = -0.35,
 		moveSpeed = 0,
 		regionScaled = false,
+		targeting = "aim",
+		castTime = 0,
+		interruptible = false,
 	},
 
 	-- Forger
@@ -515,6 +557,9 @@ Config.Techniques = {
 		mitigation = 0.55,
 		moveSpeed = 0,
 		regionScaled = false,
+		targeting = "aim",
+		castTime = 0,
+		interruptible = false,
 	},
 	caltrops = {
 		id = "caltrops",
@@ -529,6 +574,9 @@ Config.Techniques = {
 		mitigation = 0,
 		moveSpeed = 0,
 		regionScaled = false,
+		targeting = "aim",
+		castTime = 0,
+		interruptible = false,
 	},
 	sentry = {
 		id = "sentry",
@@ -543,6 +591,9 @@ Config.Techniques = {
 		mitigation = 0,
 		moveSpeed = 0,
 		regionScaled = false,
+		targeting = "aim",
+		castTime = 0,
+		interruptible = false,
 	},
 	--[[ Stand IN it or leave it. Both forger branches at once: not listed in
 		SELF_BUFF_FORGERS, so it spawns a construct, and it carries positive
@@ -553,8 +604,7 @@ Config.Techniques = {
 		player drops the ring and steps INTO it to fight hardened at melee
 		range; a Sentry player drops the ring and backs away from it. The
 		mitigation is live 0.5s before the ring appears (press vs windup) --
-		that is the resolver's shape, not a bug. 8.5 rather than 8.0 so the
-		fourth tick actually lands; see constructTickSeconds. ]]
+		that is the resolver's shape, not a bug. ]]
 	bastion = {
 		id = "bastion",
 		name = "Bastion",
@@ -563,11 +613,14 @@ Config.Techniques = {
 		cooldown = 14.0,
 		windup = 0.5,
 		damage = 18,
-		buffDuration = 8.5,
+		buffDuration = 8.0,
 		damageBuff = 0,
 		mitigation = 0.35,
 		moveSpeed = 0,
 		regionScaled = false,
+		targeting = "aim",
+		castTime = 0,
+		interruptible = false,
 	},
 
 	-- Ruler -- these are the terrain-dependent ones. Monstrous in a
@@ -585,6 +638,9 @@ Config.Techniques = {
 		mitigation = 0,
 		moveSpeed = 0,
 		regionScaled = true,
+		targeting = "aim",
+		castTime = 0,
+		interruptible = false,
 	},
 	siphon = {
 		id = "siphon",
@@ -599,6 +655,9 @@ Config.Techniques = {
 		mitigation = 0,
 		moveSpeed = 0,
 		regionScaled = true,
+		targeting = "aim",
+		castTime = 0,
+		interruptible = false,
 	},
 	tempest = {
 		id = "tempest",
@@ -613,6 +672,9 @@ Config.Techniques = {
 		mitigation = 0,
 		moveSpeed = 0,
 		regionScaled = true,
+		targeting = "aim",
+		castTime = 0,
+		interruptible = false,
 	},
 	--[[ The ruler that works in the Barrens. Flat 45 everywhere: loses to
 		Siphon on rich (99) and wellspring (143), wins on barren (27) and
@@ -634,6 +696,9 @@ Config.Techniques = {
 		mitigation = 0,
 		moveSpeed = 0,
 		regionScaled = false,
+		targeting = "aim",
+		castTime = 0,
+		interruptible = false,
 	},
 
 	--[[ Strider -- self-only WalkSpeed override, no damage path of its own.
@@ -659,6 +724,9 @@ Config.Techniques = {
 		mitigation = 0,
 		moveSpeed = 80,
 		regionScaled = false,
+		targeting = "aim",
+		castTime = 0,
+		interruptible = false,
 	},
 	swiftstep = {
 		id = "swiftstep",
@@ -673,6 +741,9 @@ Config.Techniques = {
 		mitigation = 0,
 		moveSpeed = 32,
 		regionScaled = false,
+		targeting = "aim",
+		castTime = 0,
+		interruptible = false,
 	},
 	windstride = {
 		id = "windstride",
@@ -687,6 +758,9 @@ Config.Techniques = {
 		mitigation = 0,
 		moveSpeed = 24,
 		regionScaled = false,
+		targeting = "aim",
+		castTime = 0,
+		interruptible = false,
 	},
 } :: { [string]: Technique }
 

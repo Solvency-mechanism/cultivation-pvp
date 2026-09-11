@@ -363,7 +363,16 @@ check("respawn delay is set", Config.Combat.respawnSeconds > 0)
 	damage and demanded strictly increasing windup between neighbours, which
 	fails on two techniques of equal damage purely on which order the unstable
 	sort happened to place them. What the rule always meant is that more damage
-	never telegraphs LESS -- so a harder hit must wind up at least as long. ]]
+	never telegraphs LESS -- so a harder hit must wind up at least as long.
+
+	The telegraph is the technique's COMMIT, which is one number: castTime for
+	a channelled technique, windup for everything else. Ruled that way so no
+	consumer ever has to know to add two timers together -- the first one that
+	did not would be a bug that looked like latency. ]]
+local function commitOf(tech): number
+	return if tech.castTime > 0 then tech.castTime else tech.windup
+end
+
 for _, kind in { "striker", "ruler" } do
 	local pool = {}
 	for _, tech in Config.Techniques do
@@ -376,11 +385,22 @@ for _, kind in { "striker", "ruler" } do
 			if heavier.damage > lighter.damage then
 				check(
 					`{kind}: {heavier.id} telegraphs at least as long as {lighter.id}`,
-					heavier.windup >= lighter.windup
+					commitOf(heavier) >= commitOf(lighter)
 				)
 			end
 		end
 	end
+end
+
+--[[ One timer. A channelled technique's commit is castTime and nothing else,
+	so a technique carrying both a castTime and a windup would reopen exactly
+	the two-timer seam the commitOf rule closes. Refused at the pool level so
+	it cannot be authored by accident. ]]
+for id, tech in Config.Techniques do
+	if tech.castTime > 0 then
+		eq(`channelled {id} has no windup of its own`, tech.windup, 0)
+	end
+	check(`{id} declares a targeting idiom`, tech.targeting == "aim" or tech.targeting == "lock")
 end
 
 print(`\n  passed: {passed}   failed: {failed}`)

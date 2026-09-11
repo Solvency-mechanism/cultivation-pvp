@@ -146,12 +146,16 @@ check("a 0.9s pierce telegraphs", InterfaceSpec.telegraphs(0.9))
 	combat design, and it is meaningless if the attacks it is about cannot be
 	seen coming. This is the assertion that caught lance sitting at exactly the
 	floor. ]]
+-- The telegraph is the commit: castTime for a channelled technique, windup for
+-- everything else. One number, per the one-timer ruling -- a channel with
+-- windup 0 is not a flash, it is a three-second bar.
 for id, tech in Config.Techniques do
 	if tech.kind == "striker" then
+		local commit = if tech.castTime > 0 then tech.castTime else tech.windup
 		check(
 			`striker {id} is telegraphable`,
-			InterfaceSpec.telegraphs(tech.windup),
-			`windup {tech.windup} is under the {InterfaceSpec.Cast.windupFloor} floor`
+			InterfaceSpec.telegraphs(commit),
+			`commit {commit} is under the {InterfaceSpec.Cast.windupFloor} floor`
 		)
 	end
 end
