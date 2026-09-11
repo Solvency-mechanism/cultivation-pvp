@@ -179,7 +179,61 @@ InterfaceSpec.Scale = {
 	-- Below this the viewport is a phone and density has to be bought back.
 	smallHeight = 600,
 	smallScale = 1.34,
+
+	--[[ The ceiling that was missing.
+
+		The curve above is a *floor* for legibility: below 600px it pins the
+		scale at 1.34 so text stays readable. It had no matching ceiling for
+		footprint, and the two are not the same constraint -- as a viewport gets
+		shorter, a fixed-pixel stack keeps its absolute size and eventually eats
+		the screen. Measured before this cap existed: at 450px the bottom cluster
+		took 47% of the frame and the guidance line sat at 53%, dead centre; at
+		320px it took 66%.
+
+		That was not only a tiny-window problem. A phone in landscape is 854x480
+		-- precisely the case the small-screen branch was written for -- and it
+		took 44%. The scale curve was solving legibility on exactly the device
+		whose screen it was consuming.
+
+		So: the stack may not exceed this fraction of viewport height, whatever
+		legibility would prefer. 700px and up are unaffected, because the curve
+		already returns less than the cap there. ]]
+	stackBudget = 0.38,
 }
+
+--[[ Guidance line geometry, which the footprint cap has to know about because
+	the line sits above the cluster and is part of the same stack. ]]
+InterfaceSpec.Guidance = {
+	width = 520,
+	height = 18,
+	textSize = 12,
+	-- Space between the guidance line and the top of the cluster.
+	gap = 10,
+}
+
+--[[ The full height of the bottom stack at scale 1: vitals, cast bar, action
+	bar, the margin under it, and the guidance line above it.
+
+	Summed from the specs rather than written as a constant, so it cannot drift
+	when a bar height or the slot size changes -- a stale literal here would make
+	the footprint cap silently wrong in the direction of "looks fine on my
+	monitor", which is the failure it exists to prevent. ]]
+function InterfaceSpec.stackHeight(): number
+	local vitals = InterfaceSpec.Vitals
+	local slot = InterfaceSpec.Slot
+	local cast = InterfaceSpec.Cast
+	local guidance = InterfaceSpec.Guidance
+	local header = vitals.headerTextSize + 4
+	local cluster = header
+		+ vitals.healthHeight
+		+ vitals.rowGap
+		+ vitals.madraHeight
+		+ vitals.stackGap
+		+ cast.height
+		+ vitals.stackGap
+		+ slot.size
+	return cluster + slot.bottomMargin + guidance.gap + guidance.height
+end
 
 function InterfaceSpec.scale(viewportHeight: number): number
 	local spec = InterfaceSpec.Scale
@@ -203,6 +257,20 @@ function InterfaceSpec.scale(viewportHeight: number): number
 		-- Grow with the square root of the excess, not linearly.
 		ratio = math.sqrt(viewportHeight / spec.referenceHeight)
 	end
+
+	--[[ Footprint cap. Legibility asks for a bigger interface on a small screen;
+		this is the limit past which a bigger interface stops being an interface
+		and becomes the screen. Applied after the curve rather than inside it, so
+		the reasoning stays two separable ideas: how big should this be to read,
+		and how big is it allowed to get. ]]
+	local budget = (spec.stackBudget * viewportHeight) / InterfaceSpec.stackHeight()
+	ratio = math.min(ratio, budget)
+
+	--[[ `minScale` deliberately wins over the cap at the very bottom. Below
+		roughly 390px there is no scale that both fits the budget and keeps text
+		legible, and a HUD too small to read is a worse answer than one that is
+		too large. The trade is stated here and asserted in the suite rather than
+		being an accident of clamp ordering. ]]
 	return math.clamp(ratio, spec.minScale, spec.maxScale)
 end
 

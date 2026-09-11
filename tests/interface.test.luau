@@ -42,21 +42,65 @@ eq("a negative maximum is empty", InterfaceSpec.fraction(10, -5), 0)
 eq("overfull clamps to one", InterfaceSpec.fraction(150, 100), 1)
 eq("negative health clamps to zero", InterfaceSpec.fraction(-20, 100), 0)
 
---[[ Viewport scaling. The failure this guards against is the one that cannot be
-	seen from a developer's own machine: the interface silently collapsing on a
-	phone, or ballooning on a viewport nobody tested. ]]
-check("a phone scales the interface up, not down", InterfaceSpec.scale(480) > 1.2)
+--[[ Viewport scaling.
+
+	**Two assertions here encoded the wrong idea and were rewritten rather than
+	repaired.** They asserted that a phone scales up hard (> 1.2) and that the
+	curve falls monotonically from phone to reference. Both were true of a scale
+	function that had a legibility floor and no footprint ceiling -- the same
+	function that let the bottom stack eat 44% of a landscape phone and 66% of a
+	320px window. The tests were faithfully protecting the bug.
+
+	What is asserted now is the property actually wanted: a phone is never scaled
+	*below* reference, and the stack always fits its budget. ]]
 check("the reference viewport is unscaled", math.abs(InterfaceSpec.scale(1080) - 1) < 0.02)
-check(
-	"a tablet sits between phone and reference",
-	(function(): boolean
-		local tablet = InterfaceSpec.scale(820)
-		return tablet > 1.0 and tablet < InterfaceSpec.scale(480)
-	end)()
-)
+check("a phone is never scaled below the reference size", InterfaceSpec.scale(480) >= 1.0)
 check("a large monitor grows sublinearly", InterfaceSpec.scale(2160) < 1.5)
-check("scale is clamped at the bottom", InterfaceSpec.scale(4000) <= InterfaceSpec.Scale.maxScale)
+check("scale is clamped at the top", InterfaceSpec.scale(4000) <= InterfaceSpec.Scale.maxScale)
 check("a degenerate viewport does not divide by zero", InterfaceSpec.scale(0) == 1)
+
+--[[ The footprint cap, and the height check that should have existed already.
+
+	The action bar's *width* was asserted from this suite's first version; the
+	*height* of the stack it belongs to was not. That asymmetry is the lesson
+	rather than a detail: the axis that got tested is the axis that had already
+	been thought about, and the axis that broke is the one that had not. ]]
+local STACK_BUDGET = InterfaceSpec.Scale.stackBudget
+
+for _, height in { 400, 450, 480, 540, 600, 700, 768, 800, 900, 1080, 1440, 2160 } do
+	local occupied = InterfaceSpec.stackHeight() * InterfaceSpec.scale(height)
+	check(
+		`the bottom stack fits its budget at {height}px`,
+		occupied <= STACK_BUDGET * height + 1,
+		`took {math.round((occupied / height) * 100)}% of the frame`
+	)
+end
+
+--[[ 400px is the floor at which the budget is still satisfiable. Below it no
+	scale both fits the budget and keeps text legible, `minScale` deliberately
+	wins, and that trade is asserted rather than left to clamp ordering. ]]
+check(
+	"below 400px legibility wins over footprint, deliberately",
+	InterfaceSpec.scale(320) == InterfaceSpec.Scale.minScale
+)
+
+-- Named so a regression reports which real device it broke, not which number moved.
+check(
+	"a landscape phone keeps most of its screen",
+	InterfaceSpec.stackHeight() * InterfaceSpec.scale(480) <= STACK_BUDGET * 480 + 1,
+	"854x480 is the case the small-screen branch was written for"
+)
+check(
+	"the cap does not bite at desktop heights",
+	InterfaceSpec.stackHeight() * InterfaceSpec.scale(768) < 0.3 * 768
+)
+
+-- Summed from the specs, so a layout change moves it rather than leaving a stale
+-- literal that would make the cap silently wrong in the flattering direction.
+check(
+	"the stack height is derived, not a literal",
+	InterfaceSpec.stackHeight() > InterfaceSpec.Slot.size + InterfaceSpec.Vitals.healthHeight
+)
 
 --[[ The action bar has to fit. The movement pass flagged a five-slot bar as a
 	phone-width worry it could not resolve, and the whole reason square icon

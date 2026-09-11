@@ -728,10 +728,12 @@ noticeLabel.TextXAlignment = Enum.TextXAlignment.Center
 	The voice is the one `Config.RegionNames` and the announcement copy already
 	use: spare, declarative, present tense. This game says "surfaced in the Ember
 	Barrens", not "A rare node has spawned!". ]]
-local guidanceLabel = caption(screen, text(12), TEXT_DIM, false)
+local GUIDANCE = InterfaceSpec.Guidance
+local guidanceLabel = caption(screen, text(GUIDANCE.textSize), TEXT_DIM, false)
 guidanceLabel.AnchorPoint = Vector2.new(0.5, 1)
-guidanceLabel.Position = UDim2.new(0.5, 0, 1, -(px(SLOT.bottomMargin) + clusterHeight + px(10)))
-guidanceLabel.Size = UDim2.fromOffset(px(520), px(18))
+guidanceLabel.Position =
+	UDim2.new(0.5, 0, 1, -(px(SLOT.bottomMargin) + clusterHeight + px(GUIDANCE.gap)))
+guidanceLabel.Size = UDim2.fromOffset(px(GUIDANCE.width), px(GUIDANCE.height))
 guidanceLabel.TextXAlignment = Enum.TextXAlignment.Center
 
 --[[ The first-run card.
