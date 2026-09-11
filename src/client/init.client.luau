@@ -2520,7 +2520,21 @@ end)
 
 local function fireSlot(slot: string)
 	local camera = Workspace.CurrentCamera
-	useTechnique:FireServer(slot, if camera then camera.CFrame.LookVector else nil)
+	--[[ The third argument is the lock, when there is one: the combatant id
+		already held in `lockedTarget`, and nothing else. The server resolves the
+		id back to a combatant and validates range, line of sight, bracket and
+		liveness itself; this sends what the player chose and claims nothing
+		about whether the choice is legal. For an aim technique the server
+		ignores it. Argument order is CombatService.onUseTechnique's -- player,
+		slot, aim, targetId -- and it is written in the REMOTES section of
+		frostbolt-ruling.md, where it should have been before this line was
+		missing. ]]
+	local locked = lockedTarget
+	useTechnique:FireServer(
+		slot,
+		if camera then camera.CFrame.LookVector else nil,
+		if locked then locked.id else nil
+	)
 	--[[ The speculative windup effect, drawn from here rather than from a second
 		input listener inside Vfx. There is one input owner, so there is nothing
 		to keep in agreement about what a press with Shift held means. The gate
