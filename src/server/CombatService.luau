@@ -97,6 +97,7 @@ type ActiveCast = {
 	player: Player,
 	techId: string,
 	targetCombatantId: number?,
+	aim: Vector3?,
 	startedAt: number,
 }
 local activeCasts: { [number]: ActiveCast } = {}
@@ -1024,32 +1025,10 @@ end
 	fizzled" means. Whether that shot goes on to connect is the projectile's
 	own question, answered later by whether landEffect ever runs -- exactly
 	like a raycast striker's own cast can resolve cleanly and still miss. ]]
-local function completeChannel(cast: ActiveCast)
-	if activeCasts[cast.player.UserId] ~= cast then
-		return
-	end
-	activeCasts[cast.player.UserId] = nil
-
-	local player = cast.player
-	local actor = actors[player.UserId]
-	local tech = Config.Techniques[cast.techId]
-	local now = os.clock()
-
-	local fizzled = true
-	if actor and actor.health > 0 and tech and cast.targetCombatantId then
-		local target = validateLockTarget(tech, player, actor, cast.targetCombatantId)
-		if target then
-			fizzled = false
-			if tech.projectile == "homing" then
-				launchHomingProjectile(player, actor, cast.techId, target, now)
-			else
-				landEffect(player, actor, cast.techId, tech, target, now)
-			end
-		end
-	end
-
-	broadcastCastCompleted(player.UserId, cast.techId, fizzled)
-end
+-- completeChannel is defined after resolveStriker below, not here: an aim
+-- channel with no projectile reuses resolveStriker directly (position at
+-- completion, direction from the aim stored at cast), and resolveStriker is
+-- not declared yet at this point in the file.
 
 --[[ Registers a Model as a full combatant -- same damage-resolution path,
 	same `Combat.canEngage` bracket check a player already goes through.
@@ -1397,6 +1376,63 @@ local function resolveEffect(caster: Player, actor: Combat.Actor, techId: string
 	end
 end
 
+--[[ Completion, always exactly `tech.castTime` after the cast started via
+	the `task.delay` scheduled in `onUseTechnique`. Staleness-guarded the
+	same way a dummy's own delayed reset is: if this exact cast is no longer
+	the player's current `activeCasts` entry -- interrupted, or superseded by
+	a new one -- it was already handled and this is a no-op rather than a
+	second resolution.
+
+	Branches on `tech.targeting`, not on which field happens to be set:
+	a LOCK channel re-validates against the target it locked (the world can
+	change during a multi-second channel -- the target may have died, left
+	range, or broken line of sight) and resolves through the target-aware
+	path, homing projectile or instant landEffect. An AIM channel has no
+	target to re-validate; it resolves along the aim stored at cast time,
+	either as a straight projectile (Glacier Lance) or, for a hypothetical
+	aim channel with no projectile, by calling resolveStriker directly --
+	the exact same raycast-and-resolve an ordinary windup striker already
+	uses, from the caster's position AT COMPLETION but along the direction
+	held from cast START, which is what "the bolt still goes where you
+	first aimed" requires. No technique in this set exercises that last
+	branch (Glacier Lance carries a projectile), but the dispatch has to be
+	correct for one that doesn't rather than silently doing nothing. ]]
+local function completeChannel(cast: ActiveCast)
+	if activeCasts[cast.player.UserId] ~= cast then
+		return
+	end
+	activeCasts[cast.player.UserId] = nil
+
+	local player = cast.player
+	local actor = actors[player.UserId]
+	local tech = Config.Techniques[cast.techId]
+	local now = os.clock()
+
+	local fizzled = true
+	if actor and actor.health > 0 and tech then
+		if tech.targeting == "lock" and cast.targetCombatantId then
+			local target = validateLockTarget(tech, player, actor, cast.targetCombatantId)
+			if target then
+				fizzled = false
+				if tech.projectile == "homing" then
+					launchHomingProjectile(player, actor, cast.techId, target, now)
+				else
+					landEffect(player, actor, cast.techId, tech, target, now)
+				end
+			end
+		elseif tech.targeting == "aim" and cast.aim then
+			fizzled = false
+			if tech.projectile == "straight" then
+				launchStraightProjectile(player, actor, cast.techId, cast.aim, now)
+			else
+				resolveStriker(player, actor, cast.techId, cast.aim, now)
+			end
+		end
+	end
+
+	broadcastCastCompleted(player.UserId, cast.techId, fizzled)
+end
+
 --[[ `Combat.use`'s refusal reasons, given a voice. Every one of them was
 	previously silent: press a key, pay nothing, nothing happens, no
 	explanation -- indistinguishable from lag, a dropped input, or a broken
@@ -1534,6 +1570,14 @@ local function onUseTechnique(
 	-- commit.
 	broadcastCastStart(player.UserId, techId, if target then target.combatantId else nil)
 
+	-- Aim is sampled at cast, not at resolution: a long windup (or a
+	-- channel) is a commitment, and letting it track the camera through the
+	-- telegraph would erase the counterplay the wait is there to buy. This
+	-- now runs before the channel branch too, not only the windup path
+	-- below it: an aim channel (Glacier Lance) has to remember where it was
+	-- aimed the same way an ordinary windup technique already does.
+	local aim = aimOf(player, suppliedAim)
+
 	if tech.castTime > 0 then
 		--[[ A channel, dispatched entirely separately from the windup path
 			below: its commit is castTime (windup is 0 on any such technique,
@@ -1544,11 +1588,16 @@ local function onUseTechnique(
 			mid-channel, and only one channel technique exists today) would
 			leave that earlier cast's own completion callback to find itself
 			stale and no-op via the guard in completeChannel, rather than
-			double-resolve. ]]
+			double-resolve.
+
+			`aim` is stored only for an aim-targeting channel; a lock
+			channel's completion reads `targetCombatantId` instead and never
+			looks at it. ]]
 		local cast: ActiveCast = {
 			player = player,
 			techId = techId,
 			targetCombatantId = if target then target.combatantId else nil,
+			aim = if tech.targeting == "aim" then aim else nil,
 			startedAt = now,
 		}
 		activeCasts[player.UserId] = cast
@@ -1557,11 +1606,6 @@ local function onUseTechnique(
 		end)
 		return
 	end
-
-	-- Aim is sampled at cast, not at resolution: a long windup is a commitment,
-	-- and letting it track the camera through the telegraph would erase the
-	-- counterplay the windup is there to buy.
-	local aim = aimOf(player, suppliedAim)
 
 	if tech.windup > 0 then
 		task.delay(tech.windup, function()
