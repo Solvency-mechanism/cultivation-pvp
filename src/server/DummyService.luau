@@ -20,13 +20,18 @@
 	the root's CFrame directly rather than Humanoid:MoveTo, for the same
 	reason and because a two-point back-and-forth needs no pathfinding.
 
-	Summon and dismiss are chat commands (`/dummy stationary|moving|caster
+	Summon and dismiss are a TextChatCommand (`/dummy stationary|moving|caster
 	[stage] [techId]`, `/dummy clear`) so this needs no client work: type
-	`/dummy stationary lowgold` and one is standing near the pad.
+	`/dummy stationary lowgold` and one is standing near the pad. A command
+	rather than a plain chat message for two reasons: this place uses
+	TextChatService, under which the legacy `Player.Chatted` event this
+	originally used does not fire at all; and a command does not broadcast
+	to every other player's chat window the way a parsed chat message would.
 ]]
 
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local TextChatService = game:GetService("TextChatService")
 local Workspace = game:GetService("Workspace")
 
 local Combat = require(ReplicatedStorage.Shared.Combat)
@@ -218,10 +223,7 @@ function DummyService.tick(now: number)
 	end
 end
 
-local function handleChat(player: Player, message: string)
-	if not string.match(message, "^/dummy") then
-		return
-	end
+local function handleCommand(player: Player, message: string)
 	local words = string.split(message, " ")
 	local sub = words[2]
 	if sub == "stationary" then
@@ -237,17 +239,26 @@ local function handleChat(player: Player, message: string)
 	end
 end
 
+--[[ A real TextChatCommand rather than Player.Chatted, which does not fire
+	in this place -- confirmed by landscape with an oracle (the handler's own
+	unrecognized-command warn never appeared in Output for a bogus command
+	that visibly reached chat), and understood well enough rather than
+	guessed: this place uses TextChatService, and Player.Chatted is the
+	legacy chat path it leaves behind. A command instance also means /dummy
+	no longer broadcasts to every other player's chat window the way a
+	Chatted-based parse necessarily would have. ]]
 function DummyService.start()
-	Players.PlayerAdded:Connect(function(player: Player)
-		player.Chatted:Connect(function(message: string)
-			handleChat(player, message)
-		end)
+	local command = Instance.new("TextChatCommand")
+	command.Name = "DummyCommand"
+	command.PrimaryAlias = "/dummy"
+	command.Parent = TextChatService
+
+	command.Triggered:Connect(function(originTextSource: TextSource, message: string)
+		local player = Players:GetPlayerByUserId(originTextSource.UserId)
+		if player then
+			handleCommand(player, message)
+		end
 	end)
-	for _, player in Players:GetPlayers() do
-		player.Chatted:Connect(function(message: string)
-			handleChat(player, message)
-		end)
-	end
 end
 
 return DummyService
