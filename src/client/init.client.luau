@@ -363,6 +363,8 @@ type SlotWidget = {
 	countdown: TextLabel,
 	reach: Frame,
 	sweep: Frame,
+	sweepLeft: UIGradient,
+	sweepRight: UIGradient,
 	gcd: Frame,
 	stripe: Frame,
 	stroke: UIStroke,
@@ -400,17 +402,91 @@ for index = 1, slotCount do
 	stripe.ZIndex = 2
 	stripe.Parent = root
 
-	--[[ The cooldown sweep, kept from the previous HUD because it was already
-		the right answer: readiness as a *shape* caught peripherally rather than
-		a number you have to read. It drains downward over the technique's own
-		cooldown.
+	--[[ The cooldown sweep: a radial wedge, unwinding clockwise from twelve.
 
-		A true radial wedge is what this register would use, and Roblox has no
-		conic gradient to build one from -- a real wedge means a four-frame
-		rotate-and-clip rig with a fair chance of looking wrong, and at 58px a
-		wedge and a vertical drain are near-indistinguishable. The numeric
-		countdown below is the half of a radial sweep that players actually read
-		off an icon anyway. Revisit after the playtest, not under the clock. ]]
+		Readiness as a *shape* caught peripherally rather than a number you have
+		to read -- that was always the point, and the vertical drain this replaces
+		did it adequately. A wedge does it in the vocabulary twenty years of the
+		register this HUD borrows from have trained into anyone who has played
+		it, which is why it was asked for by name.
+
+		**Built without rotating a single GuiObject, and that is the whole
+		design.** The obvious rig -- two clipped halves, each holding a rotated
+		rectangle -- depends on `ClipsDescendants` clipping *rotated* children,
+		which Roblox has historically not done reliably. Get that wrong and the
+		failure is not a slightly-off wedge; it is two dark rectangles spinning
+		across the whole HUD. So the half-plane each half needs is drawn instead
+		with a `UIGradient` carrying a hard transparency step at its midpoint,
+		and the gradient's own `Rotation` swings the boundary line. The frames
+		never rotate, the clips only ever see axis-aligned children, and the one
+		primitive this depends on -- a gradient rotating about its centre -- is
+		well supported.
+
+		Two halves, because a rotating half-plane can only ever cover half a
+		circle. The right half's dark region is the half-plane to the right of a
+		line through the centre, rotated by the elapsed angle; the left half's
+		is the mirror. Between them they cover exactly the arc from the current
+		angle clockwise round to twelve -- the time *remaining* -- and that arc
+		shrinks as the cooldown runs down.
+
+		Behind a switch, because none of this has been seen running: if it looks
+		wrong in Studio, `radialSweep = false` returns the drain in one line
+		rather than a revert. ]]
+	local sweepLeft = Instance.new("Frame")
+	sweepLeft.Size = UDim2.fromScale(0.5, 1)
+	sweepLeft.BackgroundTransparency = 1
+	sweepLeft.BorderSizePixel = 0
+	sweepLeft.ClipsDescendants = true
+	sweepLeft.ZIndex = 3
+	sweepLeft.Parent = root
+
+	local sweepRight = Instance.new("Frame")
+	sweepRight.Position = UDim2.fromScale(0.5, 0)
+	sweepRight.Size = UDim2.fromScale(0.5, 1)
+	sweepRight.BackgroundTransparency = 1
+	sweepRight.BorderSizePixel = 0
+	sweepRight.ClipsDescendants = true
+	sweepRight.ZIndex = 3
+	sweepRight.Parent = root
+
+	-- A hard step at the midpoint: one side of the boundary line is the scrim,
+	-- the other is nothing. `opaqueFirst` decides which side.
+	local function halfPlane(parent: Frame, atLocalX: number, opaqueFirst: boolean): UIGradient
+		local dark = Instance.new("Frame")
+		dark.AnchorPoint = Vector2.new(0.5, 0.5)
+		-- Centred on the SLOT's centre, expressed in the half's own space: the
+		-- half is half a slot wide and a whole slot tall.
+		dark.Position = UDim2.fromScale(atLocalX, 0.5)
+		dark.Size = UDim2.fromScale(2, 1)
+		dark.BackgroundColor3 = SCRIM
+		dark.BackgroundTransparency = SLOT.scrimTransparency
+		dark.BorderSizePixel = 0
+		dark.ZIndex = 3
+		dark.Parent = parent
+		corner(dark, px(SLOT.cornerRadius))
+
+		local a = if opaqueFirst then 0 else 1
+		local b = if opaqueFirst then 1 else 0
+		local gradient = Instance.new("UIGradient")
+		gradient.Transparency = NumberSequence.new({
+			NumberSequenceKeypoint.new(0, a),
+			NumberSequenceKeypoint.new(0.4999, a),
+			NumberSequenceKeypoint.new(0.5, b),
+			NumberSequenceKeypoint.new(1, b),
+		})
+		gradient.Rotation = 0
+		gradient.Parent = dark
+		return gradient
+	end
+
+	-- Right half: dark to the RIGHT of the boundary at rotation zero, so it
+	-- starts full and empties as the line swings from twelve round to six.
+	local sweepRightGradient = halfPlane(sweepRight, 0, false)
+	-- Left half: dark to the LEFT at rotation zero, emptying from six to twelve.
+	local sweepLeftGradient = halfPlane(sweepLeft, 1, true)
+
+	-- The drain this replaces, kept beneath the switch so the wedge can be
+	-- turned off without a revert. Only one of the two is ever visible.
 	local sweep = Instance.new("Frame")
 	sweep.AnchorPoint = Vector2.new(0, 1)
 	sweep.Position = UDim2.fromScale(0, 1)
@@ -419,8 +495,11 @@ for index = 1, slotCount do
 	sweep.BackgroundTransparency = SLOT.scrimTransparency
 	sweep.BorderSizePixel = 0
 	sweep.ZIndex = 3
+	sweep.Visible = not SLOT.radialSweep
 	sweep.Parent = root
 	corner(sweep, px(SLOT.cornerRadius))
+	sweepLeft.Visible = SLOT.radialSweep
+	sweepRight.Visible = SLOT.radialSweep
 
 	--[[ The global cooldown is a different fact from a technique cooldown: it
 		hits every slot at once and is always brief. So it draws as a thin bar
@@ -502,6 +581,8 @@ for index = 1, slotCount do
 		countdown = countdown,
 		reach = reach,
 		sweep = sweep,
+		sweepLeft = sweepLeftGradient,
+		sweepRight = sweepRightGradient,
 		gcd = gcd,
 		stripe = stripe,
 		stroke = stroke,
@@ -972,6 +1053,24 @@ local function strikerInReach(): boolean
 	return typeof(ownStage) == "number" and ownStage == theirStage
 end
 
+--[[ Drive the cooldown sweep from the fraction of cooldown REMAINING.
+
+	The wedge covers the arc from the elapsed angle clockwise round to twelve.
+	The right half handles the first half-turn, the left half the second: each
+	gradient's rotation is the elapsed angle clamped to its own 180 degrees, so
+	at a quarter elapsed the right half is a quarter open and the left is still
+	full; at three quarters the right is empty and the left is half open. The
+	drain beneath the switch reads the same fraction as a height. ]]
+local function setSweep(widget: SlotWidget, remainingFraction: number)
+	if SLOT.radialSweep then
+		local elapsedDegrees = (1 - remainingFraction) * 360
+		widget.sweepRight.Rotation = math.clamp(elapsedDegrees, 0, 180)
+		widget.sweepLeft.Rotation = math.clamp(elapsedDegrees - 180, 0, 180)
+	else
+		widget.sweep.Size = UDim2.fromScale(1, remainingFraction)
+	end
+end
+
 local function refreshSlots()
 	local now = os.clock()
 	local madra = player:GetAttribute("Madra") or 0
@@ -988,7 +1087,7 @@ local function refreshSlots()
 			widget.name.Text = "--"
 			widget.cost.Text = ""
 			widget.countdown.Text = ""
-			widget.sweep.Size = UDim2.fromScale(1, 0)
+			setSweep(widget, 0)
 			widget.gcd.Visible = false
 			continue
 		end
@@ -1002,7 +1101,7 @@ local function refreshSlots()
 		local affordable = madra >= tech.madraCost
 
 		if remaining > 0 and tech.cooldown > 0 then
-			widget.sweep.Size = UDim2.fromScale(1, math.clamp(remaining / tech.cooldown, 0, 1))
+			setSweep(widget, math.clamp(remaining / tech.cooldown, 0, 1))
 			widget.stroke.Color = COOLING
 			widget.name.TextColor3 = TEXT_FAINT
 			widget.cost.TextColor3 = TEXT_FAINT
@@ -1011,7 +1110,7 @@ local function refreshSlots()
 				then InterfaceSpec.countdown(remaining)
 				else ""
 		else
-			widget.sweep.Size = UDim2.fromScale(1, 0)
+			setSweep(widget, 0)
 			widget.countdown.Text = ""
 			widget.stripe.BackgroundTransparency = 0
 			widget.stroke.Color = if affordable then kind else UNAFFORDABLE

@@ -312,6 +312,11 @@ InterfaceSpec.Slot = {
 
 	-- How dark the cooldown scrim is over the icon.
 	scrimTransparency = 0.42,
+	--[[ Radial wedge rather than vertical drain. Behind a switch because the
+		wedge has not been seen running: if it looks wrong in Studio this is one
+		line back to the drain rather than a revert, and the drain stays built
+		beneath it for exactly that reason. ]]
+	radialSweep = true,
 	-- The global cooldown is a *different* fact from a technique cooldown -- it
 	-- affects every slot at once and is always short -- so it draws as a thin
 	-- sweep across the bottom of every slot rather than as a second scrim.
