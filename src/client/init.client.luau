@@ -73,6 +73,7 @@ local UNAFFORDABLE = color(PALETTE.unaffordable)
 local SCRIM = color(PALETTE.scrim)
 local DANGER = color(PALETTE.danger)
 local KEYBIND = color(PALETTE.keybind)
+local LOCK = color(PALETTE.lock)
 local BLACK = Color3.new(0, 0, 0)
 
 local NOTICE_COLOR: { [string]: Color3 } = {
@@ -722,6 +723,16 @@ targetCastTimer.ZIndex = 3
 	and until now a player discovered that by attacking someone and having
 	nothing whatsoever happen -- indistinguishable from a miss, from lag, or from
 	a broken button. Saying it on the frame turns a mystery into a rule. ]]
+--[[ Says "LOCKED" beside the stage when the frame is showing a lock rather
+	than the aim, so the two idioms are told apart by a word and a border rather
+	than left to be inferred. ]]
+local targetLockTag = caption(targetFrame, text(TARGET.stageTextSize), LOCK, true)
+targetLockTag.Size = UDim2.fromOffset(px(56), px(18))
+targetLockTag.Position = UDim2.new(0.6, -px(60), 0, px(3))
+targetLockTag.TextXAlignment = Enum.TextXAlignment.Right
+targetLockTag.Text = "LOCKED"
+targetLockTag.Visible = false
+
 local targetRefusal = caption(targetFrame, text(TARGET.stageTextSize), DANGER, true)
 targetRefusal.Size = UDim2.new(1, -px(16), 0, px(14))
 targetRefusal.Position = UDim2.fromOffset(px(8), px(22) + px(TARGET.healthHeight) + px(3))
@@ -982,8 +993,34 @@ end
 	sticky target the frame holds for a few seconds. Both the reticle and the pip
 	want the live answer -- either of them staying lit three seconds after you
 	looked away would be promising a shot you no longer have. ]]
-local currentTarget: Player? = nil
+local currentTarget: Nameplates.Combatant? = nil
 local aimOnTarget = false
+
+--[[ The lock: a promotion of the soft target, never a replacement for it.
+
+	This game aims by camera, and every existing technique keeps doing so -- the
+	reticle keeps meaning "where the ray goes" and the soft target keeps being
+	whoever that ray would hit. A lock is what you get when you press the lock
+	key with the reticle on someone: the same combatant, held until you release
+	it, they die, or they stay out of reach long enough. Techniques that declare
+	`targeting = "lock"` require one; everything else ignores it entirely.
+
+	So the reticle stays honest in both idioms. For an aim technique it IS the
+	aim; for a lock technique it is how you CHOSE the lock. Two idioms, each
+	with its own readout, and neither has to lie. ]]
+local lockedTarget: Nameplates.Combatant? = nil
+local lockOutOfReachSince: number? = nil
+-- Set once the aura helpers below are defined; unlock is needed before them.
+local onUnlock: ((Nameplates.Combatant) -> ())? = nil
+
+local function unlock()
+	local released = lockedTarget
+	lockedTarget = nil
+	lockOutOfReachSince = nil
+	if released and onUnlock then
+		onUnlock(released)
+	end
+end
 
 local cooldownUntil: { [string]: number } = {}
 local gcdUntil = 0
@@ -1049,7 +1086,7 @@ local function strikerInReach(): boolean
 		return false
 	end
 	local ownStage = player:GetAttribute("StageIndex")
-	local theirStage = currentTarget:GetAttribute("StageIndex")
+	local theirStage = currentTarget.source:GetAttribute("StageIndex")
 	return typeof(ownStage) == "number" and ownStage == theirStage
 end
 
@@ -1262,18 +1299,6 @@ end
 local targetSeenAt = 0
 local lastPoll = 0
 
-local function playerFromInstance(instance: Instance): Player?
-	local model = instance:FindFirstAncestorWhichIsA("Model")
-	while model do
-		local found = Players:GetPlayerFromCharacter(model)
-		if found then
-			return found
-		end
-		model = model:FindFirstAncestorWhichIsA("Model")
-	end
-	return nil
-end
-
 --[[ Mirrors `CombatService.resolveStriker` deliberately: the ray starts at the
 	root and runs along the camera's look vector for the striker's range. Using
 	the camera's *position* instead would be easier to aim and would lie -- the
@@ -1296,15 +1321,160 @@ local function pollTarget()
 		camera.CFrame.LookVector * Config.Combat.ranges.striker,
 		params
 	)
-	local found = if hit then playerFromInstance(hit.Instance) else nil
-	aimOnTarget = found ~= nil and found ~= player
-	if found and found ~= player then
+	local found = if hit then Nameplates.combatantFromInstance(hit.Instance) else nil
+	aimOnTarget = found ~= nil
+	if found then
 		currentTarget = found
 		targetSeenAt = now
 	elseif currentTarget and now - targetSeenAt > TARGET.stickySeconds then
 		currentTarget = nil
 	end
+
+	--[[ The lock's own upkeep. It drops when its combatant is gone or dead, and
+		when they have been out of reach for longer than the grace -- long enough
+		to survive a corner, short enough that walking away from someone clears
+		them. Reach for the lock is the striker's range, which is the longest
+		anything reaches, so a lock never claims more than the ray could. ]]
+	local locked = lockedTarget
+	if locked then
+		if not Nameplates.isLive(locked) then
+			unlock()
+			return
+		end
+		local theirRoot = locked.model:FindFirstChild("HumanoidRootPart")
+		local within = theirRoot
+			and theirRoot:IsA("BasePart")
+			and (theirRoot.Position - root.Position).Magnitude <= Config.Combat.ranges.striker
+		if within then
+			lockOutOfReachSince = nil
+		else
+			local since = lockOutOfReachSince or now
+			lockOutOfReachSince = since
+			if now - since > TARGET.lockReachGrace then
+				unlock()
+			end
+		end
+	end
 end
+
+--[[ Lock whatever the reticle is on. A second press on the same target, or a
+	press with nothing under the reticle, releases. Pressing it on a different
+	combatant moves the lock rather than clearing it first, because "I want
+	that one now" should be one press, not two. ]]
+local function toggleLock()
+	local under = if aimOnTarget then currentTarget else nil
+	if not under then
+		unlock()
+		return
+	end
+	if lockedTarget and lockedTarget.id == under.id then
+		unlock()
+		return
+	end
+	unlock()
+	lockedTarget = under
+	lockOutOfReachSince = nil
+end
+
+--[[ The lock's mark in the world.
+
+	PresenceService already puts a Highlight on every player as the stage aura,
+	so a second Highlight for the lock would stack on it or fight it. Instead the
+	existing one is RETINTED to the lock colour while locked, and restored to the
+	stage colour on release. A dummy carries no aura, so it gets a client-side
+	Highlight of its own for the duration of the lock and loses it after.
+
+	Re-asserted every frame rather than set once, for the reason the nameplate
+	stand-down is: PresenceService destroys and rebuilds the aura on any stage or
+	tier change, and a one-shot retint would come undone at the next tier roll.
+	The write only happens when the colour differs, so the steady state is a
+	comparison. ]]
+local AURA_NAME = "CultivatorAura"
+local ownedLockHighlight: Highlight? = nil
+
+local function auraOf(model: Model): Highlight?
+	local root = model:FindFirstChild("HumanoidRootPart")
+	local aura = if root then root:FindFirstChild(AURA_NAME) else nil
+	return if aura and aura:IsA("Highlight") then aura else nil
+end
+
+local function refreshLockHighlight()
+	local locked = lockedTarget
+	if locked then
+		local aura = auraOf(locked.model)
+		if aura then
+			if aura.OutlineColor ~= LOCK then
+				aura.OutlineColor = LOCK
+				aura.FillColor = LOCK
+			end
+		else
+			-- No aura to retint: a dummy, or a player whose aura has not built
+			-- yet. Draw our own until the lock releases.
+			if not ownedLockHighlight or ownedLockHighlight.Parent ~= locked.model then
+				if ownedLockHighlight then
+					ownedLockHighlight:Destroy()
+				end
+				local own = Instance.new("Highlight")
+				own.Name = "LockHighlight"
+				own.OutlineColor = LOCK
+				own.FillColor = LOCK
+				own.FillTransparency = 0.86
+				own.OutlineTransparency = 0.2
+				own.DepthMode = Enum.HighlightDepthMode.Occluded
+				own.Parent = locked.model
+				ownedLockHighlight = own
+			end
+		end
+		return
+	end
+
+	-- Not locked: give any retinted aura its stage colour back, and drop ours.
+	if ownedLockHighlight then
+		ownedLockHighlight:Destroy()
+		ownedLockHighlight = nil
+	end
+end
+
+--[[ Restoring a retinted aura needs the target we just released, so it is done
+	at the moment of release rather than in the per-frame refresh. ]]
+local function restoreAura(who: Nameplates.Combatant)
+	local aura = auraOf(who.model)
+	if not aura then
+		return
+	end
+	local stageIndex = who.source:GetAttribute("StageIndex")
+	if typeof(stageIndex) == "number" then
+		local stage = color(InterfaceSpec.stageColor(stageIndex))
+		aura.OutlineColor = stage
+		aura.FillColor = stage
+	end
+end
+
+--[[ Click-to-target: a ray from the cursor rather than the camera centre, so a
+	player can pick someone off to the side without turning to face them. The
+	server never sees this; it only ever sees the combatant id a lock technique
+	is eventually cast at, and validates that itself. ]]
+local function lockUnderCursor()
+	local camera = Workspace.CurrentCamera
+	local character = player.Character
+	if not camera or not character then
+		return
+	end
+	local position = UserInputService:GetMouseLocation()
+	local ray = camera:ViewportPointToRay(position.X, position.Y)
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { character :: Instance }
+	local hit = Workspace:Raycast(ray.Origin, ray.Direction * Config.Combat.ranges.striker, params)
+	local found = if hit then Nameplates.combatantFromInstance(hit.Instance) else nil
+	if found then
+		unlock()
+		lockedTarget = found
+		lockOutOfReachSince = nil
+	end
+end
+
+onUnlock = restoreAura
 
 --[[ The reticle.
 
@@ -1400,7 +1570,7 @@ local function refreshReticle()
 
 	if aimOnTarget and currentTarget then
 		local ownStage = player:GetAttribute("StageIndex")
-		local theirStage = currentTarget:GetAttribute("StageIndex")
+		local theirStage = currentTarget.source:GetAttribute("StageIndex")
 		local sameBracket = typeof(ownStage) == "number"
 			and typeof(theirStage) == "number"
 			and ownStage == theirStage
@@ -1416,27 +1586,35 @@ local function refreshReticle()
 end
 
 local function refreshTarget()
-	local target = currentTarget
-	if not target or not target.Parent or not target.Character then
+	-- The lock outranks the soft target: once you have chosen someone, the
+	-- frame stays on them however the reticle wanders.
+	local target = lockedTarget or currentTarget
+	if not target or not Nameplates.isLive(target) then
 		targetFrame.Visible = false
 		return
 	end
 
 	targetFrame.Visible = true
-	targetName.Text = target.DisplayName
+	targetName.Text = target.name
+	--[[ The frame says which idiom it is showing. A locked target is a choice
+		the player made and the border is the lock colour, solid; a soft target
+		is a readout of the aim and the border is the ordinary edge. ]]
+	local locked = lockedTarget ~= nil
+	targetLockTag.Visible = locked
 
-	local stage = target:GetAttribute("Stage")
-	local tier = target:GetAttribute("Tier")
-	local stageIndex = target:GetAttribute("StageIndex")
+	local stage = target.source:GetAttribute("Stage")
+	local tier = target.source:GetAttribute("Tier")
+	local stageIndex = target.source:GetAttribute("StageIndex")
 	targetStage.Text = if typeof(stage) == "string" and typeof(tier) == "number"
 		then `{stage}  ·  {tier}`
+		elseif typeof(stage) == "string" then stage
 		else "--"
 	if typeof(stageIndex) == "number" then
 		targetName.TextColor3 = color(InterfaceSpec.stageColor(stageIndex))
 	end
 
-	local health = target:GetAttribute("Health")
-	local maxHealth = target:GetAttribute("MaxHealth")
+	local health = target.source:GetAttribute("Health")
+	local maxHealth = target.source:GetAttribute("MaxHealth")
 	local numericHealth = if typeof(health) == "number" then health else 0
 	local numericMax = if typeof(maxHealth) == "number" then maxHealth else 0
 	local fraction = InterfaceSpec.fraction(numericHealth, numericMax)
@@ -1453,7 +1631,7 @@ local function refreshTarget()
 		and typeof(stageIndex) == "number"
 		and ownStage == stageIndex
 
-	local cast = Nameplates.castOf(target.UserId)
+	local cast = Nameplates.castOf(target.id)
 	local drawingCast = cast ~= nil and InterfaceSpec.telegraphs(cast.windup)
 
 	if not sameBracket then
@@ -1461,7 +1639,7 @@ local function refreshTarget()
 		targetRefusal.Visible = not drawingCast
 		targetRefusal.Text = "different bracket — neither of you can hit the other"
 	else
-		targetStroke.Color = EDGE
+		targetStroke.Color = if locked then LOCK else EDGE
 		targetRefusal.Visible = false
 	end
 
@@ -2120,6 +2298,7 @@ local function renderStep()
 	end
 	refreshTarget()
 	refreshReticle()
+	refreshLockHighlight()
 	refreshPicker()
 end
 
@@ -2220,5 +2399,12 @@ UserInputService.InputBegan:Connect(function(input: InputObject, processed: bool
 		-- Absent outside the development profile: buildPicker made no frame,
 		-- so the toggle is a no-op rather than a key that seems dead.
 		togglePicker()
+	elseif input.KeyCode == Enum.KeyCode.T then
+		--[[ T, not Tab: Tab is Roblox's player-list toggle, and we spent a day
+			learning there are no corners left. The same is true of keys. ]]
+		toggleLock()
+	elseif input.UserInputType == Enum.UserInputType.MouseButton1 then
+		-- Click-to-target. `processed` above already excludes clicks on UI.
+		lockUnderCursor()
 	end
 end)

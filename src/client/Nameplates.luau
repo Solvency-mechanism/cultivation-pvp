@@ -392,6 +392,50 @@ local function combatants(): { Combatant }
 	return scratch
 end
 
+--[[ Resolve a hit instance to the combatant it belongs to, or nil.
+
+	Exposed because targeting needs the same answer the plate does, and two
+	definitions of "what is a combatant" on one client is how a lock ends up on
+	something that has no health bar. Walks up to the nearest Model, then asks
+	the same two questions the enumeration asks: is it a player's character, or
+	is it tagged. Anything else -- ground, a construct, a node -- is nil. ]]
+function Nameplates.combatantFromInstance(instance: Instance): Combatant?
+	local model = instance:FindFirstAncestorWhichIsA("Model")
+	while model do
+		local owner = Players:GetPlayerFromCharacter(model)
+		if owner then
+			if owner == player then
+				return nil
+			end
+			return { id = owner.UserId, source = owner, model = model, name = owner.DisplayName }
+		end
+		if CollectionService:HasTag(model, COMBATANT_TAG) then
+			local id = model:GetAttribute("CombatantId")
+			if typeof(id) == "number" then
+				local shown = model:GetAttribute("DisplayName")
+				return {
+					id = id,
+					source = model :: Instance,
+					model = model,
+					name = if typeof(shown) == "string" then shown else model.Name,
+				}
+			end
+		end
+		model = model:FindFirstAncestorWhichIsA("Model")
+	end
+	return nil
+end
+
+--[[ Whether a combatant is still present and alive: its model is in the world
+	and its published health is above zero. The lock drops on either. ]]
+function Nameplates.isLive(who: Combatant): boolean
+	if not who.model.Parent then
+		return false
+	end
+	local health = who.source:GetAttribute("Health")
+	return typeof(health) ~= "number" or health > 0
+end
+
 local function ensurePlate(who: Combatant)
 	local existing = plates[who.id]
 	if existing and existing.model == who.model and existing.gui.Parent then

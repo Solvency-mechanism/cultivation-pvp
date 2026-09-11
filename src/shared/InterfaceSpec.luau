@@ -87,6 +87,12 @@ InterfaceSpec.Palette = {
 	danger = { r = 226, g = 88, b = 84 } :: Rgb,
 
 	keybind = { r = 255, g = 214, b = 138 } :: Rgb,
+
+	--[[ The lock. A choice the player made, as against the aim which is a
+		readout. Warm and distinct from every kind colour and from the three
+		meanings the impact layer owns, so a locked frame is not mistaken for a
+		ready slot, a striker, or a killing blow. ]]
+	lock = { r = 255, g = 176, b = 96 } :: Rgb,
 }
 
 --[[ One colour per technique kind, and the reason it is per *kind* rather than
@@ -422,6 +428,10 @@ InterfaceSpec.Target = {
 	healthHeight = 16,
 	valueTextSize = 11,
 	stickySeconds = 3.0,
+	--[[ How long a locked target may stay out of reach before the lock lets
+		go. Long enough to survive them stepping behind a pillar; short enough
+		that walking away from someone clears them. ]]
+	lockReachGrace = 4.0,
 	-- How often the aim ray is cast. Every frame is wasteful for something a
 	-- human reads a few times a second.
 	pollSeconds = 0.08,
