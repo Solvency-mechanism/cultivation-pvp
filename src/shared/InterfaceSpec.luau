@@ -441,6 +441,22 @@ InterfaceSpec.Sense = {
 	headerTextSize = 11,
 	rowTextSize = 11,
 	footTextSize = 10,
+
+	--[[ A column header row.
+
+		Each sense row packs four facts -- bearing, tier, distance, occupancy --
+		into one monospaced line with nothing naming any of them. That was flagged
+		as a teaching gap and then deferred twice under a deadline: a player can
+		read `> rare  84  1/3` for an hour without learning that the last pair is
+		how many of three places are taken, which is the single fact that decides
+		whether walking there is worth it.
+
+		Cheap to fix and worth the fourteen pixels, because this panel is read
+		while walking rather than while fighting -- density costs nothing where
+		there is no time pressure, which is the same reason the rows are allowed
+		to be small in the first place. ]]
+	columnHeight = 13,
+	columnTextSize = 10,
 }
 
 InterfaceSpec.Notice = {

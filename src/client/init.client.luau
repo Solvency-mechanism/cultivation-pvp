@@ -659,7 +659,8 @@ local sensePanel = Instance.new("Frame")
 sensePanel.Name = "Sense"
 sensePanel.AnchorPoint = Vector2.new(1, 0)
 sensePanel.Position = UDim2.new(1, -px(14), 0, px(SENSE.top))
-sensePanel.Size = UDim2.fromOffset(senseWidth, px(20) + senseRowHeight * SENSE.rows + px(16))
+local senseRowsTop = px(18) + px(SENSE.columnHeight)
+sensePanel.Size = UDim2.fromOffset(senseWidth, senseRowsTop + senseRowHeight * SENSE.rows + px(16))
 sensePanel.BackgroundColor3 = PANEL
 sensePanel.BackgroundTransparency = 0.25
 sensePanel.BorderSizePixel = 0
@@ -667,22 +668,31 @@ sensePanel.Parent = screen
 corner(sensePanel, 3)
 
 local senseHeader = caption(sensePanel, text(SENSE.headerTextSize), TEXT_FAINT, true)
-senseHeader.Size = UDim2.new(1, -px(16), 0, px(18))
+senseHeader.Size = UDim2.new(1, -px(16), 0, px(16))
 senseHeader.Position = UDim2.fromOffset(px(8), px(2))
 senseHeader.Text = "AURA SENSE"
+
+--[[ Column names, in the same monospaced font and the same format string as the
+	rows, so the labels sit over the columns they describe rather than merely
+	near them. Dimmer than the rows: it is read once and then never again. ]]
+local senseColumns = caption(sensePanel, text(SENSE.columnTextSize), TEXT_FAINT, false)
+senseColumns.Size = UDim2.new(1, -px(16), 0, px(SENSE.columnHeight))
+senseColumns.Position = UDim2.fromOffset(px(8), px(18))
+senseColumns.Font = Enum.Font.RobotoMono
+senseColumns.Text = string.format("%s %-6s %4s  %s", " ", "aura", "away", "held")
 
 local senseRows: { TextLabel } = {}
 for index = 1, SENSE.rows do
 	local row = caption(sensePanel, text(SENSE.rowTextSize), TEXT_DIM, false)
 	row.Size = UDim2.new(1, -px(16), 0, senseRowHeight)
-	row.Position = UDim2.fromOffset(px(8), px(20) + (index - 1) * senseRowHeight)
+	row.Position = UDim2.fromOffset(px(8), senseRowsTop + (index - 1) * senseRowHeight)
 	row.Font = Enum.Font.RobotoMono
 	senseRows[index] = row
 end
 
 local senseFoot = caption(sensePanel, text(SENSE.footTextSize), TEXT_FAINT, false)
 senseFoot.Size = UDim2.new(1, -px(16), 0, px(14))
-senseFoot.Position = UDim2.fromOffset(px(8), px(20) + senseRowHeight * SENSE.rows)
+senseFoot.Position = UDim2.fromOffset(px(8), senseRowsTop + senseRowHeight * SENSE.rows)
 
 -- ===================================================================
 -- Notices, top centre above the target frame.
