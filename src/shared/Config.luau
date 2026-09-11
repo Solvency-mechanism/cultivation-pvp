@@ -557,15 +557,19 @@ Config.Techniques = {
 		of the damage, for the slow rather than the hit. A quarter-second
 		lock channel, a homing bolt, WalkSpeed 6 for two seconds on arrival
 		-- taken to set up Rime, or to land Glacier on a target that cannot
-		sidestep it. 0.25 is above interface's 0.15 floor so the bar draws;
-		what this exposes is the SNAP -- interface's 0.35s break is fixed on
-		purpose and outlasts a channel this short that gets interrupted,
+		sidestep it. 0.1 is UNDER interface's 0.15 floor on purpose: it is the
+		named sub-floor channel (interface.test's SUB_FLOOR_CHANNELS lists it
+		by id, so the next one fails until added deliberately), and asking
+		what a 0.1s channel would show found a HUD bug before this entry
+		existed -- an interrupted sub-floor channel drew nothing at all, no
+		bar and no snap, fixed at f04dd38. What it exposes now is the snap:
+		interface's fixed 0.35s break outlasts the channel it interrupts,
 		because the snap is the event of the break, not the time spent in
-		red. Tests: a quick homing channel, a load-bearing slow, and that
-		snap. Priced by the rule, which constrains the HEAVIER technique: a
-		0.25 commit means every striker that hits harder must commit at least
-		0.25, and lance commits 0.15 under the release profile -- so this
-		hits exactly as hard as lance, never less, and lance is not heavier. ]]
+		red. Tests: a sub-floor channel, a quick homing bolt, a load-bearing
+		slow, and that snap. Priced by the rule, which constrains the
+		HEAVIER technique: every striker that hits harder must commit at
+		least 0.1 -- and Chill and Shard commit 0.15 and 0 at 20, so this
+		hits 20 too: the lightest tier, for the slow and not the hit. ]]
 	hoarfrost = {
 		id = "hoarfrost",
 		name = "Hoarfrost",
@@ -573,14 +577,14 @@ Config.Techniques = {
 		madraCost = 20,
 		cooldown = 5.0,
 		windup = 0,
-		damage = 42,
+		damage = 20,
 		buffDuration = 0,
 		damageBuff = 0,
 		mitigation = 0,
 		moveSpeed = 0,
 		regionScaled = false,
 		targeting = "lock",
-		castTime = 0.25,
+		castTime = 0.1,
 		interruptible = true,
 		projectile = "homing",
 		slow = { walkSpeed = 6, duration = 2.0 },
