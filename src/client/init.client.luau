@@ -1660,19 +1660,26 @@ local function buildPicker()
 		return
 	end
 
-	local rows = #slotNames
-	local height = PICKER.padding * 2
-		+ PICKER.headerHeight
-		+ rows * PICKER.rowHeight
-		+ (rows - 1) * PICKER.rowGap
-		+ px(16)
+	--[[ Laid out by the engine rather than by arithmetic.
 
+		The first version sized chips as `available / count`, which is correct
+		for three options per kind and wrong for eight: the roster pass takes
+		the pool from fifteen to thirty, and a chip a third its width is not a
+		chip. Rather than patch the division, the layout is handed to a grid
+		that wraps and a list that stacks -- so the number of options per kind
+		is something the panel discovers rather than something this code has to
+		be told. There is no width formula left to be wrong.
+
+		The body scrolls once it would exceed a fraction of the viewport, so a
+		pool of any size stays inside the screen and never over the bar it
+		edits. ]]
 	local frame = Instance.new("Frame")
 	frame.Name = "LoadoutPicker"
 	frame.AnchorPoint = Vector2.new(0.5, 1)
 	-- Above the bottom cluster, so the panel never covers the bar it edits.
 	frame.Position = UDim2.new(0.5, 0, 1, -(px(SLOT.bottomMargin) + clusterHeight + px(30)))
-	frame.Size = UDim2.fromOffset(px(PICKER.width), px(height))
+	frame.Size = UDim2.fromOffset(px(PICKER.width), 0)
+	frame.AutomaticSize = Enum.AutomaticSize.Y
 	frame.BackgroundColor3 = PANEL
 	frame.BackgroundTransparency = 0.06
 	frame.BorderSizePixel = 0
@@ -1682,55 +1689,106 @@ local function buildPicker()
 	outline(frame, EDGE, 1).Transparency = 0.3
 	pickerFrame = frame
 
-	local title = caption(frame, text(PICKER.titleTextSize), CEILING, true)
-	title.Size = UDim2.new(1, -px(PICKER.padding) * 2, 0, px(PICKER.headerHeight))
-	title.Position = UDim2.fromOffset(px(PICKER.padding), px(PICKER.padding))
+	local framePadding = Instance.new("UIPadding")
+	framePadding.PaddingTop = UDim.new(0, px(PICKER.padding))
+	framePadding.PaddingBottom = UDim.new(0, px(PICKER.padding))
+	framePadding.PaddingLeft = UDim.new(0, px(PICKER.padding))
+	framePadding.PaddingRight = UDim.new(0, px(PICKER.padding))
+	framePadding.Parent = frame
+
+	local stack = Instance.new("UIListLayout")
+	stack.FillDirection = Enum.FillDirection.Vertical
+	stack.SortOrder = Enum.SortOrder.LayoutOrder
+	stack.Padding = UDim.new(0, px(PICKER.blockGap))
+	stack.Parent = frame
+
+	local header = Instance.new("Frame")
+	header.Size = UDim2.new(1, 0, 0, px(PICKER.headerHeight))
+	header.BackgroundTransparency = 1
+	header.LayoutOrder = 0
+	header.Parent = frame
+
+	local title = caption(header, text(PICKER.titleTextSize), CEILING, true)
+	title.Size = UDim2.fromScale(1, 1)
 	title.Text = "LOADOUT"
 
-	local hint = caption(frame, text(PICKER.footTextSize), TEXT_FAINT, false)
-	hint.Size = UDim2.new(1, -px(PICKER.padding) * 2, 0, px(PICKER.headerHeight))
-	hint.Position = UDim2.fromOffset(px(PICKER.padding), px(PICKER.padding))
+	local hint = caption(header, text(PICKER.footTextSize), TEXT_FAINT, false)
+	hint.Size = UDim2.fromScale(1, 1)
 	hint.TextXAlignment = Enum.TextXAlignment.Right
 	hint.Text = "[L] close    ·    one per kind"
 
-	for rowIndex, slot in slotNames do
-		local top = px(PICKER.padding)
-			+ px(PICKER.headerHeight)
-			+ (rowIndex - 1) * (px(PICKER.rowHeight) + px(PICKER.rowGap))
+	--[[ The scrolling body. Its height is whatever its contents need, capped at
+		a fraction of the viewport; past the cap it scrolls. ]]
+	local body = Instance.new("ScrollingFrame")
+	body.Size = UDim2.fromScale(1, 0)
+	body.AutomaticSize = Enum.AutomaticSize.Y
+	body.AutomaticCanvasSize = Enum.AutomaticSize.Y
+	body.CanvasSize = UDim2.new()
+	body.BackgroundTransparency = 1
+	body.BorderSizePixel = 0
+	body.ScrollBarThickness = px(4)
+	body.ScrollBarImageColor3 = EDGE
+	body.ScrollingDirection = Enum.ScrollingDirection.Y
+	body.LayoutOrder = 1
+	body.Parent = frame
 
-		local kindLabel = caption(frame, text(PICKER.kindTextSize), TEXT_DIM, true)
-		kindLabel.Size = UDim2.fromOffset(px(PICKER.kindLabelWidth), px(PICKER.rowHeight))
-		kindLabel.Position = UDim2.fromOffset(px(PICKER.padding), top)
+	local bodyCap = Instance.new("UISizeConstraint")
+	bodyCap.MaxSize = Vector2.new(math.huge, math.floor(viewport * PICKER.maxHeightFraction))
+	bodyCap.Parent = body
+
+	local blocks = Instance.new("UIListLayout")
+	blocks.FillDirection = Enum.FillDirection.Vertical
+	blocks.SortOrder = Enum.SortOrder.LayoutOrder
+	blocks.Padding = UDim.new(0, px(PICKER.blockGap))
+	blocks.Parent = body
+
+	for rowIndex, slot in slotNames do
+		--[[ One block per kind: a label on the left, and a grid of chips that
+			wraps to as many rows as the options need. ]]
+		local block = Instance.new("Frame")
+		block.Size = UDim2.fromScale(1, 0)
+		block.AutomaticSize = Enum.AutomaticSize.Y
+		block.BackgroundTransparency = 1
+		block.LayoutOrder = rowIndex
+		block.Parent = body
+
+		local kindLabel = caption(block, text(PICKER.kindTextSize), TEXT_DIM, true)
+		kindLabel.Size = UDim2.fromOffset(px(PICKER.kindLabelWidth), px(PICKER.chipHeight))
 		kindLabel.Text = string.upper(slot)
 		kindLabel.TextColor3 = color(InterfaceSpec.kindColor(slot))
 
-		local options: { string } = optionsBySlot[slot] or {}
-		local available = px(PICKER.width) - px(PICKER.padding) * 2 - px(PICKER.kindLabelWidth)
-		local count = math.max(#options, 1)
-		local chipWidth = math.floor((available - (count - 1) * px(PICKER.chipGap)) / count)
+		local chips = Instance.new("Frame")
+		chips.Position = UDim2.fromOffset(px(PICKER.kindLabelWidth), 0)
+		chips.Size = UDim2.new(1, -px(PICKER.kindLabelWidth), 0, 0)
+		chips.AutomaticSize = Enum.AutomaticSize.Y
+		chips.BackgroundTransparency = 1
+		chips.Parent = block
 
+		local grid = Instance.new("UIGridLayout")
+		grid.CellSize = UDim2.fromOffset(px(PICKER.chipWidth), px(PICKER.chipHeight))
+		grid.CellPadding = UDim2.fromOffset(px(PICKER.chipGap), px(PICKER.chipGap))
+		grid.FillDirection = Enum.FillDirection.Horizontal
+		grid.SortOrder = Enum.SortOrder.LayoutOrder
+		grid.Parent = chips
+
+		local options: { string } = optionsBySlot[slot] or {}
 		for chipIndex, techId in options do
 			local tech = Config.Techniques[techId]
 			local button = Instance.new("TextButton")
-			button.Size = UDim2.fromOffset(chipWidth, px(PICKER.chipHeight))
-			button.Position = UDim2.fromOffset(
-				px(PICKER.padding)
-					+ px(PICKER.kindLabelWidth)
-					+ (chipIndex - 1) * (chipWidth + px(PICKER.chipGap)),
-				top + math.floor((px(PICKER.rowHeight) - px(PICKER.chipHeight)) / 2)
-			)
 			button.BackgroundColor3 = TROUGH
 			button.BackgroundTransparency = 0.15
 			button.BorderSizePixel = 0
 			button.AutoButtonColor = false
 			button.Text = ""
-			button.Parent = frame
+			button.LayoutOrder = chipIndex
+			button.Parent = chips
 			corner(button, 3)
 			local stroke = outline(button, EDGE, 1)
 
 			local label = caption(button, text(PICKER.chipTextSize), TEXT, true)
 			label.Size = UDim2.fromScale(1, 1)
 			label.TextXAlignment = Enum.TextXAlignment.Center
+			label.TextTruncate = Enum.TextTruncate.AtEnd
 			label.Text = if tech then `{tech.name}  {tech.madraCost}` else techId
 
 			button.Activated:Connect(function()

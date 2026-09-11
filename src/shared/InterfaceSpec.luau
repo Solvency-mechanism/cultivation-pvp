@@ -516,13 +516,23 @@ InterfaceSpec.Sense = {
 	rather than explaining it. ]]
 InterfaceSpec.Picker = {
 	width = 470,
-	rowHeight = 34,
-	rowGap = 6,
 	padding = 12,
 	headerHeight = 22,
 	kindLabelWidth = 74,
-	chipGap = 5,
+	-- Space between one kind's block and the next.
+	blockGap = 8,
+	--[[ Chips are a fixed size and WRAP, rather than being sized to fit the
+		row. The roster pass takes the pool from fifteen techniques to thirty --
+		six to eight per kind -- and a chip sized as `available / count` would be
+		a third its current width by then. Fixed cells hand the wrapping to the
+		engine, so the option count is something the panel discovers rather than
+		something this file has to be told. ]]
+	chipWidth = 116,
 	chipHeight = 26,
+	chipGap = 5,
+	-- The body scrolls past this fraction of the viewport, so a pool of any
+	-- size stays on screen and never over the bar it edits.
+	maxHeightFraction = 0.5,
 	titleTextSize = 13,
 	kindTextSize = 11,
 	chipTextSize = 11,
