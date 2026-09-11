@@ -5,6 +5,78 @@ All names in this project are placeholders, including the title.
 Versions are dated and describe what was **observed working**, not what was
 written. Anything unverified is listed as unverified.
 
+## frostbolt build — 2026-09-11, night (commit `e96bfa3`)
+
+The first channelled, lock-and-cast technique, built as the generic skeleton
+every later charged, channelled or homing ability reuses: a technique
+declares `targeting = "aim" | "lock"`, `castTime`, `interruptible`, and
+optionally `projectile` and `slow`, all as data in `Config.Techniques`; the
+server dispatches on those fields the way it already dispatched on `kind`.
+Still `Config.Profile = "development"` — tuning is deliberately wrong for
+balance. **Not for players.**
+
+### Observed on a gated build of this exact commit
+
+Every commit on the way here was built by rojo from a proven-clean tree and
+gated on a byte-identical copy Studio never saved over: boot fingerprint in
+the server log, HUD on the first frame, no errors from our scripts.
+
+- **`/dummy` works in the test loop for the first time.** Every local session
+  before tonight ran `LegacyChatService` because the project never declared a
+  chat service, while the published place runs `TextChatService`, under which
+  alone a `TextChatCommand` fires. Declared in the project; a local build
+  produced a Dummies folder for the first time. The dummy stands at (-20, 3, -60),
+  in view walking down the ramp.
+- **The lock.** T with the reticle on a dummy: target frame with a warm border,
+  amber **LOCKED**, name, stage, health, and the bracket-refusal line. The
+  refusal caption was found clipped by 3px on this first live sighting — the
+  frame had never held a real target before — and the frame height is now
+  summed from its rows and asserted in a test.
+- **`/dummy … ahead` and the post.** A dummy placed on the caller's own line
+  five studs out, as a ground-anchored ten-stud post, so a fresh spawn has it
+  under the reticle with no camera input.
+- **The HUD came back.** See "found and fixed" below.
+
+### Verified by reading, not yet by a screen
+
+The whole Frostbolt cast — 3-second bar, no refusal, trailed bolt curving to a
+moving target, **SLOWED ×0.5** on its plate with the patrol visibly dragging,
+the chip beside the caster's vitals, and a mid-channel hit snapping the bar
+red — is **unverified on screen**. Not for want of trying: the test loop's
+synthetic input reaches the keyboard and chat but never the mouse, and a
+lock needs the camera pointed by a hand. The code path was read end to end by
+three people and the tests; the one real bug in it was found that way (below).
+A human at a real client runs it in three chat lines.
+
+### Found and fixed on the way
+
+- **The client stopped compiling at `74f3c2b` and nothing noticed.** Luau caps a
+  function at 200 locals; the client's top-level chunk crossed it (188 → 203)
+  and the whole script never became a function — no HUD at all, while
+  four suites and three linters stayed green, because none of them compiles a
+  Roblox script. Fixed by scoping each UI section (`eabdc6c`, 155 locals, soft
+  ceiling 175 asserted). **`tests/compile.test` now compiles every file under
+  `src/` with Lune's own compiler and runs first in the gate.**
+- **The lock was never sent.** The client held the locked target and cast
+  with two arguments; the server read a third and refused `no_target` before
+  the channel started. Every Frostbolt press would have been refused with the
+  LOCKED frame showing. Found by reading both files (`c3ead69`). The contract
+  file had specified every server→client event and no client→server one; it
+  now carries both directions and says so.
+- **The moving dummy could not show a slow** — it patrols by CFrame lerp with
+  no Humanoid. It now scales its step by the slow, and `SlowMultiplier` is
+  published beside Health so a dummy's slow is as visible as a player's.
+- **Lighting migrated on every open.** `Lighting` was declared with no
+  properties; Studio rewrote the document to Voxel each time and the modal
+  blocked input. `Technology = Voxel` is now declared — what production
+  already ran.
+
+### Unchanged from the playtest build
+
+Persistence, breakthrough, the picker on L, the five-slot bar with Shift+slot
+cycling, dummies at the row. Reticle–hitmarker concentricity and the lunge
+burst at real latency still await a human hand, as before.
+
 ## playtest build — 2026-09-10, afternoon
 
 Built for the first external session: four players who are not us. Carries a
