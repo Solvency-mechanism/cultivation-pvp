@@ -491,6 +491,29 @@ Config.DefaultLoadout =
 
 	`development` exists to make TESTING fast, not to be balanced. It is not a
 	balance ruling and no number in it should be read as one.
+
+	THE TWO PROFILES ARE FOR DIFFERENT JOBS AND YOU MUST NOT MIX THEM UP:
+
+	  development -- THROUGHPUT. Exercise every technique, reach a catalyst,
+	                 reach a breakthrough, watch a cast bar, without waiting on
+	                 a bar to refill. Use it to find out WHETHER SOMETHING WORKS.
+
+	  release     -- MEASUREMENT. Use it for any number you intend to act on.
+
+	The trap, stated plainly because it is easy to walk into and expensive:
+	`madraRegenFraction = 0.60` refills a Lowgold pool in 1.7 seconds, so under
+	`development` MADRA STOPS BEING A CONSTRAINT AT ALL and a fighter is limited
+	only by cooldowns. A time-to-kill measured there is the cooldown-limited
+	FLOOR, not the real fight. Under `release` the pool regenerates 12 madra per
+	second, and the gap between that and what a loadout spends is precisely what
+	makes an expensive loadout play differently from a cheap one -- Lance at 18
+	on a 1.2s cooldown is roughly break-even, Volley at 30 and Pierce are not.
+	Under `development` that whole distinction vanishes, and with it the reason
+	different loadouts have different time-to-kill.
+
+	So: flip to `release` for the measurement run, take the numbers, flip back.
+	And record which profile any number was taken under -- a figure with no
+	profile attached is worse than no figure, because somebody will act on it.
 ]]
 Config.Profile = "development" :: "development" | "release"
 
