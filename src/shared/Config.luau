@@ -270,9 +270,12 @@ Config.Combat = {
 	respawnSeconds = 5,
 	-- Forger constructs damage on an interval rather than continuously, so a
 	-- technique's `damage` reads as damage *per tick*. At 2s, caltrops over its
-	-- full 10s window is 5 ticks (150) and sentry over 12s is 6 (144) -- around
-	-- a third of a Lowgold pool for standing still in a hazard you can walk out
-	-- of. Zoning pressure, not a kill button.
+	-- 10s window lands 4 ticks (120) and sentry over 12s lands 5 (120), not
+	-- the 5 and 6 a division suggests: `stepConstructs` expires a construct
+	-- before checking whether it is due to tick, so the tick that would fall
+	-- exactly on expiry never fires. Either way it is around a third of a
+	-- Lowgold pool for standing still in a hazard you can walk out of. Zoning
+	-- pressure, not a kill button.
 	constructTickSeconds = 2.0,
 }
 
@@ -281,8 +284,14 @@ Config.Combat = {
 	from this same pool -- which is exactly the point: it isolates whether the
 	combat feels good before build diversity can paper over it.
 
-	Five technique types, three options each, one slot per type. That is 3^5 =
-	243 loadouts with no themed content at all. When paths arrive they become a
+	Five technique types, one slot per type, and the pool per type is being
+	expanded so that build diversity becomes testable. The bar for an entry is
+	not "more damage" or "cheaper" -- it is that a player who takes it does
+	something DIFFERENT from a player who takes the alternative in that slot:
+	stands somewhere else, fires at a different moment, gives something up.
+	Balance is explicitly not a design input at this stage; strong options are
+	a gating problem for the earned-level and affinity systems that come later,
+	not a reason to flatten them now. When paths arrive they become a
 	restricted, empowered subset of this pool rather than a rewrite.
 
 	kind:
@@ -291,6 +300,25 @@ Config.Combat = {
 		forger   -- persistent construct, zoning
 		ruler    -- ambient aura command; scales with terrain richness
 		strider  -- self-only WalkSpeed override, spans burst/mid/sustain travel
+
+	How the fields are actually consumed, from the resolvers rather than from
+	their names -- because several designs below lean on it:
+
+	- The self-buff block in Combat.use fires for ANY kind when buffDuration >
+	  0 and at least one of damageBuff / mitigation / moveSpeed is positive.
+	  It fires at press, before the windup, so a striker's own bolt benefits
+	  from its own damageBuff. Negative mitigation or damageBuff are honoured
+	  as self-costs, provided one of the three is positive so the block fires.
+	- regionScaled multiplies outgoing damage for any kind, not only ruler.
+	- A forger not listed in CombatService's SELF_BUFF_FORGERS spawns a
+	  construct; if it also carries positive mitigation it self-buffs too.
+	  buffDuration is then read twice: the construct's lifetime and the buff's.
+	- Constructs tick every constructTickSeconds and are expired BEFORE the
+	  tick check on the step they lapse, so a duration that is an exact
+	  multiple of the tick loses its last tick. Durations below sit a half
+	  second past a multiple on purpose.
+	- Windup on an enforcer only delays the presentation; the buff is live at
+	  press. moveSpeed is mirrored to the Humanoid only for strider today.
 
 	moveSpeed is the absolute Humanoid.WalkSpeed to hold for buffDuration
 	seconds, 0 meaning "not applicable" -- every non-strider technique carries
@@ -356,6 +384,29 @@ Config.Techniques = {
 		moveSpeed = 0,
 		regionScaled = false,
 	},
+	--[[ WHERE you fire from. A bolt drawn from the ground under the caster:
+		barren 25, open 50, rich 90, wellspring 130. A wellspring Draught
+		out-hits Pierce on a 2.0s cooldown; a barren one is worse than Lance.
+		The only striker that defends a node from OUTSIDE it -- a ruler waits
+		until the intruder is inside 42 studs, this reaches them at 140 while
+		they are still crossing open ground. A Draught player fights from
+		rich ground and shoots outward; a Lance player does not care where
+		they stand. The windup sits between Lance and Volley in BOTH tuning
+		profiles, which the windup-by-damage assertion requires. ]]
+	draught = {
+		id = "draught",
+		name = "Draught",
+		kind = "striker",
+		madraCost = 28,
+		cooldown = 2.0,
+		windup = 0.32,
+		damage = 50,
+		buffDuration = 0,
+		damageBuff = 0,
+		mitigation = 0,
+		moveSpeed = 0,
+		regionScaled = true,
+	},
 
 	-- Enforcer
 	surge = {
@@ -383,6 +434,28 @@ Config.Techniques = {
 		buffDuration = 6.0,
 		damageBuff = 0,
 		mitigation = 0.40,
+		moveSpeed = 0,
+		regionScaled = false,
+	},
+	--[[ WHO is the aggressor. For six seconds you deal +50% and TAKE +35%.
+		Negative mitigation is honoured by Combat.mitigationOf (a -0.35 target
+		takes 135 from 100 raw) and stacks multiplicatively with everything
+		else, so Abandon under a Barrier nets 1 - (1.35 * 0.45) = 39% -- the
+		two fight each other honestly. An Abandon player presses it when THEY
+		are initiating and the opponent has just spent their burst; a Bulwark
+		player presses it when they are being initiated on. The first enforcer
+		that is a liability if you misjudge the moment. ]]
+	abandon = {
+		id = "abandon",
+		name = "Abandon",
+		kind = "enforcer",
+		madraCost = 30,
+		cooldown = 12.0,
+		windup = 0.1,
+		damage = 0,
+		buffDuration = 6.0,
+		damageBuff = 0.50,
+		mitigation = -0.35,
 		moveSpeed = 0,
 		regionScaled = false,
 	},
@@ -427,6 +500,31 @@ Config.Techniques = {
 		buffDuration = 12.0,
 		damageBuff = 0,
 		mitigation = 0,
+		moveSpeed = 0,
+		regionScaled = false,
+	},
+	--[[ Stand IN it or leave it. Both forger branches at once: not listed in
+		SELF_BUFF_FORGERS, so it spawns a construct, and it carries positive
+		mitigation, so Combat.use self-buffs at press. buffDuration is read
+		twice -- the ring's lifetime and the buff's -- which reads as "while
+		the ring stands, you are hardened". 18 x 4 ticks = 72 to anyone
+		standing in it; 35% mitigation on you for the same window. A Bastion
+		player drops the ring and steps INTO it to fight hardened at melee
+		range; a Sentry player drops the ring and backs away from it. The
+		mitigation is live 0.5s before the ring appears (press vs windup) --
+		that is the resolver's shape, not a bug. 8.5 rather than 8.0 so the
+		fourth tick actually lands; see constructTickSeconds. ]]
+	bastion = {
+		id = "bastion",
+		name = "Bastion",
+		kind = "forger",
+		madraCost = 50,
+		cooldown = 14.0,
+		windup = 0.5,
+		damage = 18,
+		buffDuration = 8.5,
+		damageBuff = 0,
+		mitigation = 0.35,
 		moveSpeed = 0,
 		regionScaled = false,
 	},
