@@ -923,13 +923,17 @@ local function onUseTechnique(player: Player, slot: unknown, suppliedAim: unknow
 				end
 			end
 		end
-		if tech.kind == "strider" then
-			-- Corrects an over-eager client prediction: the seam agreed with
-			-- interface has the client lease itself a speed pulse on
-			-- keypress and stop writing on refusal, but a slow or dropped
-			-- refusal notice must not leave a fast client stuck at the wrong
-			-- speed. `actor.buffs` was untouched by the failed `Combat.use`,
-			-- so this just reasserts whatever is already true.
+		if tech.moveSpeed > 0 then
+			-- Kind-agnostic: not just strider. A rooted enforcer, a kiting
+			-- striker, a heavy ruler that slows its own caster all carry
+			-- moveSpeed too, and every one of them needs the same
+			-- correction. Corrects an over-eager client prediction: the
+			-- seam agreed with interface has the client lease itself a
+			-- speed pulse on keypress and stop writing on refusal, but a
+			-- slow or dropped refusal notice must not leave a fast client
+			-- stuck at the wrong speed. `actor.buffs` was untouched by the
+			-- failed `Combat.use`, so this just reasserts whatever is
+			-- already true.
 			mirrorMoveSpeed(humanoidOf(player), actor, now)
 		end
 		return
@@ -938,16 +942,19 @@ local function onUseTechnique(player: Player, slot: unknown, suppliedAim: unknow
 
 	publish(player)
 
-	if tech.kind == "strider" and tech.moveSpeed > 0 then
-		-- Applied immediately rather than after the windup, unlike every
-		-- other kind: a movement effect that waited for a windup wouldn't be
-		-- a burst, and the enforcer buffs beside it already take hold at
-		-- press time too -- only their VFX broadcast waits for resolveEffect.
-		-- This write is also the server half of the latency seam agreed with
-		-- interface: the client already predicted this the instant the key
-		-- was pressed, and this is what actually reaches every other
-		-- client's view of this player, and what corrects the caster's own
-		-- client the moment it replicates down.
+	if tech.moveSpeed > 0 then
+		-- Kind-agnostic, the same as the refusal branch above: any
+		-- technique that carries moveSpeed gets it mirrored onto the
+		-- Humanoid, not only strider. Applied immediately rather than
+		-- after the windup, unlike every other effect a technique can
+		-- carry: a movement effect that waited for a windup wouldn't be a
+		-- burst, and the enforcer damage/mitigation buffs beside it already
+		-- take hold at press time too -- only their VFX broadcast waits for
+		-- resolveEffect. This write is also the server half of the latency
+		-- seam agreed with interface: the client already predicted this the
+		-- instant the key was pressed, and this is what actually reaches
+		-- every other client's view of this player, and what corrects the
+		-- caster's own client the moment it replicates down.
 		mirrorMoveSpeed(humanoidOf(player), actor, now)
 		task.delay(tech.buffDuration, function()
 			if actors[player.UserId] == actor then
