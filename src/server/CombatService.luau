@@ -86,8 +86,24 @@ local lastCastRefusalNotice: { [number]: string } = {}
 local dummies: { [Model]: Combatant } = {}
 local dummyCounter = 0
 
+--[[ One channel in flight per player, keyed by UserId -- only a player ever
+	channels a technique today, the same reason `loadouts`/`dying` are
+	UserId-keyed rather than combatantId-keyed. `startedAt` is not read for
+	timing (the `task.delay` scheduled alongside an entry owns that); it
+	exists so a stray reference to a superseded or interrupted cast is
+	obviously stale rather than silently plausible. ]]
+type ActiveCast = {
+	player: Player,
+	techId: string,
+	targetCombatantId: number?,
+	startedAt: number,
+}
+local activeCasts: { [number]: ActiveCast } = {}
+
 local techniqueFiredRemote: RemoteEvent? = nil
 local castStartedRemote: RemoteEvent? = nil
+local castInterruptedRemote: RemoteEvent? = nil
+local castCompletedRemote: RemoteEvent? = nil
 local impactRemote: RemoteEvent? = nil
 local constructCounter = 0
 local constructFolder: Folder? = nil
@@ -194,6 +210,34 @@ local function regionOf(player: Player): string
 	return regionAtPosition(root.Position)
 end
 
+-- Combat.Vec3 is a plain {x,y,z} table, not Roblox's Vector3 -- the two are
+-- not interchangeable, so every pure-module boundary crossing here builds
+-- one explicitly, the same as NodeService.placer's own callers already do.
+local function toVec3(position: Vector3): Combat.Vec3
+	return { x = position.X, y = position.Y, z = position.Z }
+end
+
+--[[ The injected half of Combat.canUseOnTarget's line-of-sight check.
+	Excludes both models rather than just their root parts, so the caster's
+	own limbs cannot self-block the ray at the origin and the target's own
+	body does not count as an obstruction at the destination -- hitting the
+	target IS the clear-sight case, not the blocked one. Built fresh per
+	validation call: a RaycastParams is cheap, and there is no state worth
+	caching across casts. ]]
+local function hasLineOfSight(
+	casterModel: Model,
+	targetModel: Model
+): (Combat.Vec3, Combat.Vec3) -> boolean
+	return function(from: Combat.Vec3, to: Combat.Vec3): boolean
+		local origin = Vector3.new(from.x, from.y, from.z)
+		local destination = Vector3.new(to.x, to.y, to.z)
+		local params = RaycastParams.new()
+		params.FilterType = Enum.RaycastFilterType.Exclude
+		params.FilterDescendantsInstances = { casterModel, targetModel }
+		return Workspace:Raycast(origin, destination - origin, params) == nil
+	end
+end
+
 --[[ Tell every client that a technique resolved, so they can draw it.
 
 	Presentation only. Nothing here decides an outcome -- the damage is already
@@ -240,7 +284,26 @@ end
 	meaningless on arrival. Each client starts its own bar on receipt and eats
 	the one-way latency as a small head start for the defender, which is the
 	right direction to be wrong in. ]]
-local function broadcastCastStart(casterId: number, techId: string)
+--[[ A technique's one commit duration: castTime for a channel, windup for
+	everything else, per the frostbolt ruling's addendum. A technique never
+	carries both -- roster's own invariant test in tests/combat.test.luau
+	refuses one that does -- so this has no ambiguous case to resolve. ]]
+local function commitOf(tech): number
+	if tech.castTime > 0 then
+		return tech.castTime
+	end
+	return tech.windup
+end
+
+--[[ `duration` and `targetId` are additive, per the shapes fixed in
+	frostbolt-ruling.md's REMOTES section -- that file is authoritative over
+	this comment, not the other way around. `duration` is commitOf(tech),
+	ALWAYS present, because the client reads it for every bar regardless of
+	kind. `windup` is untouched: still tech.windup, still sent, since
+	interface's sub-0.15s flash rule and the striker telegraph floor key off
+	commitOf separately, not off this field. `targetId` is the locked
+	combatant id for a lock technique, nil for aim. ]]
+local function broadcastCastStart(casterId: number, techId: string, targetId: number?)
 	if not castStartedRemote then
 		return
 	end
@@ -253,7 +316,31 @@ local function broadcastCastStart(casterId: number, techId: string)
 		techId = techId,
 		kind = tech.kind,
 		windup = tech.windup,
+		duration = commitOf(tech),
+		targetId = targetId,
 	})
+end
+
+--[[ Fired from the interrupt check in damageCombatant and nowhere else, per
+	the ruling. ]]
+local function broadcastCastInterrupted(casterId: number, techId: string)
+	if not castInterruptedRemote then
+		return
+	end
+	castInterruptedRemote:FireAllClients({ casterId = casterId, techId = techId })
+end
+
+--[[ Channels only -- never fired for an ordinary windup technique, which
+	still clears its own bar on the client's timer exactly as it does today.
+	`fizzled` distinguishes "the effect fired" from "completion re-validation
+	failed and nothing happened," so the client can draw the same broken-bar
+	snap it draws for an interrupt rather than a clean finish that would be a
+	lie. ]]
+local function broadcastCastCompleted(casterId: number, techId: string, fizzled: boolean)
+	if not castCompletedRemote then
+		return
+	end
+	castCompletedRemote:FireAllClients({ casterId = casterId, techId = techId, fizzled = fizzled })
 end
 
 --[[ Health/MaxHealth, published under the same attribute names for a player
@@ -378,6 +465,80 @@ local function combatantFromInstance(instance: Instance): Combatant?
 	return nil
 end
 
+--[[ The reverse of `combatantFromInstance`: given a combatantId rather than
+	a world Instance, for a lock technique whose target is chosen by id, not
+	by ray. Positive ids resolve the same way the player branch above does;
+	negative ids linear-scan `dummies` -- a handful of entries at once in
+	practice, and cheaper than keeping a second table in sync with `dummies`
+	purely for this lookup. ]]
+local function combatantById(combatantId: number): Combatant?
+	if combatantId > 0 then
+		local player = Players:GetPlayerByUserId(combatantId)
+		if not player then
+			return nil
+		end
+		local character = player.Character
+		local actor = ensureActor(player)
+		local root = rootOf(player)
+		if not character or not actor or not root then
+			return nil
+		end
+		return {
+			kind = "player",
+			combatantId = combatantId,
+			actor = actor,
+			model = character,
+			root = root,
+			humanoid = humanoidOf(player),
+			player = player,
+		}
+	end
+	for _, dummy in dummies do
+		if dummy.combatantId == combatantId then
+			return dummy
+		end
+	end
+	return nil
+end
+
+--[[ Resolve and validate a lock technique's target in one place, used both
+	when a cast starts and again when a channel completes -- the same check
+	both times, so "still valid" means the same thing at both ends rather
+	than two hand-written copies drifting. `targetCombatantId` is already a
+	number by the time this is called; the `unknown` from the remote is
+	narrowed by the caller. Returns the reason Combat.canUseOnTarget gives,
+	or "no_target" for the cases before that -- an unresolvable id or a
+	caster with no root to measure from. ]]
+local function validateLockTarget(
+	tech,
+	player: Player,
+	actor: Combat.Actor,
+	targetCombatantId: number
+): (Combatant?, string?)
+	local target = combatantById(targetCombatantId)
+	if not target then
+		return nil, "no_target"
+	end
+	local character = player.Character
+	local casterRoot = rootOf(player)
+	if not character or not casterRoot then
+		return nil, "no_target"
+	end
+	local range = Config.Combat.ranges[tech.kind] or 0
+	local ok, reason = Combat.canUseOnTarget(
+		actor,
+		toVec3(casterRoot.Position),
+		target.actor,
+		toVec3(target.root.Position),
+		range,
+		hasLineOfSight(character, target.model)
+	)
+	if not ok then
+		return nil, reason
+	end
+	return target, nil
+end
+
 --[[ `attackerActor` is optional and only ever supplied by `damageCombatant`,
 	and only when the target killed was a player -- the raw `Humanoid.Died`
 	path below has no attacker to give, because a fall has no killer.
@@ -494,6 +655,24 @@ local function damageCombatant(source: Combat.Actor, target: Combatant, raw: num
 		return
 	end
 
+	--[[ THE interrupt check, and the only one -- per the frostbolt ruling,
+		this is the one chokepoint every hit against a player already passes
+		through regardless of source (a striker bolt, a ruler sweep, a
+		construct tick, another dummy's cast), so it is also the one place a
+		channel needs to be broken from. Gated on the technique's own
+		`interruptible`, so a future uninterruptible channel is a Config
+		value, not a second code path. ]]
+	if target.kind == "player" and target.player then
+		local cast = activeCasts[target.player.UserId]
+		if cast then
+			local castTech = Config.Techniques[cast.techId]
+			if castTech and castTech.interruptible then
+				activeCasts[target.player.UserId] = nil
+				broadcastCastInterrupted(target.player.UserId, cast.techId)
+			end
+		end
+	end
+
 	mirrorHumanoid(target.humanoid, target.actor)
 	publishHealth((target.player :: Instance?) or target.model, target.actor)
 	if target.kind == "player" and target.player then
@@ -526,6 +705,78 @@ local function damageCombatant(source: Combat.Actor, target: Combatant, raw: num
 		-- its own tick to schedule the reset, rather than CombatService
 		-- needing to know DummyService exists to tell it.
 	end
+end
+
+--[[ A channel's payoff, run once at completion against a target already
+	re-validated by `validateLockTarget`. Resolves through the same
+	`Combat.outgoingDamage`/`damageCombatant` path every other technique
+	uses -- no parallel damage math for a channel. Instant rather than a
+	traveling projectile: `projectile` on the technique is Layer 5's field,
+	and the actual homing travel is the next increment on top of this one,
+	not part of the channel system itself.
+
+	The slow is authored on the technique as an absolute WalkSpeed
+	(`tech.slow.walkSpeed`, the same way strider techniques author moveSpeed)
+	but applied as a multiplier via `Combat.applySlow` -- the frostbolt-
+	ruling seam decided in Combat.luau. Converting here, at the one call
+	site, keeps the authoring convenience without teaching the pure module
+	two representations. ]]
+local function resolveChannelEffect(
+	player: Player,
+	actor: Combat.Actor,
+	techId: string,
+	tech,
+	target: Combatant,
+	now: number
+)
+	local root = rootOf(player)
+	if root then
+		broadcastVfx(player.UserId, techId, root.Position, target.root.Position, true)
+	end
+
+	local raw = Combat.outgoingDamage(Config, actor, techId, powerOf(player), regionOf(player), now)
+	damageCombatant(actor, target, raw, now)
+
+	if tech.slow and target.actor.health > 0 then
+		local multiplier = tech.slow.walkSpeed / Config.Combat.baseWalkSpeed
+		Combat.applySlow(target.actor, techId, multiplier, tech.slow.duration, now)
+		mirrorMoveSpeed(target.humanoid, target.actor, now)
+		if target.kind == "player" and target.player then
+			publish(target.player)
+		end
+	end
+end
+
+--[[ Completion, always exactly `tech.castTime` after the cast started via
+	the `task.delay` scheduled in `onUseTechnique`. Staleness-guarded the
+	same way a dummy's own delayed reset is: if this exact cast is no longer
+	the player's current `activeCasts` entry -- interrupted, or superseded by
+	a new one -- it was already handled and this is a no-op rather than a
+	second resolution. Re-validates against the target at completion time,
+	not cast time, since the whole point of a channel is that the world can
+	change out from under it: the target may have died, left range, or broken
+	line of sight during the wait. ]]
+local function completeChannel(cast: ActiveCast)
+	if activeCasts[cast.player.UserId] ~= cast then
+		return
+	end
+	activeCasts[cast.player.UserId] = nil
+
+	local player = cast.player
+	local actor = actors[player.UserId]
+	local tech = Config.Techniques[cast.techId]
+	local now = os.clock()
+
+	local fizzled = true
+	if actor and actor.health > 0 and tech and cast.targetCombatantId then
+		local target = validateLockTarget(tech, player, actor, cast.targetCombatantId)
+		if target then
+			fizzled = false
+			resolveChannelEffect(player, actor, cast.techId, tech, target, now)
+		end
+	end
+
+	broadcastCastCompleted(player.UserId, cast.techId, fizzled)
 end
 
 --[[ Registers a Model as a full combatant -- same damage-resolution path,
@@ -873,9 +1124,41 @@ end
 local REFUSAL_MESSAGES: { [string]: string } = {
 	insufficient_madra = "Not enough madra.",
 	dead = "You cannot act while dead.",
+	no_target = "You have no target.",
+	out_of_range = "Target is out of range.",
+	out_of_bracket = "Target is out of your bracket.",
+	target_dead = "That target has already fallen.",
+	no_line_of_sight = "You cannot see your target.",
 }
 
-local function onUseTechnique(player: Player, slot: unknown, suppliedAim: unknown)
+-- Debounced by (reason, techId) rather than reason alone: cooling_down is
+-- per-technique, so a different slot also on cooldown is genuinely new
+-- information and still notifies once, while mashing the same blocked slot
+-- notifies only the first time. Shared between Combat.use's own refusal
+-- reasons and a lock technique's target-validation reasons, which reach
+-- this the same way and read the same table.
+local function notifyCastRefusal(player: Player, tech, techId: string, reason: string)
+	if reason == "global_cooldown" then
+		return
+	end
+	local noticeKey = if reason == "cooling_down" then `cooling_down:{techId}` else reason
+	if lastCastRefusalNotice[player.UserId] == noticeKey then
+		return
+	end
+	lastCastRefusalNotice[player.UserId] = noticeKey
+	if reason == "cooling_down" then
+		AwarenessService.notify(player, "refused", `{tech.name} is still cooling.`)
+	else
+		AwarenessService.notify(player, "refused", REFUSAL_MESSAGES[reason] or reason)
+	end
+end
+
+local function onUseTechnique(
+	player: Player,
+	slot: unknown,
+	suppliedAim: unknown,
+	suppliedTargetId: unknown
+)
 	local now = os.clock()
 	local last = lastRequestAt[player.UserId]
 	if last and now - last < MIN_REQUEST_INTERVAL then
@@ -900,29 +1183,28 @@ local function onUseTechnique(player: Player, slot: unknown, suppliedAim: unknow
 
 	local tech = Config.Techniques[techId]
 
+	--[[ A lock technique's target is resolved and validated before anything
+		is spent -- the same ordering principle Combat.use already applies to
+		cost and cooldown, extended to the one more thing a lock technique can
+		be refused over. An aim technique skips this entirely; `target` stays
+		nil and `targetId` on CastStarted stays nil, exactly as it always has. ]]
+	local target: Combatant? = nil
+	if tech.targeting == "lock" then
+		if type(suppliedTargetId) ~= "number" then
+			notifyCastRefusal(player, tech, techId, "no_target")
+			return
+		end
+		local resolvedTarget, reason = validateLockTarget(tech, player, actor, suppliedTargetId)
+		if not resolvedTarget then
+			notifyCastRefusal(player, tech, techId, reason or "no_target")
+			return
+		end
+		target = resolvedTarget
+	end
+
 	local result = Combat.use(Config, actor, techId, now)
 	if not result.ok then
-		-- Debounced by (reason, techId) rather than reason alone: cooling_down
-		-- is per-technique, so a different slot also on cooldown is genuinely
-		-- new information and still notifies once, while mashing the *same*
-		-- blocked slot notifies only the first time.
-		if result.reason ~= "global_cooldown" then
-			local noticeKey = if result.reason == "cooling_down"
-				then `cooling_down:{techId}`
-				else result.reason
-			if lastCastRefusalNotice[player.UserId] ~= noticeKey then
-				lastCastRefusalNotice[player.UserId] = noticeKey
-				if result.reason == "cooling_down" then
-					AwarenessService.notify(player, "refused", `{tech.name} is still cooling.`)
-				else
-					AwarenessService.notify(
-						player,
-						"refused",
-						REFUSAL_MESSAGES[result.reason] or result.reason
-					)
-				end
-			end
-		end
+		notifyCastRefusal(player, tech, techId, result.reason)
 		if tech.moveSpeed > 0 then
 			-- Kind-agnostic: not just strider. A rooted enforcer, a kiting
 			-- striker, a heavy ruler that slows its own caster all carry
@@ -963,9 +1245,34 @@ local function onUseTechnique(player: Player, slot: unknown, suppliedAim: unknow
 		end)
 	end
 
-	-- Announced before the windup rather than after it, which is the whole
-	-- point: the defender's reaction window is the windup.
-	broadcastCastStart(player.UserId, techId)
+	-- Announced before the windup (or the channel) rather than after it,
+	-- which is the whole point: the defender's reaction window is the
+	-- commit.
+	broadcastCastStart(player.UserId, techId, if target then target.combatantId else nil)
+
+	if tech.castTime > 0 then
+		--[[ A channel, dispatched entirely separately from the windup path
+			below: its commit is castTime (windup is 0 on any such technique,
+			roster's own invariant), and its effect fires at completion, not
+			after a task.delay(windup) into resolveEffect. Overwriting a
+			player's own prior activeCasts entry (there should never be one --
+			Combat.use's cooldown already blocks re-casting the same slot
+			mid-channel, and only one channel technique exists today) would
+			leave that earlier cast's own completion callback to find itself
+			stale and no-op via the guard in completeChannel, rather than
+			double-resolve. ]]
+		local cast: ActiveCast = {
+			player = player,
+			techId = techId,
+			targetCombatantId = if target then target.combatantId else nil,
+			startedAt = now,
+		}
+		activeCasts[player.UserId] = cast
+		task.delay(tech.castTime, function()
+			completeChannel(cast)
+		end)
+		return
+	end
 
 	-- Aim is sampled at cast, not at resolution: a long windup is a commitment,
 	-- and letting it track the camera through the telegraph would erase the
@@ -1085,6 +1392,11 @@ function CombatService.onPlayerRemoving(player: Player)
 	dying[player.UserId] = nil
 	lastRequestAt[player.UserId] = nil
 	lastCastRefusalNotice[player.UserId] = nil
+	-- No CastInterrupted for a leaving caster's own in-flight channel: its
+	-- completeChannel is still scheduled and will find this entry gone,
+	-- fizzle silently, and broadcast nothing to clients that no longer have
+	-- a reason to care about a player who already left.
+	activeCasts[player.UserId] = nil
 	for i = #constructs, 1, -1 do
 		if constructs[i].ownerId == player.UserId then
 			constructs[i].part:Destroy()
@@ -1152,6 +1464,14 @@ function CombatService.start()
 	assert(castStarted:IsA("RemoteEvent"), "CastStarted must be a RemoteEvent")
 	castStartedRemote = castStarted
 
+	local castInterrupted = remotes:WaitForChild("CastInterrupted")
+	assert(castInterrupted:IsA("RemoteEvent"), "CastInterrupted must be a RemoteEvent")
+	castInterruptedRemote = castInterrupted
+
+	local castCompleted = remotes:WaitForChild("CastCompleted")
+	assert(castCompleted:IsA("RemoteEvent"), "CastCompleted must be a RemoteEvent")
+	castCompletedRemote = castCompleted
+
 	local impact = remotes:WaitForChild("Impact")
 	assert(impact:IsA("RemoteEvent"), "Impact must be a RemoteEvent")
 	impactRemote = impact
@@ -1159,9 +1479,14 @@ function CombatService.start()
 	local useTechnique = remotes:WaitForChild("UseTechnique")
 	assert(useTechnique:IsA("RemoteEvent"), "UseTechnique must be a RemoteEvent")
 
-	useTechnique.OnServerEvent:Connect(function(player: Player, slot: unknown, aim: unknown)
-		onUseTechnique(player, slot, aim)
-	end)
+	-- targetId is the fourth argument, additive: an aim technique's client
+	-- never sends one, and onUseTechnique already treats a non-number there
+	-- as "no target", which is exactly what a nil argument is.
+	useTechnique.OnServerEvent:Connect(
+		function(player: Player, slot: unknown, aim: unknown, targetId: unknown)
+			onUseTechnique(player, slot, aim, targetId)
+		end
+	)
 
 	local setLoadout = remotes:WaitForChild("SetLoadout")
 	assert(setLoadout:IsA("RemoteEvent"), "SetLoadout must be a RemoteEvent")

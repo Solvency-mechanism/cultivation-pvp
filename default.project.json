@@ -30,6 +30,12 @@
         "CastStarted": {
           "$className": "RemoteEvent"
         },
+        "CastInterrupted": {
+          "$className": "RemoteEvent"
+        },
+        "CastCompleted": {
+          "$className": "RemoteEvent"
+        },
         "Impact": {
           "$className": "RemoteEvent"
         }
