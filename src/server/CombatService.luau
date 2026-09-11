@@ -511,6 +511,58 @@ local function combatantById(combatantId: number): Combatant?
 	return nil
 end
 
+-- The last bracket notice already told to each attacker, keyed by
+-- (relation, targetCombatantId) per bracket-tone.md -- a duel against one
+-- person says it once, and a new target says it again.
+local lastBracketNotice: { [number]: string } = {}
+
+local BRACKET_NOTICE_TEXT: { [string]: string } = {
+	below = "You are punching down. Nothing you win here is worth having. (Placeholder copy.)",
+	above = "You are punching up. They have more health and hit harder — this is not a fair fight. (Placeholder copy.)",
+}
+
+-- Under "refuse" the hit did not land, so interface's punch_up/punch_down
+-- copy would be a lie ("you are punching up" implies it landed) -- this is
+-- the refusal register's own sentence instead, through the "refused" kind
+-- the lock path's own out_of_bracket refusal already uses.
+local BRACKET_REFUSAL_TEXT = "Different bracket — neither of you can hit the other."
+
+--[[ Voices a cross-bracket relation for whichever mode is active, per
+	bracket-tone.md ruling 3: "notice" sends interface's placeholder-marked
+	punch_up/punch_down through the new "bracket" kind (the hit already
+	landed, or the lock is about to be allowed through, by the time this is
+	called); "refuse" sends the refusal register's own sentence through
+	"refused". Silent on "same" -- nothing to say -- and on a source with no
+	resolvable Player (a dummy or NPC attacker), since nobody exempt from
+	the bracket design needs to be told about it either. ]]
+local function notifyBracketRelation(
+	source: Combat.Actor,
+	target: Combatant,
+	relation: "same" | "above" | "below"
+)
+	if relation == "same" then
+		return
+	end
+	local attackerId = tonumber(source.id)
+	if not attackerId or attackerId <= 0 then
+		return
+	end
+	local attacker = Players:GetPlayerByUserId(attackerId)
+	if not attacker then
+		return
+	end
+	local noticeKey = `{relation}:{target.combatantId}`
+	if lastBracketNotice[attacker.UserId] == noticeKey then
+		return
+	end
+	lastBracketNotice[attacker.UserId] = noticeKey
+	if Config.Combat.crossBracket == "notice" then
+		AwarenessService.notify(attacker, "bracket", BRACKET_NOTICE_TEXT[relation] or relation)
+	else
+		AwarenessService.notify(attacker, "refused", BRACKET_REFUSAL_TEXT)
+	end
+end
+
 --[[ Resolve and validate a lock technique's target in one place, used both
 	when a cast starts and again when a channel completes -- the same check
 	both times, so "still valid" means the same thing at both ends rather
@@ -518,7 +570,13 @@ end
 	number by the time this is called; the `unknown` from the remote is
 	narrowed by the caller. Returns the reason Combat.canUseOnTarget gives,
 	or "no_target" for the cases before that -- an unresolvable id or a
-	caster with no root to measure from. ]]
+	caster with no root to measure from.
+
+	`out_of_bracket` gets one more chance under crossBracket == "notice": per
+	bracket-tone.md, the lock path follows the same flag the damage
+	chokepoint does, so a mismatched lock is allowed through (with the same
+	notice fired) instead of refused, rather than "notice" mode only
+	applying to techniques that happen to miss on the first raycast. ]]
 local function validateLockTarget(
 	tech: Config.Technique,
 	player: Player,
@@ -544,6 +602,10 @@ local function validateLockTarget(
 		hasLineOfSight(character, target.model)
 	)
 	if not ok then
+		if reason == "out_of_bracket" and Config.Combat.crossBracket == "notice" then
+			notifyBracketRelation(actor, target, Combat.bracketRelation(actor, target.actor))
+			return target, nil
+		end
 		return nil, reason
 	end
 	return target, nil
@@ -652,12 +714,23 @@ end
 	falls back to `localId = 0` when there is no local player, so a combatant
 	that ever sat at `0` would read as the viewer. `math.huge` can never equal
 	any real id, by construction, not by remembering. ]]
+--[[ The chokepoint, per bracket-tone.md ruling 3: this used to return
+	silently on a failed canEngage, and twenty-one of twenty-six techniques
+	are aim techniques whose cross-bracket hit therefore produced nothing at
+	all -- not even a refusal, since resolveStriker calls this unconditionally
+	on any raycast hit. Both modes now voice it: "refuse" notifies and stops
+	here exactly as before; "notice" notifies and falls through to apply the
+	hit unscaled -- Combat.applyDamage below already takes raw as given, so
+	"unscaled" costs nothing extra to mean. ]]
 local function damageCombatant(source: Combat.Actor, target: Combatant, raw: number, now: number)
 	if target.actor.health <= 0 then
 		return
 	end
 	if not Combat.canEngage(source, target.actor) then
-		return
+		notifyBracketRelation(source, target, Combat.bracketRelation(source, target.actor))
+		if Config.Combat.crossBracket == "refuse" then
+			return
+		end
 	end
 
 	local result = Combat.applyDamage(Config, target.actor, raw, now)

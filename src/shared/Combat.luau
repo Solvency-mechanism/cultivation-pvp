@@ -185,6 +185,23 @@ function Combat.canEngage(a: Actor, b: Actor): boolean
 	return a.stageIndex == b.stageIndex
 end
 
+--[[ From the ATTACKER's (a's) view, per bracket-tone.md: "below" means the
+	target is below the attacker -- punching down -- and "above" means the
+	target is above -- punching up. Pure and decides nothing about what
+	happens next; canEngage above is unchanged and still the only thing that
+	decides whether brackets mix. The caller (damageCombatant, in
+	CombatService) decides what a mismatch means under whichever
+	crossBracket mode is active. ]]
+function Combat.bracketRelation(a: Actor, b: Actor): "same" | "above" | "below"
+	if a.stageIndex == b.stageIndex then
+		return "same"
+	elseif b.stageIndex > a.stageIndex then
+		return "above"
+	else
+		return "below"
+	end
+end
+
 local function distance(a: Vec3, b: Vec3): number
 	local dx, dy, dz = a.x - b.x, a.y - b.y, a.z - b.z
 	return (dx * dx + dy * dy + dz * dz) ^ 0.5

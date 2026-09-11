@@ -280,6 +280,80 @@ end
 eq("an exact-multiple duration still delivers its last tick", countConstructTicks(10, 2), 5)
 eq("a duration a half second past a multiple is unaffected", countConstructTicks(8.5, 2), 4)
 
+--[[ bracket-tone.md: bracketRelation is read from the ATTACKER's side. A
+	same-stage pair is "same"; an attacker below the target's stage is
+	punching up ("above" -- the target is above them); an attacker above the
+	target's stage is punching down ("below" -- the target is below them). ]]
+local sameA, sameB =
+	Combat.newActor(Config, "br1", LOWGOLD), Combat.newActor(Config, "br2", LOWGOLD)
+eq("same bracket", Combat.bracketRelation(sameA, sameB), "same")
+
+local puncherUp, puncherUpTarget =
+	Combat.newActor(Config, "br3", LOWGOLD), Combat.newActor(Config, "br4", 6)
+eq(
+	"attacking a higher stage is punching up",
+	Combat.bracketRelation(puncherUp, puncherUpTarget),
+	"above"
+)
+
+local puncherDown, puncherDownTarget =
+	Combat.newActor(Config, "br5", 6), Combat.newActor(Config, "br6", LOWGOLD)
+eq(
+	"attacking a lower stage is punching down",
+	Combat.bracketRelation(puncherDown, puncherDownTarget),
+	"below"
+)
+
+--[[ The mode decision itself lives in CombatService's damageCombatant, not
+	in a pure module -- deliberately, per the ruling ("Combat.canEngage stays
+	pure and unchanged... the server decides what to do with it"). This
+	mirrors that chokepoint's own branch using only the pure primitives it is
+	built from, the same way canEngage/applyDamage compose there -- reading
+	Config.Combat.crossBracket directly rather than taking a mode parameter,
+	so toggling the real field is what drives the assertion, the same
+	save-and-restore pattern roster's own commitOf ordering check uses for
+	the windups the development profile overrides. This is also the release-
+	profile check the doc asks for: forcing the field to "refuse" and
+	confirming cross-bracket damage is zero IS confirming the release value
+	behaves as release requires, not a value read back from a profile
+	section the override has already written over by the time this file
+	runs. ]]
+local function crossBracketDealt(
+	attacker: Combat.Actor,
+	defender: Combat.Actor,
+	raw: number
+): number
+	if not Combat.canEngage(attacker, defender) and Config.Combat.crossBracket == "refuse" then
+		return 0
+	end
+	return Combat.applyDamage(Config, defender, raw, 0).dealt
+end
+
+do
+	local restore = Config.Combat.crossBracket
+
+	Config.Combat.crossBracket = "refuse"
+	local refuseAttacker, refuseDefender =
+		Combat.newActor(Config, "br7", LOWGOLD), Combat.newActor(Config, "br8", 6)
+	eq(
+		"release value (refuse): cross-bracket damage is zero",
+		crossBracketDealt(refuseAttacker, refuseDefender, 100),
+		0
+	)
+
+	Config.Combat.crossBracket = "notice"
+	local noticeAttacker, noticeDefender =
+		Combat.newActor(Config, "br9", LOWGOLD), Combat.newActor(Config, "br10", 6)
+	near(
+		"development value (notice): cross-bracket damage lands unscaled",
+		crossBracketDealt(noticeAttacker, noticeDefender, 100),
+		100,
+		1e-9
+	)
+
+	Config.Combat.crossBracket = restore
+end
+
 local mitigated = Combat.newActor(Config, "t2", LOWGOLD)
 Combat.use(Config, mitigated, "bulwark", 0)
 near("mitigation reduces incoming", Combat.applyDamage(Config, mitigated, 100, 1).dealt, 60, 1e-9)
