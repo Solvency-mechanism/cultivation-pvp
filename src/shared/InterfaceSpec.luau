@@ -692,8 +692,18 @@ InterfaceSpec.Notice = {
 	             elapsed. Equal or higher always replaces, so nothing is ever
 	             stuck and no queue has to exist. ]]
 InterfaceSpec.NoticeKind = {
-	death = { scale = 1.34, seconds = 7.0, priority = 3, floor = 3.0 },
-	kill = { scale = 1.22, seconds = 5.5, priority = 3, floor = 2.5 },
+	death = { scale = 1.34, seconds = 7.0, priority = 4, floor = 3.0 },
+	kill = { scale = 1.22, seconds = 5.5, priority = 4, floor = 2.5 },
+	--[[ A cross-bracket hit: "you are punching up" or "you are punching down".
+		A warning in both directions -- one wastes you, the other kills you --
+		so it takes the danger hue. Above `server` so a Prime banner cannot
+		erase it in the half-second after a hit; below `kill` and `death` so a
+		death mid-duel still wins the line. Held longer than a refusal because
+		it is information about the fight, not about a button. The server
+		debounces it per opponent, so this weight is spent once per duel and
+		not once per hit -- the only reason a red line this long is affordable.
+		Copy is in bracket-tone.md and is combat's to send. ]]
+	bracket = { scale = 1.1, seconds = 7.0, priority = 3, floor = 2.0 },
 	server = { scale = 1.0, seconds = 6.0, priority = 2, floor = 1.5 },
 	refused = { scale = 1.0, seconds = 4.0, priority = 1, floor = 0.0 },
 	regional = { scale = 1.0, seconds = 6.0, priority = 1, floor = 0.0 },

@@ -236,6 +236,17 @@ check("a kill outranks a server announcement", kill.priority > server.priority)
 check("a death is held longer than a plain notice", death.seconds > plain.seconds)
 check("a death is drawn larger than a plain notice", death.scale > plain.scale)
 check("a kill cannot be erased immediately", kill.floor > 0)
+
+--[[ The bracket warning sits between a Prime banner and a death: a banner in
+	the half-second after a cross-bracket hit must not erase it, and a death
+	mid-duel must still win the line. Both directions asserted. ]]
+local bracket = InterfaceSpec.noticeKind("bracket")
+check("a bracket warning outranks a server announcement", bracket.priority > server.priority)
+check("a death outranks a bracket warning", death.priority > bracket.priority)
+check(
+	"a bracket warning is held longer than a refusal",
+	bracket.seconds > InterfaceSpec.noticeKind("refused").seconds
+)
 check("a plain notice claims no floor", plain.floor == 0)
 eq("an unknown kind degrades to the plain weight", InterfaceSpec.noticeKind("nonsense"), plain)
 

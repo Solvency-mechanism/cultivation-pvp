@@ -102,6 +102,10 @@ local NOTICE_COLOR: { [string]: Color3 } = {
 	-- that is not a health bar, and it means what the vignette means.
 	kill = CEILING,
 	death = DANGER,
+	-- A cross-bracket warning in either direction. Same hue as a refusal,
+	-- because it is one kind of thing: the fight you are in is not the fight
+	-- you think it is.
+	bracket = DANGER,
 }
 
 local TIER_COLOR: { [string]: Color3 } = {
