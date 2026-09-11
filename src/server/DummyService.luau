@@ -51,6 +51,7 @@ type Dummy = {
 	patrolA: Vector3?,
 	patrolB: Vector3?,
 	patrolPeriod: number?,
+	patrolPhase: number?,
 	techId: string?,
 	nextCastAt: number?,
 	resetAt: number?,
@@ -199,12 +200,28 @@ function DummyService.clearAll()
 	end
 end
 
+-- Shared across every dummy rather than per-dummy: all of them tick from
+-- the same call, so one delta serves all, and a dummy spawned mid-session
+-- starts at phase 0 without needing its own first-tick special case.
+local lastTickAt: number? = nil
+
 --[[ Patrol, cast scheduling, and the auto-reset poll, all in one pass so a
 	dummy needs nothing from outside this file once spawned. Health is read
 	off `actor` directly -- the same table `registerDummy` returned, mutated
 	in place by every hit -- rather than through a CombatService getter,
-	which is the reason `registerDummy` hands the actor back at all. ]]
+	which is the reason `registerDummy` hands the actor back at all.
+
+	Patrol is a phase accumulator now, not a stateless function of absolute
+	time: the moving variant is the instrument a slow is measured against
+	(a stationary lock target proves the lock, a moving one proves the
+	slow), and a stateless sin(now / period) has no notion of "how far
+	along" to scale down. Advancing phase by delta * slowMultiplierOf each
+	tick means a slowed dummy visibly drags rather than continuing to patrol
+	at full, unaffected speed. ]]
 function DummyService.tick(now: number)
+	local delta = if lastTickAt then now - lastTickAt else 0
+	lastTickAt = now
+
 	for _, dummy in dummies do
 		if dummy.actor.health <= 0 then
 			if not dummy.resetAt then
@@ -219,7 +236,11 @@ function DummyService.tick(now: number)
 		if dummy.kind == "moving" and dummy.patrolA and dummy.patrolB and dummy.patrolPeriod then
 			local a = dummy.patrolA :: Vector3
 			local b = dummy.patrolB :: Vector3
-			local t = (math.sin((now / (dummy.patrolPeriod :: number)) * math.pi * 2) + 1) / 2
+			local period = dummy.patrolPeriod :: number
+			local slow = Combat.slowMultiplierOf(dummy.actor, now)
+			local phase = ((dummy.patrolPhase or 0) + (delta / period) * slow) % 1
+			dummy.patrolPhase = phase
+			local t = (math.sin(phase * math.pi * 2) + 1) / 2
 			dummy.root.CFrame = CFrame.new(a:Lerp(b, t))
 		elseif
 			dummy.kind == "caster"

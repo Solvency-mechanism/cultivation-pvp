@@ -12,6 +12,7 @@
 local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
 local Combat = require(ReplicatedStorage.Shared.Combat)
@@ -351,6 +352,14 @@ end
 local function publishHealth(instance: Instance, actor: Combat.Actor)
 	instance:SetAttribute("Health", math.floor(actor.health))
 	instance:SetAttribute("MaxHealth", math.floor(Combat.maxHealth(Config, actor.stageIndex)))
+	-- Published here rather than only where a slow is applied, so it is
+	-- never stale: pruning is lazy (Combat.pruneBuffs runs wherever a buff
+	-- total is read), so the attribute is only ever as current as the last
+	-- publish, exactly like Health already is. 1.0 when not slowed -- a
+	-- dummy has no Humanoid to read WalkSpeed off, so this is the one read
+	-- path a status cue has for both a player and a dummy, and it carries
+	-- the magnitude a boolean could not.
+	instance:SetAttribute("SlowMultiplier", Combat.slowMultiplierOf(actor, os.clock()))
 end
 
 local function publish(player: Player)
@@ -707,13 +716,12 @@ local function damageCombatant(source: Combat.Actor, target: Combatant, raw: num
 	end
 end
 
---[[ A channel's payoff, run once at completion against a target already
-	re-validated by `validateLockTarget`. Resolves through the same
-	`Combat.outgoingDamage`/`damageCombatant` path every other technique
-	uses -- no parallel damage math for a channel. Instant rather than a
-	traveling projectile: `projectile` on the technique is Layer 5's field,
-	and the actual homing travel is the next increment on top of this one,
-	not part of the channel system itself.
+--[[ A channel's payoff against a target already re-validated by
+	validateLockTarget. Resolves through the same
+	Combat.outgoingDamage/damageCombatant path every other technique uses --
+	no parallel damage math for a channel or a projectile. Used both for an
+	instant (non-projectile) channel and as the landing effect a homing
+	projectile calls once it arrives, below.
 
 	The slow is authored on the technique as an absolute WalkSpeed
 	(`tech.slow.walkSpeed`, the same way strider techniques author moveSpeed)
@@ -721,7 +729,7 @@ end
 	ruling seam decided in Combat.luau. Converting here, at the one call
 	site, keeps the authoring convenience without teaching the pure module
 	two representations. ]]
-local function resolveChannelEffect(
+local function landEffect(
 	player: Player,
 	actor: Combat.Actor,
 	techId: string,
@@ -747,6 +755,131 @@ local function resolveChannelEffect(
 	end
 end
 
+--[[ A server-driven homing bolt, per Layer 5 and interface's own tagging
+	ask: the client finds it with CollectionService:GetTagged("Projectile")
+	and dresses it (trail, glow) without ever owning its motion or its
+	lifetime, the same division the Combatant tag already draws between a
+	dummy's state and its presentation. TechId/CasterId are the read path
+	interface asked for -- the same names Impact and CastStarted already use
+	for "which technique, whose". The server holds the actual state in
+	`projectiles`, stepped from CombatService.tick; the part is the
+	presentation of that state, not a second copy of it. ]]
+type Projectile = {
+	part: BasePart,
+	techId: string,
+	player: Player,
+	casterActor: Combat.Actor,
+	targetCombatantId: number,
+	expiresAt: number,
+}
+local projectiles: { Projectile } = {}
+local projectileFolder: Folder? = nil
+
+local HOMING_PROJECTILE_SPEED = 90
+local PROJECTILE_ARRIVAL_RADIUS = 4
+-- A safety net against a target that never becomes reachable again after
+-- launch (not already caught by the dead/gone check every tick), not a
+-- number tuned for feel.
+local PROJECTILE_MAX_LIFETIME = 5
+
+local function ensureProjectileFolder(): Folder
+	if projectileFolder and projectileFolder.Parent then
+		return projectileFolder
+	end
+	local folder = Instance.new("Folder")
+	folder.Name = "Projectiles"
+	folder.Parent = Workspace
+	projectileFolder = folder
+	return folder
+end
+
+local function launchHomingProjectile(
+	player: Player,
+	actor: Combat.Actor,
+	techId: string,
+	target: Combatant,
+	now: number
+)
+	local root = rootOf(player)
+	if not root then
+		return
+	end
+
+	local part = Instance.new("Part")
+	part.Name = `projectile_{techId}`
+	part.Shape = Enum.PartType.Ball
+	part.Size = Vector3.new(1.4, 1.4, 1.4)
+	part.Material = Enum.Material.Neon
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanQuery = false
+	part.CanTouch = false
+	part.CFrame = CFrame.new(root.Position)
+	part.Parent = ensureProjectileFolder()
+
+	CollectionService:AddTag(part, "Projectile")
+	part:SetAttribute("TechId", techId)
+	part:SetAttribute("CasterId", player.UserId)
+
+	table.insert(projectiles, {
+		part = part,
+		techId = techId,
+		player = player,
+		casterActor = actor,
+		targetCombatantId = target.combatantId,
+		expiresAt = now + PROJECTILE_MAX_LIFETIME,
+	})
+end
+
+--[[ Advances every in-flight projectile by one step, re-aiming at its
+	target's CURRENT position each step rather than a position captured at
+	launch -- that is what makes it homing rather than a straight-line shot.
+	A target that died or is otherwise unresolvable drops the projectile
+	with no landing, same as a channel fizzling; arrival calls `landEffect`,
+	the identical resolver an instant channel uses.
+
+	Driven by its own Heartbeat connection in CombatService.start, NOT from
+	CombatService.tick: `tick` runs at Config.Field.cycleTickSeconds (1s),
+	coarse on purpose for regen and construct zoning, and a 90 stud/s bolt
+	advancing once a second would jump in 90-stud teleports rather than
+	travel. Motion needs a frame's cadence; the rest of combat does not. ]]
+local function stepProjectiles(deltaSeconds: number, now: number)
+	for i = #projectiles, 1, -1 do
+		local projectile = projectiles[i]
+		if not projectile.part.Parent then
+			table.remove(projectiles, i)
+			continue
+		end
+
+		local target = combatantById(projectile.targetCombatantId)
+		local tech = Config.Techniques[projectile.techId]
+		if not target or not tech or target.actor.health <= 0 or now >= projectile.expiresAt then
+			projectile.part:Destroy()
+			table.remove(projectiles, i)
+			continue
+		end
+
+		local toTarget = target.root.Position - projectile.part.Position
+		local distance = toTarget.Magnitude
+		if distance <= PROJECTILE_ARRIVAL_RADIUS then
+			landEffect(
+				projectile.player,
+				projectile.casterActor,
+				projectile.techId,
+				tech,
+				target,
+				now
+			)
+			projectile.part:Destroy()
+			table.remove(projectiles, i)
+			continue
+		end
+
+		local step = math.min(HOMING_PROJECTILE_SPEED * deltaSeconds, distance)
+		projectile.part.CFrame = CFrame.new(projectile.part.Position + toTarget.Unit * step)
+	end
+end
+
 --[[ Completion, always exactly `tech.castTime` after the cast started via
 	the `task.delay` scheduled in `onUseTechnique`. Staleness-guarded the
 	same way a dummy's own delayed reset is: if this exact cast is no longer
@@ -755,7 +888,13 @@ end
 	second resolution. Re-validates against the target at completion time,
 	not cast time, since the whole point of a channel is that the world can
 	change out from under it: the target may have died, left range, or broken
-	line of sight during the wait. ]]
+	line of sight during the wait.
+
+	`fizzled` is decided here even for a projectile technique: the channel
+	itself completed and committed to a real shot, which is what "not
+	fizzled" means. Whether that shot goes on to connect is the projectile's
+	own question, answered later by whether landEffect ever runs -- exactly
+	like a raycast striker's own cast can resolve cleanly and still miss. ]]
 local function completeChannel(cast: ActiveCast)
 	if activeCasts[cast.player.UserId] ~= cast then
 		return
@@ -772,7 +911,11 @@ local function completeChannel(cast: ActiveCast)
 		local target = validateLockTarget(tech, player, actor, cast.targetCombatantId)
 		if target then
 			fizzled = false
-			resolveChannelEffect(player, actor, cast.techId, tech, target, now)
+			if tech.projectile == "homing" then
+				launchHomingProjectile(player, actor, cast.techId, target, now)
+			else
+				landEffect(player, actor, cast.techId, tech, target, now)
+			end
 		end
 	end
 
@@ -1493,6 +1636,13 @@ function CombatService.start()
 
 	setLoadout.OnServerEvent:Connect(function(player: Player, slot: unknown, techId: unknown)
 		onSetLoadout(player, slot, techId)
+	end)
+
+	-- Its own connection rather than folded into CombatService.tick -- see
+	-- stepProjectiles's own doc comment for why the coarse combat tick
+	-- cadence would make a homing bolt teleport instead of travel.
+	RunService.Heartbeat:Connect(function(deltaSeconds: number)
+		stepProjectiles(deltaSeconds, os.clock())
 	end)
 end
 
