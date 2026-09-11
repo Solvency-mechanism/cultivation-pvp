@@ -253,13 +253,20 @@ Config.Combat = {
 	deathLossTierFraction = 0.35,
 	globalCooldown = 0.4,
 	-- Reach per technique kind, in studs. Striker pokes, Ruler blankets,
-	-- Forger drops a construct at your feet, Enforcer is self-only.
+	-- Forger drops a construct at your feet, Enforcer and Strider are
+	-- self-only.
 	ranges = {
 		striker = 140,
 		ruler = 42,
 		forger = 18,
 		enforcer = 0,
+		strider = 0,
 	},
+	-- Humanoid.WalkSpeed a character reverts to once no strider buff is
+	-- live. Roblox's own engine default, named here so both the server and
+	-- the client's local prediction revert to the same number rather than
+	-- each hardcoding 16 independently.
+	baseWalkSpeed = 16,
 	respawnSeconds = 5,
 	-- Forger constructs damage on an interval rather than continuously, so a
 	-- technique's `damage` reads as damage *per tick*. At 2s, caltrops over its
@@ -274,8 +281,8 @@ Config.Combat = {
 	from this same pool -- which is exactly the point: it isolates whether the
 	combat feels good before build diversity can paper over it.
 
-	Four technique types, three options each, one slot per type. That is 3^4 =
-	81 loadouts with no themed content at all. When paths arrive they become a
+	Five technique types, three options each, one slot per type. That is 3^5 =
+	243 loadouts with no themed content at all. When paths arrive they become a
 	restricted, empowered subset of this pool rather than a rewrite.
 
 	kind:
@@ -283,11 +290,17 @@ Config.Combat = {
 		enforcer -- self-buff window, melee sustain
 		forger   -- persistent construct, zoning
 		ruler    -- ambient aura command; scales with terrain richness
+		strider  -- self-only WalkSpeed override, spans burst/mid/sustain travel
+
+	moveSpeed is the absolute Humanoid.WalkSpeed to hold for buffDuration
+	seconds, 0 meaning "not applicable" -- every non-strider technique carries
+	it at 0 the same way a striker carries mitigation at 0, for one uniform
+	shape rather than an optional field only three entries have.
 ]]
 export type Technique = {
 	id: string,
 	name: string,
-	kind: "striker" | "enforcer" | "forger" | "ruler",
+	kind: "striker" | "enforcer" | "forger" | "ruler" | "strider",
 	madraCost: number,
 	cooldown: number,
 	windup: number,
@@ -295,6 +308,7 @@ export type Technique = {
 	buffDuration: number,
 	damageBuff: number,
 	mitigation: number,
+	moveSpeed: number,
 	regionScaled: boolean,
 }
 
@@ -311,6 +325,7 @@ Config.Techniques = {
 		buffDuration = 0,
 		damageBuff = 0,
 		mitigation = 0,
+		moveSpeed = 0,
 		regionScaled = false,
 	},
 	volley = {
@@ -324,6 +339,7 @@ Config.Techniques = {
 		buffDuration = 0,
 		damageBuff = 0,
 		mitigation = 0,
+		moveSpeed = 0,
 		regionScaled = false,
 	},
 	pierce = {
@@ -337,6 +353,7 @@ Config.Techniques = {
 		buffDuration = 0,
 		damageBuff = 0,
 		mitigation = 0,
+		moveSpeed = 0,
 		regionScaled = false,
 	},
 
@@ -352,6 +369,7 @@ Config.Techniques = {
 		buffDuration = 5.0,
 		damageBuff = 0.35,
 		mitigation = 0,
+		moveSpeed = 0,
 		regionScaled = false,
 	},
 	bulwark = {
@@ -365,19 +383,7 @@ Config.Techniques = {
 		buffDuration = 6.0,
 		damageBuff = 0,
 		mitigation = 0.40,
-		regionScaled = false,
-	},
-	swiftstep = {
-		id = "swiftstep",
-		name = "Swiftstep",
-		kind = "enforcer",
-		madraCost = 22,
-		cooldown = 7.0,
-		windup = 0.05,
-		damage = 0,
-		buffDuration = 4.0,
-		damageBuff = 0.15,
-		mitigation = 0.10,
+		moveSpeed = 0,
 		regionScaled = false,
 	},
 
@@ -393,6 +399,7 @@ Config.Techniques = {
 		buffDuration = 8.0,
 		damageBuff = 0,
 		mitigation = 0.55,
+		moveSpeed = 0,
 		regionScaled = false,
 	},
 	caltrops = {
@@ -406,6 +413,7 @@ Config.Techniques = {
 		buffDuration = 10.0,
 		damageBuff = 0,
 		mitigation = 0,
+		moveSpeed = 0,
 		regionScaled = false,
 	},
 	sentry = {
@@ -419,6 +427,7 @@ Config.Techniques = {
 		buffDuration = 12.0,
 		damageBuff = 0,
 		mitigation = 0,
+		moveSpeed = 0,
 		regionScaled = false,
 	},
 
@@ -435,6 +444,7 @@ Config.Techniques = {
 		buffDuration = 0,
 		damageBuff = 0,
 		mitigation = 0,
+		moveSpeed = 0,
 		regionScaled = true,
 	},
 	siphon = {
@@ -448,6 +458,7 @@ Config.Techniques = {
 		buffDuration = 0,
 		damageBuff = 0,
 		mitigation = 0,
+		moveSpeed = 0,
 		regionScaled = true,
 	},
 	tempest = {
@@ -461,15 +472,74 @@ Config.Techniques = {
 		buffDuration = 0,
 		damageBuff = 0,
 		mitigation = 0,
+		moveSpeed = 0,
 		regionScaled = true,
+	},
+
+	--[[ Strider -- self-only WalkSpeed override, no damage path of its own.
+		Three techniques spanning one axis (burst / mid / sustain) rather than
+		three flavors of one thing, per the human's own framing of the gap:
+		an instant flash is a great juke and bad travel, a persistent boost is
+		the reverse, and the choice between them has to be real. Built out of
+		Humanoid.WalkSpeed first for all three, including the burst -- it is
+		the cheap, honest implementation, and only escalates to a client-
+		predicted impulse if a moving-dummy test says WalkSpeed alone doesn't
+		read as a juke. Available to everyone from the start: no aura gating,
+		no unlock threshold, that axis deferred entire. ]]
+	lunge = {
+		id = "lunge",
+		name = "Lunge",
+		kind = "strider",
+		madraCost = 20,
+		cooldown = 4.0,
+		windup = 0.05,
+		damage = 0,
+		buffDuration = 0.25,
+		damageBuff = 0,
+		mitigation = 0,
+		moveSpeed = 80,
+		regionScaled = false,
+	},
+	swiftstep = {
+		id = "swiftstep",
+		name = "Swiftstep",
+		kind = "strider",
+		madraCost = 22,
+		cooldown = 7.0,
+		windup = 0.05,
+		damage = 0,
+		buffDuration = 2.5,
+		damageBuff = 0,
+		mitigation = 0,
+		moveSpeed = 32,
+		regionScaled = false,
+	},
+	windstride = {
+		id = "windstride",
+		name = "Windstride",
+		kind = "strider",
+		madraCost = 30,
+		cooldown = 12.0,
+		windup = 0.1,
+		damage = 0,
+		buffDuration = 12.0,
+		damageBuff = 0,
+		mitigation = 0,
+		moveSpeed = 24,
+		regionScaled = false,
 	},
 } :: { [string]: Technique }
 
 -- One slot per technique type.
-Config.LoadoutSlots = { "striker", "enforcer", "forger", "ruler" }
+Config.LoadoutSlots = { "striker", "enforcer", "forger", "ruler", "strider" }
 
-Config.DefaultLoadout =
-	{ striker = "lance", enforcer = "surge", forger = "barrier", ruler = "siphon" }
+Config.DefaultLoadout = {
+	striker = "lance",
+	enforcer = "surge",
+	forger = "barrier",
+	ruler = "siphon",
+	strider = "swiftstep",
+}
 
 --[[
 	=========================== TUNING PROFILE ===========================

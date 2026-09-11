@@ -15,6 +15,7 @@ export type Buff = {
 	source: string,
 	damageBuff: number,
 	mitigation: number,
+	moveSpeed: number,
 	expiresAt: number,
 }
 
@@ -105,6 +106,21 @@ function Combat.mitigationOf(actor: Actor, now: number): number
 	return math.min(1 - remaining, MAX_MITIGATION)
 end
 
+--[[ The highest live moveSpeed override, or 0 if none -- the caller's cue to
+	fall back to base WalkSpeed. "Highest wins" rather than stacking, so a
+	burst popped mid-sustain reads as a burst on top of a sustain rather than
+	an arbitrary sum of two speeds nobody tuned together. ]]
+function Combat.moveSpeedOf(actor: Actor, now: number): number
+	Combat.pruneBuffs(actor, now)
+	local highest = 0
+	for _, buff in actor.buffs do
+		if buff.moveSpeed > highest then
+			highest = buff.moveSpeed
+		end
+	end
+	return highest
+end
+
 --[[ Brackets never mix. An out-of-bracket engagement is refused outright
 	rather than balanced. ]]
 function Combat.canEngage(a: Actor, b: Actor): boolean
@@ -166,7 +182,9 @@ function Combat.use(config: any, actor: Actor, techId: string, now: number): Use
 	actor.cooldowns[techId] = now + tech.cooldown
 	actor.gcdUntil = now + config.Combat.globalCooldown
 
-	if tech.buffDuration > 0 and (tech.damageBuff > 0 or tech.mitigation > 0) then
+	if
+		tech.buffDuration > 0 and (tech.damageBuff > 0 or tech.mitigation > 0 or tech.moveSpeed > 0)
+	then
 		-- Reapplying a technique refreshes rather than stacks with itself.
 		for i = #actor.buffs, 1, -1 do
 			if actor.buffs[i].source == techId then
@@ -177,6 +195,7 @@ function Combat.use(config: any, actor: Actor, techId: string, now: number): Use
 			source = techId,
 			damageBuff = tech.damageBuff,
 			mitigation = tech.mitigation,
+			moveSpeed = tech.moveSpeed,
 			expiresAt = now + tech.buffDuration,
 		})
 	end

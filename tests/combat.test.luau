@@ -134,6 +134,41 @@ Combat.use(Config, m, "barrier", 0.5)
 near("two sources stack multiplicatively", Combat.mitigationOf(m, 1), 1 - (0.6 * 0.45), 1e-9)
 check("stacked mitigation stays under 1", Combat.mitigationOf(m, 1) < 1)
 
+-- Strider techniques apply a moveSpeed override the same way enforcer buffs
+-- apply damageBuff/mitigation, on the same insertion, refresh and expiry
+-- machinery.
+local s = Combat.newActor(Config, "p7", LOWGOLD)
+near("no override before use", Combat.moveSpeedOf(s, 0), 0, 1e-9)
+Combat.use(Config, s, "swiftstep", 0)
+near(
+	"swiftstep grants its speed",
+	Combat.moveSpeedOf(s, 1),
+	Config.Techniques.swiftstep.moveSpeed,
+	1e-9
+)
+near("speed lapses on schedule", Combat.moveSpeedOf(s, 99), 0, 1e-9)
+
+-- Highest wins rather than stacking: a burst popped mid-sustain reads as a
+-- burst on top of a sustain, not the sum of two speeds nobody tuned together
+-- -- and the sustain is still there once the burst lapses.
+local burst = Combat.newActor(Config, "p8", LOWGOLD)
+Combat.use(Config, burst, "windstride", 0)
+-- Past windstride's own global cooldown (0.4s), or this second `use` is
+-- refused as `global_cooldown` and inserts no buff at all.
+Combat.use(Config, burst, "lunge", 0.5)
+near(
+	"a burst on top of a sustain reads as the burst",
+	Combat.moveSpeedOf(burst, 0.6),
+	Config.Techniques.lunge.moveSpeed,
+	1e-9
+)
+near(
+	"sustain still live once the burst lapses",
+	Combat.moveSpeedOf(burst, 0.8),
+	Config.Techniques.windstride.moveSpeed,
+	1e-9
+)
+
 -- Ruler techniques read the terrain; others ignore it
 local t = Combat.newActor(Config, "p6", LOWGOLD)
 local siphonOpen = Combat.outgoingDamage(Config, t, "siphon", freshPower, "open", 0)
@@ -219,8 +254,19 @@ for id, tech in Config.Techniques do
 	check(`{id} has a cooldown`, tech.cooldown > 0)
 	byKind[tech.kind] = (byKind[tech.kind] or 0) + 1
 end
+-- Enforcer dropped to two options when swiftstep migrated to strider, and
+-- the round-6 backfill technique that would have kept it at three was
+-- explicitly cut from this pass's scope -- so this is a real count, not the
+-- uniform three every other slot still holds.
+local expectedOptions: { [string]: number } = {
+	striker = 3,
+	enforcer = 2,
+	forger = 3,
+	ruler = 3,
+	strider = 3,
+}
 for _, slot in Config.LoadoutSlots do
-	eq(`three options for {slot}`, byKind[slot], 3)
+	eq(`options for {slot}`, byKind[slot], expectedOptions[slot])
 end
 
 -- Death feeds the ratchet: costly, but never a demotion.
@@ -231,7 +277,7 @@ eq("death never demotes the stage", afterDeath.stageIndex, LOWGOLD)
 eq("death floors at the stage bottom", afterDeath.tier, 1)
 
 -- Slot resolution is the trust boundary: the client sends a slot name, and the
--- server must refuse everything that is not one of its own four slots.
+-- server must refuse everything that is not one of its own five slots.
 do
 	local techId, reason = Combat.resolveSlot(Config, Config.DefaultLoadout, "striker")
 	eq("resolves a real slot", techId, Config.DefaultLoadout.striker)

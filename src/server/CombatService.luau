@@ -289,6 +289,27 @@ local function mirrorHumanoid(humanoid: Humanoid?, actor: Combat.Actor)
 	humanoid.Health = actor.health
 end
 
+--[[ WalkSpeed seam, agreed with interface before either side wrote anything:
+	the client predicts and writes this property locally the instant a
+	strider slot is pressed, inside its own leased window, and stops the
+	moment that window ends or the server confirms. Everything past that
+	lease is this function's alone -- it is called immediately on a
+	successful `Combat.use` (so the real value replicates down and overwrites
+	the prediction with no fight, since only one side is writing once the
+	client's window closes), again on a refusal (so an over-eager client
+	prediction gets corrected even though nothing else runs for a refused
+	cast), and once more at the buff's own expiry (scheduled below, since
+	nothing else polls a lapsed buff into existence). `Combat.moveSpeedOf`
+	already returns 0 when nothing is live, which is exactly the cue to fall
+	back to `baseWalkSpeed`. ]]
+local function mirrorMoveSpeed(humanoid: Humanoid?, actor: Combat.Actor, now: number)
+	if not humanoid then
+		return
+	end
+	local override = Combat.moveSpeedOf(actor, now)
+	humanoid.WalkSpeed = if override > 0 then override else Config.Combat.baseWalkSpeed
+end
+
 local function ensureActor(player: Player): Combat.Actor?
 	-- No actor exists between death and respawn, so a corpse cannot be hit
 	-- again and the dead player cannot spend madra.
@@ -819,6 +840,15 @@ local function resolveEffect(caster: Player, actor: Combat.Actor, techId: string
 			broadcastVfx(caster.UserId, techId, root.Position, nil, true)
 		end
 		publish(caster)
+	elseif tech.kind == "strider" then
+		-- Self-only, same shape as enforcer. The WalkSpeed itself was already
+		-- applied at press time in `onUseTechnique`, not deferred to here --
+		-- see `mirrorMoveSpeed`'s doc comment for why a movement effect can't
+		-- wait for the windup the way a hit needs to.
+		local root = rootOf(caster)
+		if root then
+			broadcastVfx(caster.UserId, techId, root.Position, nil, true)
+		end
 	elseif tech.kind == "forger" then
 		local root = rootOf(caster)
 		if root then
@@ -868,6 +898,8 @@ local function onUseTechnique(player: Player, slot: unknown, suppliedAim: unknow
 		return
 	end
 
+	local tech = Config.Techniques[techId]
+
 	local result = Combat.use(Config, actor, techId, now)
 	if not result.ok then
 		-- Debounced by (reason, techId) rather than reason alone: cooling_down
@@ -881,7 +913,6 @@ local function onUseTechnique(player: Player, slot: unknown, suppliedAim: unknow
 			if lastCastRefusalNotice[player.UserId] ~= noticeKey then
 				lastCastRefusalNotice[player.UserId] = noticeKey
 				if result.reason == "cooling_down" then
-					local tech = Config.Techniques[techId]
 					AwarenessService.notify(player, "refused", `{tech.name} is still cooling.`)
 				else
 					AwarenessService.notify(
@@ -892,11 +923,38 @@ local function onUseTechnique(player: Player, slot: unknown, suppliedAim: unknow
 				end
 			end
 		end
+		if tech.kind == "strider" then
+			-- Corrects an over-eager client prediction: the seam agreed with
+			-- interface has the client lease itself a speed pulse on
+			-- keypress and stop writing on refusal, but a slow or dropped
+			-- refusal notice must not leave a fast client stuck at the wrong
+			-- speed. `actor.buffs` was untouched by the failed `Combat.use`,
+			-- so this just reasserts whatever is already true.
+			mirrorMoveSpeed(humanoidOf(player), actor, now)
+		end
 		return
 	end
 	lastCastRefusalNotice[player.UserId] = nil
 
 	publish(player)
+
+	if tech.kind == "strider" and tech.moveSpeed > 0 then
+		-- Applied immediately rather than after the windup, unlike every
+		-- other kind: a movement effect that waited for a windup wouldn't be
+		-- a burst, and the enforcer buffs beside it already take hold at
+		-- press time too -- only their VFX broadcast waits for resolveEffect.
+		-- This write is also the server half of the latency seam agreed with
+		-- interface: the client already predicted this the instant the key
+		-- was pressed, and this is what actually reaches every other
+		-- client's view of this player, and what corrects the caster's own
+		-- client the moment it replicates down.
+		mirrorMoveSpeed(humanoidOf(player), actor, now)
+		task.delay(tech.buffDuration, function()
+			if actors[player.UserId] == actor then
+				mirrorMoveSpeed(humanoidOf(player), actor, os.clock())
+			end
+		end)
+	end
 
 	-- Announced before the windup rather than after it, which is the whole
 	-- point: the defender's reaction window is the windup.
@@ -907,7 +965,6 @@ local function onUseTechnique(player: Player, slot: unknown, suppliedAim: unknow
 	-- counterplay the windup is there to buy.
 	local aim = aimOf(player, suppliedAim)
 
-	local tech = Config.Techniques[techId]
 	if tech.windup > 0 then
 		task.delay(tech.windup, function()
 			resolveEffect(player, actor, techId, aim)
@@ -990,7 +1047,13 @@ local function onCharacterAdded(player: Player)
 		end)
 	end
 
-	ensureActor(player)
+	-- A fresh actor's buffs are always empty, so this reverts to
+	-- baseWalkSpeed explicitly rather than assuming a new Humanoid's own
+	-- default happens to already match it.
+	local actor = ensureActor(player)
+	if actor then
+		mirrorMoveSpeed(humanoid, actor, os.clock())
+	end
 end
 
 function CombatService.onPlayerAdded(player: Player)
