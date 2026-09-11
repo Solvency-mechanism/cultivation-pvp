@@ -421,7 +421,22 @@ InterfaceSpec.Cast = {
 	--[[ How long a bar shows its snap after an interrupt or a fizzle. Long
 		enough to be seen as an event -- the bar did not finish, it broke --
 		and short enough that a defender who just interrupted someone is not
-		staring at a red bar while the next thing happens. ]]
+		staring at a red bar while the next thing happens.
+
+		**Fixed, and deliberately not scaled to the channel it snaps.** A
+		quarter-second channel (Hoarfrost, castTime 0.25) can be interrupted
+		and then show red for longer than it ever ran. That is correct: the
+		snap is not the cast's duration drawn in red, it is the EVENT of the
+		cast breaking, and an event needs a minimum duration to be seen at
+		all. Scaling it to the channel would make the shortest casts -- the
+		ones a player is least likely to have noticed starting -- also the
+		ones whose breaking is least visible, which is backwards.
+
+		And a 0.25s channel does draw a bar: it clears the 0.15 floor as
+		Lance's 0.28 windup does, and the floor is about whether a bar can be
+		SEEN, not whether it can be ACTED on. Fifteen frames is seen. What it
+		cannot be is reacted to inside the human 0.25s figure, and that is the
+		technique's design, not the bar's. ]]
 	snapSeconds = 0.35,
 }
 
