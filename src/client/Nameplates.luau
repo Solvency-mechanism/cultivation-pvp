@@ -186,7 +186,15 @@ local function buildPlate(who: Combatant, head: BasePart): Plate?
 	local gui = Instance.new("BillboardGui")
 	gui.Name = PLATE_NAME
 	gui.Size = UDim2.fromOffset(width, total)
-	gui.StudsOffsetWorldSpace = Vector3.new(0, PLATE.studsOffset, 0)
+	--[[ Offset from the top of the anchor rather than a flat constant.
+
+		`studsOffset` was tuned against a Head, which already sits near the top
+		of a rig. A dummy's anchor is its root -- a five-stud slab pinned at its
+		own centre -- so the same constant would float the plate halfway *inside*
+		the body it is labelling. Measuring from the anchor's top edge makes one
+		number correct for both, and stays correct for whatever shape a future
+		combatant turns out to be. ]]
+	gui.StudsOffsetWorldSpace = Vector3.new(0, head.Size.Y / 2 + PLATE.studsOffset, 0)
 	-- Occluded rather than always-on-top: seeing health bars through a wall
 	-- would be a wallhack the interface handed out for free.
 	gui.AlwaysOnTop = false
@@ -366,11 +374,16 @@ local function combatants(): { Combatant }
 		if tagged:IsA("Model") and not Players:GetPlayerFromCharacter(tagged) then
 			local id = tagged:GetAttribute("CombatantId")
 			if typeof(id) == "number" then
+				--[[ A dummy's Model is named "Dummy" for every variant, so the
+					instance name would render three identical plates. The
+					`DisplayName` attribute is what distinguishes them, and it is
+					what a player's `DisplayName` is the analogue of. ]]
+				local shown = tagged:GetAttribute("DisplayName")
 				table.insert(scratch, {
 					id = id,
 					source = tagged,
 					model = tagged,
-					name = tagged.Name,
+					name = if typeof(shown) == "string" then shown else tagged.Name,
 				})
 			end
 		end
@@ -386,11 +399,22 @@ local function ensurePlate(who: Combatant)
 	end
 	dropPlate(who.id)
 
-	local head = who.model:FindFirstChild("Head")
-	if not head or not head:IsA("BasePart") then
+	--[[ A plate anchors to the top of whatever this combatant is, which is not
+		always a Head.
+
+		A player rig has one. A training dummy is a Model holding a single part
+		named `HumanoidRootPart` and nothing else -- no Head, and deliberately no
+		Humanoid either. Requiring a Head meant `ensurePlate` returned early and
+		a dummy silently never got a plate at all: not an error, not a warning,
+		just no health bar over the one thing built to have its health watched.
+
+		Found by reading DummyService before asking anyone to test it, which is
+		the only reason it was not discovered as "the nameplates do not work". ]]
+	local anchor = who.model:FindFirstChild("Head") or who.model.PrimaryPart
+	if not anchor or not anchor:IsA("BasePart") then
 		return
 	end
-	local built = buildPlate(who, head)
+	local built = buildPlate(who, anchor)
 	if built then
 		plates[who.id] = built
 	end

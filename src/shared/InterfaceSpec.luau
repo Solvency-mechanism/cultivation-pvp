@@ -150,7 +150,16 @@ end
 	with distance stops being readable exactly when a fight is spreading out. ]]
 InterfaceSpec.Plate = {
 	width = 158,
-	studsOffset = 3.2,
+	--[[ Clearance above the TOP of whatever the plate anchors to, not above its
+		centre. `Nameplates` adds half the anchor's height before applying this.
+
+		2.6 rather than the 3.2 it was, and the difference is exactly half a
+		player's head: the flat 3.2 was measured from a Head's centre, so keeping
+		it while switching to a top-edge measurement would have nudged every
+		verified-working player plate upward. Recomputed so a player's plate
+		lands in precisely the same place it already does, and a dummy's clears
+		its five-stud slab instead of floating inside it. ]]
+	studsOffset = 2.6,
 	nameTextSize = 13,
 	stageTextSize = 11,
 	healthHeight = 8,
