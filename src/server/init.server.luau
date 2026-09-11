@@ -9,6 +9,7 @@ local AwarenessService = require(script.AwarenessService)
 local CombatService = require(script.CombatService)
 local Config = require(ReplicatedStorage.Shared.Config)
 local CultivationService = require(script.CultivationService)
+local DummyService = require(script.DummyService)
 local NodeService = require(script.NodeService)
 local PersistenceService = require(script.PersistenceService)
 local PresenceService = require(script.PresenceService)
@@ -60,6 +61,19 @@ CombatService.setKillHandler(function(killer: Player)
 end)
 
 startService("CombatService", CombatService.start)
+
+--[[ Dummies are a testing instrument, not content, but they are wired exactly
+	like everything else on purpose: a dummy that went through its own start,
+	its own tick or its own damage path would stop being a measuring instrument
+	and become a second thing to debug.
+
+	This line is here because it was missing. DummyService was complete, correct
+	and 8,513 bytes of dead code -- nothing required it, so `start` never ran,
+	the chat hook was never connected, and every /dummy command fell on the
+	floor. Nothing caught it: 362 assertions passed, selene was clean and rojo
+	built fine, because AN UNREFERENCED MODULE IS PERFECTLY VALID LUAU and a
+	module that is never required cannot fail a suite that never requires it. ]]
+startService("DummyService", DummyService.start)
 startService("AwarenessService", AwarenessService.start)
 
 --[[ Joining yields on the data store, so everything downstream of cultivation
@@ -201,6 +215,9 @@ RunService.Heartbeat:Connect(function(delta: number)
 	end)
 	tickService("CombatService", now, function()
 		CombatService.tick(elapsed, now)
+	end)
+	tickService("DummyService", now, function()
+		DummyService.tick(now)
 	end)
 	tickService("AwarenessService", now, AwarenessService.tick)
 	tickService("PresenceService", now, PresenceService.tick)
