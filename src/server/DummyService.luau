@@ -61,8 +61,18 @@ local spawnCount = 0
 
 local DUMMIES_FOLDER_NAME = "Dummies"
 local DEFAULT_STAGE = "Foundation"
--- A few strides north of the pad and into the open field, not on top of it.
-local BASE_POSITION = Vector3.new(0, 0, -108)
+--[[ The original -108 was chosen for "a few strides north of the pad and
+	into the open field, not on top of it" -- an intent, not a checked
+	outcome. It put the row beside the ramp on open dirt twenty studs below
+	eye level (dummy one) and fourteen studs under the ramp's surface
+	(dummies two through four): landscape verified on the live published
+	place that /dummy worked end to end and a player standing on the pad
+	still saw nothing. -60 is landscape's own number: eighteen studs past
+	the ramp foot at -78, on the plate at y = 3, forty-four studs clear of
+	the nearest region-lobe edge (so a row here reads consistent ruler
+	damage, not a straddled-edge artifact), directly ahead of a player
+	walking down the ramp, none of the five row slots under anything. ]]
+local BASE_POSITION = Vector3.new(0, 0, -60)
 local ROW_SPACING = 10
 local ROW_WIDTH = 5
 
