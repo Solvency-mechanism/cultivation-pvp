@@ -81,6 +81,12 @@ local Workspace = game:GetService("Workspace")
 	              it to the technique: a lance impact's flash lasts 0.14s after
 	              a 0.28s windup, so ~0.36 catches the core with the shards
 	              still out.
+	              lockId: for a lock technique (Frostbolt, Rime Verdict,
+	              Hoarfrost), the target's CombatantId -- the third argument
+	              UseTechnique takes, which the server refuses no_target
+	              without. A dummy's is the negative CombatantId attribute on
+	              its Model; read it off the placed dummy and put it here. Lance
+	              and the aim variations need nothing.
 	hold          number?  seconds to keep the frame after the marker before
 	              the next shot. Default 4.
 ]]
@@ -97,6 +103,7 @@ type Shot = {
 		slot: string,
 		target: Vector3?,
 		aim: Vector3?,
+		lockId: number?,
 		delay: number?,
 		markerAfter: number,
 	}?,
@@ -291,9 +298,10 @@ local function fire(shot: Shot)
 	else
 		aim = camera.CFrame.LookVector
 	end
-	-- The real path, with the real remote, the same two things a keypress
-	-- sends. The server owns everything after this line.
-	useTechnique:FireServer(spec.slot, aim)
+	-- The real path, with the real remote, the same things a keypress sends:
+	-- slot, aim, and the lock id when the technique needs one. The server owns
+	-- everything after this line.
+	useTechnique:FireServer(spec.slot, aim, spec.lockId)
 	log(`{shot.name}: fired {spec.slot}`)
 	task.wait(spec.markerAfter)
 end
