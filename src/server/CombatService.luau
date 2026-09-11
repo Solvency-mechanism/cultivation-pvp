@@ -9,6 +9,7 @@
 	thin binding layer in the same shape as CultivationService.
 ]]
 
+local CollectionService = game:GetService("CollectionService")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
@@ -500,6 +501,128 @@ local function damageCombatant(source: Combat.Actor, target: Combatant, raw: num
 	end
 end
 
+--[[ Registers a Model as a full combatant -- same damage-resolution path,
+	same `Combat.canEngage` bracket check a player already goes through.
+	`stageIndex` is fixed at registration rather than derived, unlike a
+	player's: a dummy's bracket is something a tester sets deliberately, to
+	exercise `canEngage`'s refusal for the first time without needing two
+	real players parked at two different stages, which is why it has never
+	been properly exercised.
+
+	Tags and attributes follow the scheme agreed directly with interface:
+	CollectionService tag `"Combatant"`, and `CombatantId`/`Health`/
+	`MaxHealth`/`StageIndex`/`Stage` set on the model using the exact names a
+	player already carries, so one nameplate read path covers both. Returns
+	the actor so the caller (DummyService) can poll `actor.health` on its own
+	tick rather than CombatService needing a reason to know DummyService
+	exists. ]]
+function CombatService.registerDummy(model: Model, stageIndex: number): Combat.Actor?
+	local stage = Config.Stages[stageIndex]
+	local root = model:FindFirstChild("HumanoidRootPart")
+	if not stage or not root or not root:IsA("BasePart") then
+		return nil
+	end
+
+	dummyCounter += 1
+	local combatantId = -dummyCounter
+	local humanoid = model:FindFirstChildOfClass("Humanoid")
+	local actor = Combat.newActor(Config, tostring(combatantId), stageIndex)
+
+	dummies[model] = {
+		kind = "dummy",
+		combatantId = combatantId,
+		actor = actor,
+		model = model,
+		root = root :: BasePart,
+		humanoid = humanoid,
+		player = nil,
+	}
+
+	CollectionService:AddTag(model, "Combatant")
+	model:SetAttribute("CombatantId", combatantId)
+	model:SetAttribute("StageIndex", stageIndex)
+	model:SetAttribute("Stage", stage.name)
+	mirrorHumanoid(humanoid, actor)
+	publishHealth(model, actor)
+
+	return actor
+end
+
+function CombatService.unregisterDummy(model: Model)
+	dummies[model] = nil
+end
+
+--[[ Heals a registered dummy to full and republishes -- the auto-reset a
+	dummy needs to be a continuous instrument rather than a respawn chore.
+	No-ops for a model that was never registered or has since been
+	unregistered, so a reset scheduled just before a `/cleardummies` cannot
+	resurrect one. ]]
+function CombatService.resetDummyHealth(model: Model)
+	local dummy = dummies[model]
+	if not dummy then
+		return
+	end
+	dummy.actor.health = Combat.maxHealth(Config, dummy.actor.stageIndex)
+	mirrorHumanoid(dummy.humanoid, dummy.actor)
+	publishHealth(model, dummy.actor)
+end
+
+--[[ A scripted loop-caster, for DummyService's telegraphed-cast variant.
+	Goes through the exact same broadcast/windup/resolve shape a player's own
+	cast already does -- `CastStarted` at intent time, `TechniqueFired` and
+	damage at resolve -- so the defender-side cast bar, never once witnessed
+	by a human, has a real cast to test against rather than a fake timer.
+
+	Only `kind == "ruler"` is wired: a striker needs an aim direction and a
+	forger needs a placement point, neither of which a stationary loop-caster
+	has, and a ruler technique (tempest, upheaval, siphon) is exactly what
+	"casts on a loop" asks for. Power is fixed at `referencePower` -- a dummy
+	has no cultivation state to derive one from, and does not need build
+	diversity, only to exist as a source of a real, telegraphed cast. ]]
+function CombatService.dummyCast(model: Model, techId: string)
+	local dummy = dummies[model]
+	if not dummy or dummy.actor.health <= 0 then
+		return
+	end
+	local tech = Config.Techniques[techId]
+	if not tech or tech.kind ~= "ruler" then
+		return
+	end
+
+	broadcastCastStart(dummy.combatantId, techId)
+
+	task.delay(tech.windup, function()
+		local stillThere = dummies[model]
+		if not stillThere or stillThere.actor.health <= 0 then
+			return
+		end
+		local now = os.clock()
+		local raw = Combat.outgoingDamage(
+			Config,
+			dummy.actor,
+			techId,
+			Config.Combat.referencePower,
+			regionAtPosition(dummy.root.Position),
+			now
+		)
+		broadcastVfx(dummy.combatantId, techId, dummy.root.Position, nil, false)
+
+		local params = OverlapParams.new()
+		params.FilterType = Enum.RaycastFilterType.Exclude
+		params.FilterDescendantsInstances = { model }
+		local seen: { [Model]: boolean } = {}
+		local parts =
+			Workspace:GetPartBoundsInRadius(dummy.root.Position, Config.Combat.ranges.ruler, params)
+		for _, part in parts do
+			local target = combatantFromInstance(part)
+			if target and target.model ~= model and not seen[target.model] then
+				seen[target.model] = true
+				damageCombatant(dummy.actor, target, raw, now)
+			end
+		end
+	end)
+end
+
 local function ensureConstructFolder(): Folder
 	if constructFolder and constructFolder.Parent then
 		return constructFolder
@@ -687,13 +810,13 @@ local function resolveEffect(caster: Player, actor: Combat.Actor, techId: string
 		-- Self-only. Combat.use already applied the buff.
 		local root = rootOf(caster)
 		if root then
-			broadcastVfx(caster, techId, root.Position, nil, true)
+			broadcastVfx(caster.UserId, techId, root.Position, nil, true)
 		end
 		publish(caster)
 	elseif tech.kind == "forger" then
 		local root = rootOf(caster)
 		if root then
-			broadcastVfx(caster, techId, root.Position, nil, true)
+			broadcastVfx(caster.UserId, techId, root.Position, nil, true)
 		end
 		if SELF_BUFF_FORGERS[techId] then
 			publish(caster)
@@ -702,6 +825,19 @@ local function resolveEffect(caster: Player, actor: Combat.Actor, techId: string
 		end
 	end
 end
+
+--[[ `Combat.use`'s refusal reasons, given a voice. Every one of them was
+	previously silent: press a key, pay nothing, nothing happens, no
+	explanation -- indistinguishable from lag, a dropped input, or a broken
+	build. `global_cooldown` is deliberately absent and stays that way: it is
+	0.4s and fires constantly during ordinary fast play, so a notice on every
+	GCD-blocked press would spam the channel and teach players to ignore it,
+	which would cost the weight `kill`/`death` notices just earned. The slot
+	bar's own cooldown sweep already shows it as a shape; that is enough. ]]
+local REFUSAL_MESSAGES: { [string]: string } = {
+	insufficient_madra = "Not enough madra.",
+	dead = "You cannot act while dead.",
+}
 
 local function onUseTechnique(player: Player, slot: unknown, suppliedAim: unknown)
 	local now = os.clock()
@@ -728,6 +864,16 @@ local function onUseTechnique(player: Player, slot: unknown, suppliedAim: unknow
 
 	local result = Combat.use(Config, actor, techId, now)
 	if not result.ok then
+		if result.reason == "cooling_down" then
+			local tech = Config.Techniques[techId]
+			AwarenessService.notify(player, "refused", `{tech.name} is still cooling.`)
+		elseif result.reason ~= "global_cooldown" then
+			AwarenessService.notify(
+				player,
+				"refused",
+				REFUSAL_MESSAGES[result.reason] or result.reason
+			)
+		end
 		return
 	end
 
@@ -735,7 +881,7 @@ local function onUseTechnique(player: Player, slot: unknown, suppliedAim: unknow
 
 	-- Announced before the windup rather than after it, which is the whole
 	-- point: the defender's reaction window is the windup.
-	broadcastCastStart(player, techId)
+	broadcastCastStart(player.UserId, techId)
 
 	-- Aim is sampled at cast, not at resolution: a long windup is a commitment,
 	-- and letting it track the camera through the telegraph would erase the
@@ -876,13 +1022,15 @@ local function stepConstructs(now: number)
 			continue
 		end
 
-		local seen: { [number]: boolean } = {}
+		-- Deduped by Model rather than UserId, so a dummy standing in a
+		-- construct dedupes exactly the same way a player does.
+		local seen: { [Model]: boolean } = {}
 		local parts = Workspace:GetPartBoundsInRadius(construct.position, construct.radius)
 		for _, part in parts do
-			local target = playerFromInstance(part)
-			if target and target.UserId ~= construct.ownerId and not seen[target.UserId] then
-				seen[target.UserId] = true
-				damagePlayer(ownerActor, target, construct.damagePerTick, now)
+			local target = combatantFromInstance(part)
+			if target and target.player ~= owner and not seen[target.model] then
+				seen[target.model] = true
+				damageCombatant(ownerActor, target, construct.damagePerTick, now)
 			end
 		end
 	end
