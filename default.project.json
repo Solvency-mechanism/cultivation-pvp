@@ -68,7 +68,10 @@
       }
     },
     "Lighting": {
-      "$className": "Lighting"
+      "$className": "Lighting",
+      "$properties": {
+        "Technology": "Voxel"
+      }
     },
     "SoundService": {
       "$className": "SoundService",
