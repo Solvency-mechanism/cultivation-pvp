@@ -60,6 +60,7 @@ local HEALTH = color(PALETTE.health)
 local HEALTH_LOW = color(PALETTE.healthLow)
 local TEXT = color(PALETTE.text)
 local TEXT_DIM = color(PALETTE.textDim)
+local DANGER = color(PALETTE.danger)
 local BLACK = Color3.new(0, 0, 0)
 
 --[[ The cast registry.
@@ -77,9 +78,18 @@ local BLACK = Color3.new(0, 0, 0)
 export type Cast = {
 	techId: string,
 	kind: string,
-	windup: number,
+	-- How long the bar runs: the technique's commit. castTime for a channel,
+	-- windup for everything else -- the server sends one number and the
+	-- client never adds two. Named for what it is, not for which field it
+	-- came from.
+	duration: number,
 	startedAt: number,
 	endsAt: number,
+	--[[ Set when the cast ended early and badly -- interrupted, or completed
+		but fizzled -- so a bar can draw a snap rather than a fade. To the
+		player the cast produced nothing, and "finished cleanly" would be a
+		lie. Held for `snapSeconds` after the end, then the record is gone. ]]
+	snappedAt: number?,
 }
 
 local casts: { [number]: Cast } = {}
@@ -90,18 +100,41 @@ local casts: { [number]: Cast } = {}
 	telegraph start a few frames late and it finishes exactly when the technique
 	resolves. Wrong in the direction that costs the attacker, which is the right
 	direction to be wrong in. ]]
-function Nameplates.noteCast(casterId: number, techId: string, kind: string, windup: number)
+function Nameplates.noteCast(casterId: number, techId: string, kind: string, duration: number)
 	local now = os.clock()
 	casts[casterId] = {
 		techId = techId,
 		kind = kind,
-		windup = windup,
+		duration = duration,
 		startedAt = now,
-		-- Sub-floor windups still get a record, so the plate can flash even
+		-- Sub-floor commits still get a record, so the plate can flash even
 		-- though it will not draw a bar. `flashSeconds` gives the flash
 		-- somewhere to live without pretending to be a duration.
-		endsAt = now + math.max(windup, InterfaceSpec.Cast.flashSeconds),
+		endsAt = now + math.max(duration, InterfaceSpec.Cast.flashSeconds),
+		snappedAt = nil,
 	}
+end
+
+--[[ A cast ended by the server rather than by its own clock: interrupted, or
+	completed. Matched on technique so a stale event for an earlier cast cannot
+	end a newer one -- the same guard the movement prediction uses.
+
+	`snapped` is true for an interrupt and for a fizzled completion. A clean
+	completion just ends the record now, which for a channel that ran its full
+	duration is a no-op the client would have reached on its own clock a few
+	milliseconds later. ]]
+function Nameplates.endCast(casterId: number, techId: string, snapped: boolean)
+	local cast = casts[casterId]
+	if not cast or cast.techId ~= techId then
+		return
+	end
+	local now = os.clock()
+	if snapped then
+		cast.snappedAt = now
+		cast.endsAt = now
+	else
+		casts[casterId] = nil
+	end
 end
 
 function Nameplates.castOf(userId: number): Cast?
@@ -109,11 +142,24 @@ function Nameplates.castOf(userId: number): Cast?
 	if not cast then
 		return nil
 	end
-	if os.clock() >= cast.endsAt + InterfaceSpec.Cast.holdSeconds then
+	local now = os.clock()
+	if cast.snappedAt then
+		if now >= cast.snappedAt + InterfaceSpec.Cast.snapSeconds then
+			casts[userId] = nil
+			return nil
+		end
+		return cast
+	end
+	if now >= cast.endsAt + InterfaceSpec.Cast.holdSeconds then
 		casts[userId] = nil
 		return nil
 	end
 	return cast
+end
+
+-- Whether a cast record is in its snap: ended badly, still being shown as such.
+function Nameplates.isSnapped(cast: Cast): boolean
+	return cast.snappedAt ~= nil
 end
 
 --[[ A combatant, player or dummy, behind one shape.
@@ -540,13 +586,19 @@ local function refresh(who: Combatant, plate: Plate)
 	end
 
 	local cast = Nameplates.castOf(who.id)
-	if cast and InterfaceSpec.telegraphs(cast.windup) then
-		local elapsed = os.clock() - cast.startedAt
-		local progress = math.clamp(elapsed / math.max(cast.windup, 1e-3), 0, 1)
+	if cast and InterfaceSpec.telegraphs(cast.duration) then
 		plate.castRow.Visible = true
 		plate.stage.Visible = false
-		plate.castFill.Size = UDim2.fromScale(progress, 1)
-		plate.castFill.BackgroundColor3 = color(InterfaceSpec.kindColor(cast.kind))
+		if cast.snappedAt then
+			-- Broken, not finished: full width in the danger hue for a beat.
+			plate.castFill.Size = UDim2.fromScale(1, 1)
+			plate.castFill.BackgroundColor3 = DANGER
+		else
+			local elapsed = os.clock() - cast.startedAt
+			local progress = math.clamp(elapsed / math.max(cast.duration, 1e-3), 0, 1)
+			plate.castFill.Size = UDim2.fromScale(progress, 1)
+			plate.castFill.BackgroundColor3 = color(InterfaceSpec.kindColor(cast.kind))
+		end
 		plate.castLabel.Text = string.upper(cast.techId)
 	else
 		plate.castRow.Visible = false

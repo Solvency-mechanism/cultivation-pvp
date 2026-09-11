@@ -410,6 +410,11 @@ InterfaceSpec.Cast = {
 	-- A finished cast holds for a beat before clearing, so a fast technique
 	-- does not simply blink out of existence the instant it lands.
 	holdSeconds = 0.12,
+	--[[ How long a bar shows its snap after an interrupt or a fizzle. Long
+		enough to be seen as an event -- the bar did not finish, it broke --
+		and short enough that a defender who just interrupted someone is not
+		staring at a red bar while the next thing happens. ]]
+	snapSeconds = 0.35,
 }
 
 --[[ The target frame.

@@ -1276,7 +1276,14 @@ local function predictMovement(tech: Config.Technique)
 		if pendingMove and pendingMove.token == token then
 			pendingMove = nil
 			local current = ownHumanoid()
-			if current then
+			--[[ Revert only if the speed is still the one we wrote. If the
+				server has written anything since -- a slow landing in this
+				window, a different buff -- that value is the truth and ours
+				is stale; writing base over a server slow would hand the client
+				a frame of speed it has no right to. Named before the slow
+				existed so it was not discovered as "slows sometimes do not
+				apply". ]]
+			if current and current.WalkSpeed == tech.moveSpeed then
 				current.WalkSpeed = Config.Combat.baseWalkSpeed
 			end
 		end
@@ -1632,7 +1639,7 @@ local function refreshTarget()
 		and ownStage == stageIndex
 
 	local cast = Nameplates.castOf(target.id)
-	local drawingCast = cast ~= nil and InterfaceSpec.telegraphs(cast.windup)
+	local drawingCast = cast ~= nil and InterfaceSpec.telegraphs(cast.duration)
 
 	if not sameBracket then
 		targetStroke.Color = DANGER
@@ -1644,14 +1651,22 @@ local function refreshTarget()
 	end
 
 	if cast and drawingCast then
-		local elapsed = os.clock() - cast.startedAt
-		local remaining = math.max(cast.windup - elapsed, 0)
 		targetCast.Visible = true
-		targetCastFill.Size = UDim2.fromScale(math.clamp(elapsed / cast.windup, 0, 1), 1)
-		targetCastFill.BackgroundColor3 = color(InterfaceSpec.kindColor(cast.kind))
 		local tech = Config.Techniques[cast.techId]
 		targetCastName.Text = if tech then string.upper(tech.name) else string.upper(cast.techId)
-		targetCastTimer.Text = string.format("%.1f", remaining)
+		if Nameplates.isSnapped(cast) then
+			-- Broken, not finished: the whole bar in the danger hue for a beat,
+			-- and no timer, because there is no time left to count.
+			targetCastFill.Size = UDim2.fromScale(1, 1)
+			targetCastFill.BackgroundColor3 = DANGER
+			targetCastTimer.Text = ""
+		else
+			local elapsed = os.clock() - cast.startedAt
+			local remaining = math.max(cast.duration - elapsed, 0)
+			targetCastFill.Size = UDim2.fromScale(math.clamp(elapsed / cast.duration, 0, 1), 1)
+			targetCastFill.BackgroundColor3 = color(InterfaceSpec.kindColor(cast.kind))
+			targetCastTimer.Text = string.format("%.1f", remaining)
+		end
 	else
 		targetCast.Visible = false
 	end
@@ -1669,24 +1684,33 @@ local function refreshOwnCast()
 		castFrame.Visible = false
 		return
 	end
-	local now = os.clock()
-	local elapsed = now - cast.startedAt
-	if elapsed > cast.windup + CASTSPEC.holdSeconds then
+	--[[ The registry owns the record's lifetime, including the snap. Reading
+		through castOf rather than holding our own timer means an interrupt or a
+		fizzle ends this bar the same frame it ends the nameplate's. ]]
+	local live = Nameplates.castOf(player.UserId)
+	if not live or live ~= cast then
 		ownCast = nil
 		castFrame.Visible = false
 		return
 	end
-	if not InterfaceSpec.telegraphs(cast.windup) then
+	if not InterfaceSpec.telegraphs(cast.duration) then
 		castFrame.Visible = false
 		return
 	end
 
 	local tech = Config.Techniques[cast.techId]
 	castFrame.Visible = true
-	castFill.Size = UDim2.fromScale(math.clamp(elapsed / cast.windup, 0, 1), 1)
-	castFill.BackgroundColor3 = color(InterfaceSpec.kindColor(cast.kind))
 	castName.Text = if tech then string.upper(tech.name) else string.upper(cast.techId)
-	castTimer.Text = string.format("%.1f", math.max(cast.windup - elapsed, 0))
+	if Nameplates.isSnapped(cast) then
+		castFill.Size = UDim2.fromScale(1, 1)
+		castFill.BackgroundColor3 = DANGER
+		castTimer.Text = ""
+	else
+		local elapsed = os.clock() - cast.startedAt
+		castFill.Size = UDim2.fromScale(math.clamp(elapsed / cast.duration, 0, 1), 1)
+		castFill.BackgroundColor3 = color(InterfaceSpec.kindColor(cast.kind))
+		castTimer.Text = string.format("%.1f", math.max(cast.duration - elapsed, 0))
+	end
 end
 
 -- ===================================================================
@@ -1845,6 +1869,15 @@ local castStarted = remotes:WaitForChild("CastStarted") :: RemoteEvent
 	the entire HUD with it, to add a feature. Absent, cycling simply does
 	nothing; present, it works. Nothing else in this file depends on it. ]]
 local setLoadout = remotes:FindFirstChild("SetLoadout")
+
+--[[ Looked up without waiting, like SetLoadout, for the same reason: these land
+	from the combat workstream in a separate change, and a WaitForChild on a
+	remote that has not shipped would hang the whole HUD. Absent, a channel's
+	bar clears on its own clock as every bar does today; present, an interrupt
+	or a fizzle snaps it early. Their shapes are the REMOTES section of
+	frostbolt-ruling.md, and are revised there, never here. ]]
+local castInterrupted = remotes:FindFirstChild("CastInterrupted")
+local castCompleted = remotes:FindFirstChild("CastCompleted")
 
 --[[ Loadout cycling, without a picker.
 
@@ -2171,17 +2204,44 @@ castStarted.OnClientEvent:Connect(function(event: any)
 	if not casterId then
 		return
 	end
-	Nameplates.noteCast(
-		casterId,
-		tostring(event.techId),
-		tostring(event.kind),
-		tonumber(event.windup) or 0
-	)
+	--[[ `duration` is the commit -- castTime for a channel, windup otherwise --
+		and the server sends it on every cast per the REMOTES section. The
+		fallback to `windup` exists only for the window before the server half
+		ships; once it has, the two are equal for every ordinary technique and
+		the fallback is never taken. ]]
+	local duration = tonumber(event.duration) or tonumber(event.windup) or 0
+	Nameplates.noteCast(casterId, tostring(event.techId), tostring(event.kind), duration)
 	if casterId == player.UserId then
 		ownCast = Nameplates.castOf(casterId)
 		confirmMovement(tostring(event.techId))
 	end
 end)
+
+local function onCastEnded(event: any, snapped: boolean)
+	if typeof(event) ~= "table" then
+		return
+	end
+	local casterId = tonumber(event.casterId)
+	if not casterId then
+		return
+	end
+	Nameplates.endCast(casterId, tostring(event.techId), snapped)
+end
+
+if castInterrupted and castInterrupted:IsA("RemoteEvent") then
+	castInterrupted.OnClientEvent:Connect(function(event: any)
+		-- An interrupt is always a snap: the cast broke.
+		onCastEnded(event, true)
+	end)
+end
+if castCompleted and castCompleted:IsA("RemoteEvent") then
+	castCompleted.OnClientEvent:Connect(function(event: any)
+		-- A fizzled completion produced nothing, so it reads as broken too. A
+		-- clean one just ends the record; the bar was about to end anyway.
+		local fizzled = typeof(event) == "table" and event.fizzled == true
+		onCastEnded(event, fizzled)
+	end)
+end
 
 --[[ The guidance state machine. First match wins, and the order is the order a
 	player's attention should follow: what is stopping you, then what you are

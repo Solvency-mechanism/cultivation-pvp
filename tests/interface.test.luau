@@ -220,6 +220,41 @@ check("a kill cannot be erased immediately", kill.floor > 0)
 check("a plain notice claims no floor", plain.floor == 0)
 eq("an unknown kind degrades to the plain weight", InterfaceSpec.noticeKind("nonsense"), plain)
 
+--[[ Cast-bar timing constants, and the relation between them that matters.
+
+	A snap -- the bar drawn broken after an interrupt or a fizzle -- has to be
+	visible as an event, so it must outlast the ordinary post-cast hold; and it
+	must still be brief, so a defender who just interrupted someone is not
+	staring at a red bar while the next thing happens. Both bounds asserted,
+	because either one drifting turns a designed cue into either a flicker or a
+	stuck bar. ]]
+check(
+	"a snap outlasts the ordinary hold",
+	InterfaceSpec.Cast.snapSeconds > InterfaceSpec.Cast.holdSeconds
+)
+check("a snap is still brief", InterfaceSpec.Cast.snapSeconds < 1.0)
+check(
+	"the sub-floor flash is shorter than a snap",
+	InterfaceSpec.Cast.flashSeconds < InterfaceSpec.Cast.snapSeconds
+)
+
+--[[ The commit is one number. Every channelled technique in the live pool must
+	have windup 0, per the one-timer ruling -- two timers on one technique is a
+	seam by construction, and this is the assertion that keeps anyone from
+	reopening it by adding a technique with both. Roster asserts the same from
+	the Config side; this is the client's stake in it, since the bar draws
+	exactly one duration. ]]
+for id, tech in Config.Techniques do
+	local castTime = (tech :: any).castTime or 0
+	if castTime > 0 then
+		check(`channelled technique {id} has no separate windup`, tech.windup == 0)
+		check(
+			`channelled technique {id} telegraphs by its castTime`,
+			InterfaceSpec.telegraphs(castTime)
+		)
+	end
+end
+
 -- Cooldown countdowns, in the shape an icon prints them.
 eq("a sub-second cooldown shows a decimal", InterfaceSpec.countdown(0.8), "0.8")
 eq("a long cooldown rounds up to whole seconds", InterfaceSpec.countdown(15.2), "16")
