@@ -1063,6 +1063,99 @@ local function noteOwnCast(techId: string)
 	gcdUntil = now + Config.Combat.globalCooldown
 end
 
+--[[ Movement prediction.
+
+	A server-set WalkSpeed does not reach the player instantly. The client owns
+	and simulates its own character, so a server write has to replicate down
+	before the character actually moves faster -- 50 to 150ms on a real
+	connection. Against Lunge, which is 80 speed for 0.25s, that is not a detail:
+	up to sixty percent of the pulse can be gone before it starts, and the part
+	a player feels most -- the instant answer to their own keypress -- is exactly
+	the part latency eats. It would read as a slippery floor rather than a juke,
+	and a tester would honestly report that the burst does not work when the
+	truth is that the plumbing does not.
+
+	So the client writes the speed the instant the key goes down, and stops
+	waiting for permission to *start* moving. It is not a second authority. It
+	reads `moveSpeed` and `buffDuration` from the same Config the server charges
+	from, exactly as the cooldown prediction reads `madraCost` and `cooldown`,
+	and it holds no copy of anything.
+
+	The seam, named explicitly rather than discovered:
+
+	  - The client writes WalkSpeed ONCE, on press, behind the same local gate
+	    the windup effect uses. It never writes position, never writes a buff,
+	    never tells the server anything it does not already send.
+	  - The server applies the real speed, owns the real duration, and its
+	    expiry write is what ends the effect. A client write does not replicate
+	    up; a server write does replicate down. The asymmetry runs the right way.
+	  - On `CastStarted` for our own cast of this technique, the client CANCELS
+	    its revert and never touches the property again. From there the server
+	    owns it.
+	  - If no confirmation arrives within windup plus a grace, the client
+	    reverts to base speed. The refused-press case, and the same shape as
+	    `Vfx.clearCharge` collapsing an unconfirmed charge.
+
+	The client deliberately does NOT restore itself at `buffDuration` on the
+	confirmed path, and Lunge is the reason. At 0.25s, a slow enough connection
+	lands the server's replicated 80 *after* a client self-restore -- and the
+	character goes 80, 16, 80, 16: a double pulse from a mechanic whose entire
+	value is feeling like one clean juke. Leaving the server's restore as the
+	only restore makes the burst *longer* by one latency on a bad link instead,
+	which still reads as a dash. Long beats double. That is a property of any
+	client prediction of a sub-second burst, not of this one, and it is why the
+	burst has to be measured in the published place: on loopback neither case
+	ever occurs.
+
+	What this grants a cheater: nothing. Roblox gives the client its own
+	character, so a modified client can already set its own WalkSpeed to
+	anything it likes, today. The trade is entirely about honest clients' feel,
+	and a desync costs a brief wrong speed rather than a wrong outcome. ]]
+local MOVE_CONFIRM_GRACE = 0.3
+
+local pendingMove: { techId: string, token: number }? = nil
+local moveToken = 0
+
+local function ownHumanoid(): Humanoid?
+	local character = player.Character
+	return if character then character:FindFirstChildOfClass("Humanoid") else nil
+end
+
+local function predictMovement(tech: Config.Technique)
+	if tech.moveSpeed <= 0 then
+		return
+	end
+	local humanoid = ownHumanoid()
+	if not humanoid then
+		return
+	end
+
+	moveToken += 1
+	local token = moveToken
+	pendingMove = { techId = tech.id, token = token }
+	humanoid.WalkSpeed = tech.moveSpeed
+
+	task.delay(tech.windup + MOVE_CONFIRM_GRACE, function()
+		-- Still pending means the server never confirmed this press.
+		if pendingMove and pendingMove.token == token then
+			pendingMove = nil
+			local current = ownHumanoid()
+			if current then
+				current.WalkSpeed = Config.Combat.baseWalkSpeed
+			end
+		end
+	end)
+end
+
+--[[ The server confirmed our cast: hand the property over and stop caring.
+	Matched on technique rather than merely on caster, so a spammed second key
+	cannot confirm the first. ]]
+local function confirmMovement(techId: string)
+	if pendingMove and pendingMove.techId == techId then
+		pendingMove = nil
+	end
+end
+
 -- ===================================================================
 -- Soft targeting.
 -- ===================================================================
@@ -1729,6 +1822,7 @@ castStarted.OnClientEvent:Connect(function(event: any)
 	)
 	if casterId == player.UserId then
 		ownCast = Nameplates.castOf(casterId)
+		confirmMovement(tostring(event.techId))
 	end
 end)
 
@@ -1883,13 +1977,20 @@ end)
 	binds itself to `5` the day it lands. Everything sent here is intent -- a
 	slot name and where the camera is looking -- and the server owns every
 	decision that follows. ]]
+
 local function fireSlot(slot: string)
 	local camera = Workspace.CurrentCamera
 	useTechnique:FireServer(slot, if camera then camera.CFrame.LookVector else nil)
 	--[[ The speculative windup effect, drawn from here rather than from a second
 		input listener inside Vfx. There is one input owner, so there is nothing
-		to keep in agreement about what a press with Shift held means. ]]
-	Vfx.predictWindup(slot)
+		to keep in agreement about what a press with Shift held means. The gate
+		result is reused for movement, so there is also one gate. ]]
+	if Vfx.predictWindup(slot) then
+		local tech = slotTechnique(slot)
+		if tech then
+			predictMovement(tech)
+		end
+	end
 end
 
 local SLOT_KEYS: { [Enum.KeyCode]: string } = {}

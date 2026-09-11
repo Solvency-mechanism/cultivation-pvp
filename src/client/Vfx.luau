@@ -2730,30 +2730,31 @@ end
 
 	One input owner rather than two that must agree about modifiers. The HUD
 	knows what a press means; this draws what it is told. ]]
-function Vfx.predictWindup(slot: string)
+function Vfx.predictWindup(slot: string): boolean
 	local player = Players.LocalPlayer
 	if not player then
-		return
+		return false
 	end
 	local techId = player:GetAttribute("Slot_" .. slot)
 	if typeof(techId) ~= "string" then
-		return
+		return false
 	end
 	local tech = Config.Techniques[techId]
 	if not tech then
-		return
+		return false
 	end
 
 	local now = os.clock()
 	if now < gcdUntil or now < (confirmedUntil[techId] or 0) then
-		return
+		return false
 	end
 	local madra = player:GetAttribute("Madra")
 	if typeof(madra) == "number" and madra < tech.madraCost then
-		return
+		return false
 	end
 
 	Vfx.charge(techId, player.UserId)
+	return true
 end
 
 return Vfx
