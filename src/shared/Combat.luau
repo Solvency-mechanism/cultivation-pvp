@@ -16,8 +16,18 @@ export type Buff = {
 	damageBuff: number,
 	mitigation: number,
 	moveSpeed: number,
+	slowMultiplier: number,
 	expiresAt: number,
 }
+
+--[[ A plain position, not Roblox's Vector3, so this module loads under Lune
+	as well as Roblox -- same reason AuraNodes.Vec3 exists, and the same
+	shape. Not the same declared type only because this module takes no
+	internal requires. Vector3 is a distinct builtin, not a table, so it
+	does not satisfy this on its own -- NodeService.placer's own callers
+	already construct `{ x = v.X, y = v.Y, z = v.Z }` at the boundary rather
+	than pass a Vector3 through, and CombatService does the same here. ]]
+export type Vec3 = { x: number, y: number, z: number }
 
 export type Actor = {
 	id: string,
@@ -121,10 +131,96 @@ function Combat.moveSpeedOf(actor: Actor, now: number): number
 	return highest
 end
 
+--[[ Multiplicative, applied on top of whatever moveSpeedOf already resolved
+	(an override or base speed) -- deliberately NOT represented as another
+	moveSpeed buff, per the frostbolt-ruling seam: moveSpeedOf takes the
+	HIGHEST live override, so a slow expressed as a low moveSpeed would lose
+	outright to any unrelated buff already live at or above it (windstride's
+	sustain 24 alone would silently cancel an 8 slow, with no dash spent and
+	nothing to counter). A multiplier always bites, proportionally, on
+	whatever speed is actually in effect -- so a caster mid-lunge (80) who
+	gets slowed 0.5 drops to 40, a real, costed escape, while someone merely
+	sustaining at 24 drops to 12, genuinely slowed. Stacks multiplicatively
+	like mitigation, for the same never-reaches-zero reason. ]]
+function Combat.slowMultiplierOf(actor: Actor, now: number): number
+	Combat.pruneBuffs(actor, now)
+	local total = 1.0
+	for _, buff in actor.buffs do
+		total *= buff.slowMultiplier
+	end
+	return total
+end
+
+--[[ Inflicted on a target by a hit landing, not a self-buff -- so this does
+	not go through Combat.use, which only ever touches the calling actor.
+	Refreshes rather than stacks with itself, same discipline Combat.use's
+	own self-buff insertion already uses, keyed by `source` so a second
+	frostbolt from a different caster is a distinct entry rather than a
+	refresh of this one. ]]
+function Combat.applySlow(
+	actor: Actor,
+	source: string,
+	multiplier: number,
+	duration: number,
+	now: number
+)
+	for i = #actor.buffs, 1, -1 do
+		if actor.buffs[i].source == source then
+			table.remove(actor.buffs, i)
+		end
+	end
+	table.insert(actor.buffs, {
+		source = source,
+		damageBuff = 0,
+		mitigation = 0,
+		moveSpeed = 0,
+		slowMultiplier = multiplier,
+		expiresAt = now + duration,
+	})
+end
+
 --[[ Brackets never mix. An out-of-bracket engagement is refused outright
 	rather than balanced. ]]
 function Combat.canEngage(a: Actor, b: Actor): boolean
 	return a.stageIndex == b.stageIndex
+end
+
+local function distance(a: Vec3, b: Vec3): number
+	local dx, dy, dz = a.x - b.x, a.y - b.y, a.z - b.z
+	return (dx * dx + dy * dy + dz * dz) ^ 0.5
+end
+
+--[[ Whether a lock technique may resolve against a specific target right
+	now: alive, same bracket, in range, with line of sight. The distance
+	check is pure arithmetic; the line-of-sight raycast is a Roblox API and
+	cannot live in a pure module, so it is injected -- the same pattern
+	NodeService.placer and CultivationService's refusal handler already use
+	for the identical problem. Lune passes a stub; CombatService passes a
+	real Workspace:Raycast wrapper. Interface's reach pip calls this exact
+	function for a lock technique too, so there is exactly one answer to
+	"can I hit this" rather than a client copy that can drift from the
+	server's. ]]
+function Combat.canUseOnTarget(
+	caster: Actor,
+	casterPosition: Vec3,
+	target: Actor,
+	targetPosition: Vec3,
+	range: number,
+	hasLineOfSight: (Vec3, Vec3) -> boolean
+): (boolean, string)
+	if target.health <= 0 then
+		return false, "target_dead"
+	end
+	if not Combat.canEngage(caster, target) then
+		return false, "out_of_bracket"
+	end
+	if distance(casterPosition, targetPosition) > range then
+		return false, "out_of_range"
+	end
+	if not hasLineOfSight(casterPosition, targetPosition) then
+		return false, "no_line_of_sight"
+	end
+	return true, "ok"
 end
 
 function Combat.canUse(config: any, actor: Actor, techId: string, now: number): (boolean, string)
@@ -196,6 +292,11 @@ function Combat.use(config: any, actor: Actor, techId: string, now: number): Use
 			damageBuff = tech.damageBuff,
 			mitigation = tech.mitigation,
 			moveSpeed = tech.moveSpeed,
+			-- 1.0, not 0: this is the multiplier's identity value, unlike
+			-- every field beside it where 0 means "no effect". Nothing self-
+			-- slows through Combat.use today -- a slow lands on a target via
+			-- Combat.applySlow, inflicted by a hit, never by casting.
+			slowMultiplier = 1.0,
 			expiresAt = now + tech.buffDuration,
 		})
 	end

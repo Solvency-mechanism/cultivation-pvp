@@ -179,6 +179,68 @@ near("ruler scales down on barren ground", siphonBarren / siphonOpen, 0.5, 1e-9)
 local lanceWell = Combat.outgoingDamage(Config, t, "lance", freshPower, "wellspring", 0)
 near("striker ignores terrain", lanceWell, freshHit, 1e-9)
 
+--[[ Slow is a separate multiplier, not a moveSpeed buff -- the frostbolt-
+	ruling seam. A slow bites proportionally on whatever speed is already in
+	effect, including a dash: it never simply loses to an unrelated buff the
+	way a competing moveSpeed entry would. ]]
+local slowed = Combat.newActor(Config, "p9", LOWGOLD)
+near("no slow before it is applied", Combat.slowMultiplierOf(slowed, 0), 1.0, 1e-9)
+Combat.applySlow(slowed, "frostbolt", 0.5, 3.0, 0)
+near("slow halves effective speed", Combat.slowMultiplierOf(slowed, 1), 0.5, 1e-9)
+near("slow lapses on schedule", Combat.slowMultiplierOf(slowed, 99), 1.0, 1e-9)
+
+-- Reapplying a slow from the same source refreshes rather than stacking
+Combat.applySlow(slowed, "frostbolt", 0.5, 3.0, 0)
+Combat.applySlow(slowed, "frostbolt", 0.5, 3.0, 1)
+eq("one slow from one source, not two", #slowed.buffs, 1)
+
+-- A slow bites a dash proportionally rather than losing to it outright
+local dashing = Combat.newActor(Config, "p10", LOWGOLD)
+Combat.use(Config, dashing, "lunge", 0)
+Combat.applySlow(dashing, "frostbolt", 0.5, 3.0, 0)
+near(
+	"a dash under a slow is halved, not unaffected",
+	Combat.moveSpeedOf(dashing, 0.1) * Combat.slowMultiplierOf(dashing, 0.1),
+	Config.Techniques.lunge.moveSpeed * 0.5,
+	1e-9
+)
+
+--[[ CanUseOnTarget: alive, same bracket, in range, line of sight -- in that
+	order, so the first thing wrong is the reason reported. The raycast is
+	injected; these stubs are the Lune half of the seam CombatService's real
+	Workspace:Raycast wrapper fills on the Roblox side. ]]
+local origin: Combat.Vec3 = { x = 0, y = 0, z = 0 }
+local near5: Combat.Vec3 = { x = 5, y = 0, z = 0 }
+local far500: Combat.Vec3 = { x = 500, y = 0, z = 0 }
+local clearSight = function()
+	return true
+end
+local blockedSight = function()
+	return false
+end
+
+local locker = Combat.newActor(Config, "p11", LOWGOLD)
+local lockTarget = Combat.newActor(Config, "p12", LOWGOLD)
+local okTarget, reasonTarget =
+	Combat.canUseOnTarget(locker, origin, lockTarget, near5, 10, clearSight)
+check("in range, in bracket, alive, clear sight is ok", okTarget)
+eq("ok reason", reasonTarget, "ok")
+
+lockTarget.health = 0
+local _, deadReason = Combat.canUseOnTarget(locker, origin, lockTarget, near5, 10, clearSight)
+eq("dead target refused", deadReason, "target_dead")
+lockTarget.health = Combat.maxHealth(Config, LOWGOLD)
+
+local outOfBracket = Combat.newActor(Config, "p13", 6)
+local _, bracketReason = Combat.canUseOnTarget(locker, origin, outOfBracket, near5, 10, clearSight)
+eq("cross-bracket target refused", bracketReason, "out_of_bracket")
+
+local _, rangeReason = Combat.canUseOnTarget(locker, origin, lockTarget, far500, 10, clearSight)
+eq("out-of-range target refused", rangeReason, "out_of_range")
+
+local _, sightReason = Combat.canUseOnTarget(locker, origin, lockTarget, near5, 10, blockedSight)
+eq("blocked sight refused", sightReason, "no_line_of_sight")
+
 -- Damage application
 local target = Combat.newActor(Config, "t1", LOWGOLD)
 local hit = Combat.applyDamage(Config, target, 100, 0)
