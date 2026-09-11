@@ -125,21 +125,27 @@ type Shot = {
 	hold: number?,
 }
 
---[[ Placeholder coordinates. Landscape replaces these with the three frames
-	it names in storefront.md; the shapes are what matter here. ]]
+--[[ The three frames landscape named in storefront.md; coordinates are
+	first-round. Order matters when no Shot attribute selects one: both
+	thumbnails run first so the aura nodes get two holds to cycle before the
+	icon frame, which wants a gold Prime in the Wellspring and is the only
+	shot that does not fire. Axes: +z north toward the Wellspring, -x west
+	(Verdant Reach), +x east (Ember Barrens); ground is y ~ 0.2. ]]
 local SHOTS: { Shot } = {
 	{
-		--[[ THUMBNAIL. HUD in, partially: vitals and the five-slot bar are a
-			truthful advert for what the game is; the sense panel, guidance and
-			chat are for playing, not looking. A technique mid-moment, not a
-			pose. ]]
-		name = "thumbnail",
+		--[[ THUMBNAIL, recommended. The two regions face each other across
+			the corridor south of the plaza: the character stands on the
+			Reach's grass firing EAST at the Barrens, the camera west and
+			above so the afternoon sun is behind the lens -- green front-lit,
+			basalt and embers dark, the flash between them. Nothing in the
+			frame is the spawn. ]]
+		name = "reach-against-barrens",
 		camera = {
-			position = Vector3.new(-18, 9, -84),
-			lookAt = Vector3.new(0, 4, -60),
-			fov = 62,
+			position = Vector3.new(-92, 15, -98),
+			lookAt = Vector3.new(-30, 5, -110),
+			fov = 66,
 		},
-		character = Vector3.new(-5, 3, -60),
+		character = Vector3.new(-58, 3, -108),
 		dummy = "stationary lowgold ahead",
 		settle = 3,
 		hud = { CultivationHud = true, CultivationReticle = false, ImpactFeedback = true },
@@ -148,40 +154,79 @@ local SHOTS: { Shot } = {
 			"Guidance",
 			"Notice",
 			"FirstRunCard",
+			"BreakthroughPrompt",
 			"TargetFrame",
+			"RefinementRail",
 			"LoadoutPicker",
 		},
 		coreGui = false,
+		lighting = { ClockTime = 16.0 },
 		fire = {
 			slot = "striker",
-			target = Vector3.new(0, 4, -60),
+			target = Vector3.new(-53, 4, -108),
 			delay = 0.5,
 			markerAfter = 0.36,
 		},
 		hold = 4,
 	},
 	{
-		--[[ ICON. HUD out entirely. One strong shape, one strong colour,
-			readable at 64px: a gold Prime node, or one landed impact's white
-			core against near-black dust, per ImpactSpec's two-material rule.
-			Composed for SQUARE -- landscape crops the centre, not the
-			thumbnail squeezed. ]]
-		name = "icon",
+		--[[ THUMBNAIL, alternate: the crossroads pillars with a cast. The
+			character stands on the plaza's south edge firing north so the
+			flash lands at the monument's foot with the gold crown directly
+			above it, the two region waymarks framing left and right, the
+			compass spokes leading in, and the Wellspring spire on the same
+			axis 172 studs beyond. ]]
+		name = "crossroads-cast",
 		camera = {
-			position = Vector3.new(8, 6, -70),
-			lookAt = Vector3.new(0, 4, -60),
+			position = Vector3.new(-22, 7, -62),
+			lookAt = Vector3.new(0, 12, -20),
+			fov = 64,
+		},
+		character = Vector3.new(0, 3, -34),
+		dummy = "stationary lowgold ahead",
+		settle = 3,
+		hud = { CultivationHud = true, CultivationReticle = false, ImpactFeedback = true },
+		hideChildren = {
+			"Sense",
+			"Guidance",
+			"Notice",
+			"FirstRunCard",
+			"BreakthroughPrompt",
+			"TargetFrame",
+			"RefinementRail",
+			"LoadoutPicker",
+		},
+		coreGui = false,
+		lighting = { ClockTime = 15.4 },
+		fire = {
+			slot = "striker",
+			target = Vector3.new(0, 4, -29),
+			delay = 0.5,
+			markerAfter = 0.36,
+		},
+		hold = 4,
+	},
+	{
+		--[[ ICON. HUD out entirely; composed for the CENTRE SQUARE of the
+			16:9 frame -- landscape crops that square, never the thumbnail
+			squeezed. The Wellspring heart at (0, 0, 172): the spire rising
+			through the square, the neon pool at its foot, a node in the lower
+			third. Dusk, so the cyan pool and rim and a gold Prime are the
+			only saturated light. No fire: the subject is the node. The Prime
+			is RNG; shoot on a round where the node in frame is gold, two
+			rounds max, then the CrossroadsCrown is the deterministic
+			fallback (camera (-14, 30, -40) -> (0, 40, 0), fov 40). ]]
+		name = "wellspring-prime",
+		camera = {
+			position = Vector3.new(-24, 9, 138),
+			lookAt = Vector3.new(0, 14, 172),
 			fov = 50,
 		},
 		settle = 3,
 		hud = { CultivationHud = false, CultivationReticle = false, ImpactFeedback = false },
 		coreGui = false,
-		fire = {
-			slot = "striker",
-			target = Vector3.new(0, 4, -60),
-			delay = 0.5,
-			markerAfter = 0.36,
-		},
-		hold = 4,
+		lighting = { ClockTime = 18.3, Brightness = 1.6, ExposureCompensation = 0.15 },
+		hold = 6,
 	},
 }
 
