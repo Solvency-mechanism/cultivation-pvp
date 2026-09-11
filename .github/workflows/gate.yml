@@ -28,6 +28,7 @@ jobs:
       - name: Tests
         run: |
           lune run tests/compile.test
+          lune run tests/wiring.test
           lune run tests/progression.test
           lune run tests/auranodes.test
           lune run tests/combat.test

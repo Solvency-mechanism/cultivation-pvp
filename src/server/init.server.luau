@@ -11,6 +11,7 @@ local Config = require(ReplicatedStorage.Shared.Config)
 local CultivationService = require(script.CultivationService)
 local DummyService = require(script.DummyService)
 local NodeService = require(script.NodeService)
+local NpcService = require(script.NpcService)
 local PersistenceService = require(script.PersistenceService)
 local PresenceService = require(script.PresenceService)
 
@@ -74,6 +75,11 @@ startService("CombatService", CombatService.start)
 	built fine, because AN UNREFERENCED MODULE IS PERFECTLY VALID LUAU and a
 	module that is never required cannot fail a suite that never requires it. ]]
 startService("DummyService", DummyService.start)
+--[[ The second time a finished server module was landed without this line.
+	NpcService reads ArenaService.patrols() and registers through CombatService,
+	so it starts after both. tests/wiring.test now fails on any server module
+	with a start that init.server never requires. ]]
+startService("NpcService", NpcService.start)
 startService("AwarenessService", AwarenessService.start)
 
 --[[ Joining yields on the data store, so everything downstream of cultivation
@@ -218,6 +224,9 @@ RunService.Heartbeat:Connect(function(delta: number)
 	end)
 	tickService("DummyService", now, function()
 		DummyService.tick(now)
+	end)
+	tickService("NpcService", now, function()
+		NpcService.tick(now)
 	end)
 	tickService("AwarenessService", now, AwarenessService.tick)
 	tickService("PresenceService", now, PresenceService.tick)
