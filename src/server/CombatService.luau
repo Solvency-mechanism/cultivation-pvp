@@ -778,22 +778,36 @@ end
 	for "which technique, whose". The server holds the actual state in
 	`projectiles`, stepped from CombatService.tick; the part is the
 	presentation of that state, not a second copy of it. ]]
+--[[ Two guidance shapes behind one record, per the projectile-variations
+	set: "homing" chases a known target (targetCombatantId, re-aimed at its
+	live position every step); "straight" has no target at all and instead
+	carries a fixed direction and a range to give up at, proximity-checking
+	for whatever it passes near -- the skillshot idiom, Shard and Glacier
+	Lance. A flat, optional-field shape rather than two separate types,
+	matching how Technique itself carries every field and leaves the unused
+	ones nil/0 -- one array, one step loop, one place either kind is
+	destroyed or lands. ]]
 type Projectile = {
 	part: BasePart,
 	techId: string,
 	player: Player,
 	casterActor: Combat.Actor,
-	targetCombatantId: number,
+	kind: "homing" | "straight",
+	targetCombatantId: number?,
+	direction: Vector3?,
+	traveledDistance: number?,
+	maxDistance: number?,
 	expiresAt: number,
 }
 local projectiles: { Projectile } = {}
 local projectileFolder: Folder? = nil
 
-local HOMING_PROJECTILE_SPEED = 90
-local PROJECTILE_ARRIVAL_RADIUS = 4
--- A safety net against a target that never becomes reachable again after
--- launch (not already caught by the dead/gone check every tick), not a
--- number tuned for feel.
+local PROJECTILE_SPEED = 90
+local PROJECTILE_HIT_RADIUS = 4
+-- A safety net against a homing target that never becomes reachable again
+-- after launch (not already caught by the dead/gone check every tick), not
+-- a number tuned for feel. Straight bolts are bounded by maxDistance
+-- instead; this is their backstop too, in case something pins one in place.
 local PROJECTILE_MAX_LIFETIME = 5
 
 local function ensureProjectileFolder(): Folder
@@ -805,6 +819,31 @@ local function ensureProjectileFolder(): Folder
 	folder.Parent = Workspace
 	projectileFolder = folder
 	return folder
+end
+
+--[[ The presentation half of a projectile, identical regardless of
+	guidance -- interface's own tagging ask reads this the same way for
+	either kind, so a straight bolt needs nothing the homing one does not.
+	Server owns motion and lifetime entirely; the caller inserts the guided
+	half into `projectiles` immediately after. ]]
+local function spawnProjectilePart(techId: string, player: Player, origin: Vector3): BasePart
+	local part = Instance.new("Part")
+	part.Name = `projectile_{techId}`
+	part.Shape = Enum.PartType.Ball
+	part.Size = Vector3.new(1.4, 1.4, 1.4)
+	part.Material = Enum.Material.Neon
+	part.Anchored = true
+	part.CanCollide = false
+	part.CanQuery = false
+	part.CanTouch = false
+	part.CFrame = CFrame.new(origin)
+	part.Parent = ensureProjectileFolder()
+
+	CollectionService:AddTag(part, "Projectile")
+	part:SetAttribute("TechId", techId)
+	part:SetAttribute("CasterId", player.UserId)
+
+	return part
 end
 
 local function launchHomingProjectile(
@@ -819,42 +858,81 @@ local function launchHomingProjectile(
 		return
 	end
 
-	local part = Instance.new("Part")
-	part.Name = `projectile_{techId}`
-	part.Shape = Enum.PartType.Ball
-	part.Size = Vector3.new(1.4, 1.4, 1.4)
-	part.Material = Enum.Material.Neon
-	part.Anchored = true
-	part.CanCollide = false
-	part.CanQuery = false
-	part.CanTouch = false
-	part.CFrame = CFrame.new(root.Position)
-	part.Parent = ensureProjectileFolder()
-
-	CollectionService:AddTag(part, "Projectile")
-	part:SetAttribute("TechId", techId)
-	part:SetAttribute("CasterId", player.UserId)
-
 	table.insert(projectiles, {
 		-- Widened explicitly: table.insert's generic signature wants an
 		-- exact match against `{Projectile}`'s element type, and the
 		-- literal's own inferred shape is `Part` (from Instance.new
 		-- itself), narrower than the field's declared `BasePart`.
-		part = part :: BasePart,
+		part = spawnProjectilePart(techId, player, root.Position) :: BasePart,
 		techId = techId,
 		player = player,
 		casterActor = actor,
+		kind = "homing",
 		targetCombatantId = target.combatantId,
 		expiresAt = now + PROJECTILE_MAX_LIFETIME,
 	})
 end
 
---[[ Advances every in-flight projectile by one step, re-aiming at its
-	target's CURRENT position each step rather than a position captured at
-	launch -- that is what makes it homing rather than a straight-line shot.
-	A target that died or is otherwise unresolvable drops the projectile
-	with no landing, same as a channel fizzling; arrival calls `landEffect`,
-	the identical resolver an instant channel uses.
+--[[ The skillshot half: no target, a fixed direction sampled once at
+	launch (the same "aim is sampled at cast, not resolution" discipline
+	windup techniques already follow), and a range to give up at. Proximity-
+	checked against every combatant each step rather than a raycast, so it
+	behaves like the homing bolt's own arrival check -- one hit rule for
+	both guidance shapes, not two. ]]
+local function launchStraightProjectile(
+	player: Player,
+	actor: Combat.Actor,
+	techId: string,
+	aim: Vector3,
+	now: number
+)
+	local root = rootOf(player)
+	if not root then
+		return
+	end
+
+	table.insert(projectiles, {
+		part = spawnProjectilePart(techId, player, root.Position) :: BasePart,
+		techId = techId,
+		player = player,
+		casterActor = actor,
+		kind = "straight",
+		direction = aim.Magnitude > 0 and aim.Unit or Vector3.zAxis,
+		traveledDistance = 0,
+		maxDistance = Config.Combat.ranges.striker,
+		expiresAt = now + PROJECTILE_MAX_LIFETIME,
+	})
+end
+
+--[[ One combatant near a point, excluding the caster -- the straight bolt's
+	own hit rule, proximity rather than a raycast so it behaves like the
+	homing bolt's arrival check rather than needing a second kind of check
+	to reason about. Deduping is unnecessary here the way it is in
+	resolveRuler: a bolt lands on the first thing it reaches and is gone,
+	never sweeping a whole radius in one step. ]]
+local function combatantNear(position: Vector3, radius: number, exclude: Player): Combatant?
+	local params = OverlapParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	local excludeCharacter = exclude.Character
+	params.FilterDescendantsInstances = if excludeCharacter then { excludeCharacter } else {}
+	for _, part in Workspace:GetPartBoundsInRadius(position, radius, params) do
+		local target = combatantFromInstance(part)
+		if target and target.player ~= exclude then
+			return target
+		end
+	end
+	return nil
+end
+
+--[[ Advances every in-flight projectile by one step. A homing bolt re-aims
+	at its target's CURRENT position each step rather than a position
+	captured at launch -- that is what makes it homing rather than a
+	straight-line shot; a target that died or is otherwise unresolvable
+	drops it with no landing, same as a channel fizzling. A straight bolt
+	holds its launch direction and proximity-checks as it advances, giving
+	up with no landing past maxDistance -- a clean miss, the same as a
+	striker raycast finding nothing. Either kind's arrival calls
+	`landEffect`, the identical resolver an instant channel uses.
 
 	Driven by its own Heartbeat connection in CombatService.start, NOT from
 	CombatService.tick: `tick` runs at Config.Field.cycleTickSeconds (1s),
@@ -869,32 +947,65 @@ local function stepProjectiles(deltaSeconds: number, now: number)
 			continue
 		end
 
-		local target = combatantById(projectile.targetCombatantId)
 		local tech = Config.Techniques[projectile.techId]
-		if not target or not tech or target.actor.health <= 0 or now >= projectile.expiresAt then
+		if not tech or now >= projectile.expiresAt then
 			projectile.part:Destroy()
 			table.remove(projectiles, i)
 			continue
 		end
 
-		local toTarget = target.root.Position - projectile.part.Position
-		local distance = toTarget.Magnitude
-		if distance <= PROJECTILE_ARRIVAL_RADIUS then
-			landEffect(
-				projectile.player,
-				projectile.casterActor,
-				projectile.techId,
-				tech,
-				target,
-				now
-			)
-			projectile.part:Destroy()
-			table.remove(projectiles, i)
-			continue
-		end
+		if projectile.kind == "homing" then
+			local target = combatantById(projectile.targetCombatantId :: number)
+			if not target or target.actor.health <= 0 then
+				projectile.part:Destroy()
+				table.remove(projectiles, i)
+				continue
+			end
 
-		local step = math.min(HOMING_PROJECTILE_SPEED * deltaSeconds, distance)
-		projectile.part.CFrame = CFrame.new(projectile.part.Position + toTarget.Unit * step)
+			local toTarget = target.root.Position - projectile.part.Position
+			local distance = toTarget.Magnitude
+			if distance <= PROJECTILE_HIT_RADIUS then
+				landEffect(
+					projectile.player,
+					projectile.casterActor,
+					projectile.techId,
+					tech,
+					target,
+					now
+				)
+				projectile.part:Destroy()
+				table.remove(projectiles, i)
+				continue
+			end
+
+			local step = math.min(PROJECTILE_SPEED * deltaSeconds, distance)
+			projectile.part.CFrame = CFrame.new(projectile.part.Position + toTarget.Unit * step)
+		else
+			local direction = projectile.direction :: Vector3
+			local step = PROJECTILE_SPEED * deltaSeconds
+			local nextPosition = projectile.part.Position + direction * step
+			projectile.part.CFrame = CFrame.new(nextPosition)
+			projectile.traveledDistance = (projectile.traveledDistance :: number) + step
+
+			local target = combatantNear(nextPosition, PROJECTILE_HIT_RADIUS, projectile.player)
+			if target then
+				landEffect(
+					projectile.player,
+					projectile.casterActor,
+					projectile.techId,
+					tech,
+					target,
+					now
+				)
+				projectile.part:Destroy()
+				table.remove(projectiles, i)
+			elseif (projectile.traveledDistance :: number) >= projectile.maxDistance :: number then
+				-- A clean miss: ranged out with nothing found, same as a
+				-- striker raycast that hit nothing.
+				projectile.part:Destroy()
+				table.remove(projectiles, i)
+			end
+		end
 	end
 end
 
@@ -1246,7 +1357,15 @@ local function resolveEffect(caster: Player, actor: Combat.Actor, techId: string
 	local now = os.clock()
 
 	if tech.kind == "striker" then
-		resolveStriker(caster, actor, techId, aim, now)
+		-- projectile dispatches the way kind already does, per the ruling:
+		-- "straight" is the skillshot idiom (Shard, and Glacier Lance's own
+		-- channel completion reaches the same launcher) and needs no windup-
+		-- path raycast at all, unlike an ordinary striker's instant hitscan.
+		if tech.projectile == "straight" then
+			launchStraightProjectile(caster, actor, techId, aim, now)
+		else
+			resolveStriker(caster, actor, techId, aim, now)
+		end
 	elseif tech.kind == "ruler" then
 		resolveRuler(caster, actor, techId, now)
 	elseif tech.kind == "enforcer" then
