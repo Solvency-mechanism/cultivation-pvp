@@ -263,13 +263,18 @@ check(
 	reopening it by adding a technique with both. Roster asserts the same from
 	the Config side; this is the client's stake in it, since the bar draws
 	exactly one duration. ]]
+--[[ The one-timer rule holds for EVERY channel: windup 0. The telegraph part
+	honours the same named list the striker assertion does -- a sub-floor
+	channel is a deliberate exception to "the bar is the telegraph", and it is
+	deliberate only if it is listed. Two assertions, one list, or they
+	contradict on exactly the case the list exists for -- which they did. ]]
 for id, tech in Config.Techniques do
 	local castTime = (tech :: any).castTime or 0
 	if castTime > 0 then
 		check(`channelled technique {id} has no separate windup`, tech.windup == 0)
 		check(
-			`channelled technique {id} telegraphs by its castTime`,
-			InterfaceSpec.telegraphs(castTime)
+			`channelled technique {id} telegraphs by its castTime, or is named sub-floor`,
+			InterfaceSpec.telegraphs(castTime) or SUB_FLOOR_CHANNELS[id] == true
 		)
 	end
 end
