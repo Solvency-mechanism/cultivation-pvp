@@ -435,7 +435,28 @@ InterfaceSpec.Rail = {
 	unhurried rather than uniformly. ]]
 InterfaceSpec.Sense = {
 	width = 196,
-	top = 16,
+
+	--[[ Left edge, vertically centred, and the reason is that every corner is
+		already spoken for.
+
+		This panel sat in the top right and was occluded by Roblox's own player
+		list, which lives in that corner, cannot be moved, and got a reason to be
+		open the moment leaderstats shipped. Losing it matters more than losing
+		any other panel: bearing, distance and occupancy are the only instruments
+		this game gives you for *finding* anything, so the occluded panel was the
+		one you navigate by.
+
+		Roblox owns three of the four corners and it owns them on every platform:
+		the menu button and chat top left, the player list top right, and on touch
+		the movement stick bottom left with jump bottom right. The bottom centre
+		is the action bar's and is not negotiable. That leaves the vertical edges,
+		and the left edge at mid height is clear of chat above it and of the
+		thumbstick below it.
+
+		Worth writing down rather than rediscovering: **the corners are gone.**
+		The next element that wants one will hit exactly this, and the answer will
+		be an edge again. ]]
+	side = 14,
 	rowHeight = 17,
 	rows = 6,
 	headerTextSize = 11,

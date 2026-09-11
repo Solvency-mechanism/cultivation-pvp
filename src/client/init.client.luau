@@ -657,8 +657,8 @@ local senseRowHeight = px(SENSE.rowHeight)
 
 local sensePanel = Instance.new("Frame")
 sensePanel.Name = "Sense"
-sensePanel.AnchorPoint = Vector2.new(1, 0)
-sensePanel.Position = UDim2.new(1, -px(14), 0, px(SENSE.top))
+sensePanel.AnchorPoint = Vector2.new(0, 0.5)
+sensePanel.Position = UDim2.new(0, px(SENSE.side), 0.5, 0)
 local senseRowsTop = px(18) + px(SENSE.columnHeight)
 sensePanel.Size = UDim2.fromOffset(senseWidth, senseRowsTop + senseRowHeight * SENSE.rows + px(16))
 sensePanel.BackgroundColor3 = PANEL
