@@ -21,12 +21,19 @@
 	reason and because a two-point back-and-forth needs no pathfinding.
 
 	Summon and dismiss are a TextChatCommand (`/dummy stationary|moving|caster
-	[stage] [techId]`, `/dummy clear`) so this needs no client work: type
-	`/dummy stationary lowgold` and one is standing near the pad. A command
-	rather than a plain chat message for two reasons: this place uses
+	[stage] [techId] [ahead]`, `/dummy clear`) so this needs no client work:
+	type `/dummy stationary lowgold` and one is standing near the pad. A
+	command rather than a plain chat message for two reasons: this place uses
 	TextChatService, under which the legacy `Player.Chatted` event this
 	originally used does not fire at all; and a command does not broadcast
 	to every other player's chat window the way a parsed chat message would.
+
+	The trailing `ahead` places the dummy on the CALLER's own centre ray
+	(root position plus root LookVector, a few studs out) instead of the
+	fixed row -- the only way to get a lockable target when the input
+	surface reaching this place is keyboard only, confirmed by landscape:
+	world clicks and a synthetic camera drag do not reach the game, so a
+	fixed row nobody can aim a camera at cannot be locked at all.
 ]]
 
 local Players = game:GetService("Players")
@@ -125,6 +132,30 @@ local function nextSpawnPosition(): Vector3
 	return Vector3.new(flat.X, (groundY or flat.Y) + 3, flat.Z)
 end
 
+-- Six studs: the aim ray leaves the root along the camera look, pitched a
+-- little down at default, so six studs plus the slab's 5-stud height keep a
+-- fresh north-facing spawn's centre ray on it with no camera input at all.
+-- Seven is fine as margin; twenty-five is not -- the ray has left the slab
+-- by then.
+local AHEAD_DISTANCE = 6
+
+--[[ The caller's own root position plus their facing, at the root's own
+	height rather than groundY + 3 -- the whole point is landing on the
+	caller's centre ray, not on the ground under it. Placement, not a
+	targeting shortcut: this only decides where a dummy appears, never sends
+	a cast or a lock on the caller's behalf. ]]
+local function positionAheadOf(player: Player): Vector3?
+	local character = player.Character
+	if not character then
+		return nil
+	end
+	local root = character:FindFirstChild("HumanoidRootPart")
+	if not root or not root:IsA("BasePart") then
+		return nil
+	end
+	return root.Position + root.CFrame.LookVector * AHEAD_DISTANCE
+end
+
 local function buildRig(displayName: string, color: Color3): (Model, BasePart)
 	local model = Instance.new("Model")
 	model.Name = "Dummy"
@@ -159,15 +190,31 @@ local function register(model: Model, root: BasePart, stageIndex: number, kind: 
 	return dummy
 end
 
-function DummyService.spawnStationary(stageName: string?)
+--[[ `aheadOf`, when given, places the dummy on that player's own centre ray
+	instead of the fixed row -- the only way to get a dummy under a lock key
+	when the input surface reaching this place is keyboard only (confirmed by
+	landscape: world clicks and synthetic camera drag do not reach the game,
+	so a fixed row nobody can aim a camera at is not a usable lock target).
+	Falls back to the row if the caller's character is not resolvable, same
+	as it always has. ]]
+function DummyService.spawnStationary(stageName: string?, aheadOf: Player?)
 	local model, root = buildRig("Training Dummy", STATIONARY_COLOR)
-	root.CFrame = CFrame.new(nextSpawnPosition())
+	local position = if aheadOf then positionAheadOf(aheadOf) else nil
+	root.CFrame = CFrame.new(position or nextSpawnPosition())
 	register(model, root, stageIndexOf(stageName), "stationary")
 end
 
-function DummyService.spawnMoving(stageName: string?)
+--[[ "Ahead" for the moving variant means the patrol STARTS on the caller's
+	ray and crosses it, not merely that it exists somewhere nearby -- the
+	lock has to be takeable before the dummy walks off. Reusing `center` as
+	both the patrol's midpoint and the spawn position already gives this for
+	free: phase starts at 0, which is t = 0.5, the exact midpoint between
+	patrolA and patrolB -- so a fresh spawn is already standing at `center`,
+	and the sine patrol crosses back through that same point every half
+	cycle after. ]]
+function DummyService.spawnMoving(stageName: string?, aheadOf: Player?)
 	local model, root = buildRig("Training Dummy (Moving)", MOVING_COLOR)
-	local center = nextSpawnPosition()
+	local center = (if aheadOf then positionAheadOf(aheadOf) else nil) or nextSpawnPosition()
 	root.CFrame = CFrame.new(center)
 	local dummy = register(model, root, stageIndexOf(stageName), "moving")
 	if dummy then
@@ -177,13 +224,14 @@ function DummyService.spawnMoving(stageName: string?)
 	end
 end
 
-function DummyService.spawnCaster(stageName: string?, techId: string?)
+function DummyService.spawnCaster(stageName: string?, techId: string?, aheadOf: Player?)
 	local tech = techId and Config.Techniques[techId]
 	local resolvedTechId = if tech and tech.kind == "ruler"
 		then techId :: string
 		else DEFAULT_CASTER_TECH
 	local model, root = buildRig("Training Dummy (Casting)", CASTER_COLOR)
-	root.CFrame = CFrame.new(nextSpawnPosition())
+	local position = if aheadOf then positionAheadOf(aheadOf) else nil
+	root.CFrame = CFrame.new(position or nextSpawnPosition())
 	local dummy = register(model, root, stageIndexOf(stageName), "caster")
 	if dummy then
 		dummy.techId = resolvedTechId
@@ -254,15 +302,27 @@ function DummyService.tick(now: number)
 	end
 end
 
+--[[ `ahead` is a trailing word rather than a fixed position, since the
+	number of preceding args varies by kind (caster takes a tech id, the
+	others don't) -- checking the last word rather than a fixed index handles
+	all three without three separate parses. `handleCommand` already has
+	`player`; passing it through as the placement anchor costs nothing new to
+	the trust boundary, since it only ever affects where a dummy spawns. ]]
 local function handleCommand(player: Player, message: string)
 	local words = string.split(message, " ")
 	local sub = words[2]
+	local ahead = words[#words] == "ahead"
+	local argEnd = if ahead then #words - 1 else #words
+	local stageArg = if argEnd >= 3 then words[3] else nil
+	local techArg = if argEnd >= 4 then words[4] else nil
+	local aheadOf: Player? = if ahead then player else nil
+
 	if sub == "stationary" then
-		DummyService.spawnStationary(words[3])
+		DummyService.spawnStationary(stageArg, aheadOf)
 	elseif sub == "moving" then
-		DummyService.spawnMoving(words[3])
+		DummyService.spawnMoving(stageArg, aheadOf)
 	elseif sub == "caster" then
-		DummyService.spawnCaster(words[3], words[4])
+		DummyService.spawnCaster(stageArg, techArg, aheadOf)
 	elseif sub == "clear" then
 		DummyService.clearAll()
 	else
