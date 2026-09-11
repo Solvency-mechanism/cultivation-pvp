@@ -16,6 +16,21 @@ local Config = require(ReplicatedStorage.Shared.Config)
 	this is not a cycle. ]]
 local ArenaService = require(script.Parent.ArenaService)
 
+--[[ A measuring instrument, development profile only. The realised prime
+	interval and how many primes are up at once were derived from Config (a
+	saturated field of seven, one spawn per freed slot, 300 s prime lifetime
+	-> one prime every ~5.8 min, ~0.86 up) and those figures are a ceiling
+	under play, because a drained node frees its slot early and raises the
+	turnover. Nothing on the server said when a node spawned or how it left,
+	so the derivation could not be checked against a session. Two lines,
+	greppable in the server log, size both the interval and the drains
+	caveat from the same ten minutes. Silent in release. ]]
+local function logField(message: string)
+	if Config.Profile == "development" then
+		print(`[field] {message}`)
+	end
+end
+
 local NodeService = {}
 
 local field: { AuraNodes.Node } = {}
@@ -513,8 +528,12 @@ end
 
 function NodeService.step(now: number)
 	for _, node in field do
-		if AuraNodes.isExpired(node, now) and onDrained then
-			onDrained(node)
+		if AuraNodes.isExpired(node, now) then
+			-- Seen exactly once: the cull below removes it in this same step.
+			logField(`expired {node.tier} ({if node.drained then "drained" else "aged"})`)
+			if onDrained then
+				onDrained(node)
+			end
 		end
 	end
 
@@ -528,9 +547,11 @@ function NodeService.step(now: number)
 			before[node.id] = true
 		end
 		AuraNodes.step(Config, field, now, math.random, nextId, placer)
-		if onSpawned then
-			for _, node in field do
-				if not before[node.id] then
+		for _, node in field do
+			if not before[node.id] then
+				local p = node.position
+				logField(`spawned {node.tier} at {math.round(p.x)},{math.round(p.z)} {node.region}`)
+				if onSpawned then
 					onSpawned(node)
 				end
 			end
