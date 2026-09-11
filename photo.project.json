@@ -1,0 +1,62 @@
+{
+  "name": "starter-game-photo",
+  "tree": {
+    "$className": "DataModel",
+    "ReplicatedStorage": {
+      "$className": "ReplicatedStorage",
+      "Shared": {
+        "$path": "src/shared"
+      },
+      "Remotes": {
+        "$className": "Folder",
+        "UseTechnique": { "$className": "RemoteEvent" },
+        "SetLoadout": { "$className": "RemoteEvent" },
+        "Breakthrough": { "$className": "RemoteEvent" },
+        "Notice": { "$className": "RemoteEvent" },
+        "Sensed": { "$className": "RemoteEvent" },
+        "TechniqueFired": { "$className": "RemoteEvent" },
+        "CastStarted": { "$className": "RemoteEvent" },
+        "CastInterrupted": { "$className": "RemoteEvent" },
+        "CastCompleted": { "$className": "RemoteEvent" },
+        "Impact": { "$className": "RemoteEvent" }
+      },
+      "Packages": {
+        "$path": { "optional": "Packages" }
+      }
+    },
+    "ServerScriptService": {
+      "$className": "ServerScriptService",
+      "Server": {
+        "$path": "src/server"
+      }
+    },
+    "StarterPlayer": {
+      "$className": "StarterPlayer",
+      "StarterPlayerScripts": {
+        "$className": "StarterPlayerScripts",
+        "Client": {
+          "$path": "src/client"
+        },
+        "Photo": {
+          "$path": { "optional": "photo" }
+        }
+      }
+    },
+    "Workspace": {
+      "$className": "Workspace",
+      "$properties": { "Gravity": 196.2 }
+    },
+    "Lighting": {
+      "$className": "Lighting",
+      "$properties": { "Technology": "Voxel" }
+    },
+    "SoundService": {
+      "$className": "SoundService",
+      "$properties": { "RespectFilteringEnabled": true }
+    },
+    "TextChatService": {
+      "$className": "TextChatService",
+      "$properties": { "ChatVersion": "TextChatService" }
+    }
+  }
+}
