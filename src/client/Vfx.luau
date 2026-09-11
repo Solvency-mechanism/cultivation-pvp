@@ -82,7 +82,6 @@ local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
 local TweenService = game:GetService("TweenService")
-local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 
 local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
@@ -2720,9 +2719,18 @@ end
 	so a refused press reads as a refused press rather than as a technique that
 	fired and did nothing.
 
-	This listener sends nothing and decides nothing. Input authority stays exactly
-	where it was. ]]
-local function localWindup(slot: string)
+	**Called by the HUD rather than bound here.** This module used to bind its own
+	`InputBegan` and map number keys to slots itself, which was wrong in two ways
+	that only became visible together. It duplicated a keycode table that the HUD
+	already derives from `Config.LoadoutSlots`, so a fifth slot would have fired
+	the technique with no windup effect -- a silent half-failure. And it had no
+	modifier guard, so once the HUD gained Shift-plus-slot for swapping a
+	technique, holding Shift drew a charge for a cast that was never going to
+	happen.
+
+	One input owner rather than two that must agree about modifiers. The HUD
+	knows what a press means; this draws what it is told. ]]
+function Vfx.predictWindup(slot: string)
 	local player = Players.LocalPlayer
 	if not player then
 		return
@@ -2747,22 +2755,5 @@ local function localWindup(slot: string)
 
 	Vfx.charge(techId, player.UserId)
 end
-
-local SLOT_KEYS: { [Enum.KeyCode]: string } = {
-	[Enum.KeyCode.One] = Config.LoadoutSlots[1],
-	[Enum.KeyCode.Two] = Config.LoadoutSlots[2],
-	[Enum.KeyCode.Three] = Config.LoadoutSlots[3],
-	[Enum.KeyCode.Four] = Config.LoadoutSlots[4],
-}
-
-UserInputService.InputBegan:Connect(function(input: InputObject, processed: boolean)
-	if processed then
-		return
-	end
-	local slot = SLOT_KEYS[input.KeyCode]
-	if slot then
-		localWindup(slot)
-	end
-end)
 
 return Vfx

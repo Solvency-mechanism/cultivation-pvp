@@ -239,6 +239,20 @@ ImpactSpec.Cast = {
 		enforcer = "rbxasset://sounds/metal.ogg",
 		forger = "rbxasset://sounds/switch3.wav",
 		ruler = "rbxasset://sounds/bass.wav",
+		--[[ strider deliberately shares the striker sample, and the argument is
+			that it is the same event from the other side. `snap.wav` was chosen
+			for striker because it reads as *something left, fast*; a movement
+			technique is the caster being the thing that left. Cost-driven pitch
+			separates them, since no strider costs what a striker does.
+
+			Chosen from the six `rbxasset` paths this file has actually verified
+			as resolving with a non-zero TimeLength rather than by reaching for a
+			plausible-sounding new one -- six such guesses were probed when this
+			table was written and every one of them failed. A dash deserves its
+			own sample and should get one, but it has to be verified in Studio
+			first; until then a shared sample is a smaller defect than the
+			silence an unmapped kind falls into by construction. ]]
+		strider = "rbxasset://sounds/snap.wav",
 	} :: { [string]: string },
 	--[[ Cheapest technique speaks highest, dearest speaks lowest. The range is
 		set by the narrowest case rather than the widest: the three strikers sit

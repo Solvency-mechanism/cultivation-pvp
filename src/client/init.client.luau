@@ -1642,6 +1642,10 @@ end)
 local function fireSlot(slot: string)
 	local camera = Workspace.CurrentCamera
 	useTechnique:FireServer(slot, if camera then camera.CFrame.LookVector else nil)
+	--[[ The speculative windup effect, drawn from here rather than from a second
+		input listener inside Vfx. There is one input owner, so there is nothing
+		to keep in agreement about what a press with Shift held means. ]]
+	Vfx.predictWindup(slot)
 end
 
 --[[ Loadout cycling, without a picker.
