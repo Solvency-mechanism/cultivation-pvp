@@ -77,6 +77,7 @@
 	collapses visibly if the server never confirms it.
 ]]
 
+local CollectionService = game:GetService("CollectionService")
 local Debris = game:GetService("Debris")
 local Players = game:GetService("Players")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
@@ -85,6 +86,8 @@ local TweenService = game:GetService("TweenService")
 local Workspace = game:GetService("Workspace")
 
 local Config = require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("Config"))
+local InterfaceSpec =
+	require(ReplicatedStorage:WaitForChild("Shared"):WaitForChild("InterfaceSpec"))
 
 local Vfx = {}
 
@@ -2756,5 +2759,92 @@ function Vfx.predictWindup(slot: string): boolean
 	Vfx.charge(techId, player.UserId)
 	return true
 end
+
+-- ----------------------------------------------------------- projectiles
+
+--[[ Dressing for a server-driven projectile.
+
+	The server spawns a 1.4-stud neon ball, tags it `Projectile` with `TechId`
+	and `CasterId`, and moves it every Heartbeat by writing its CFrame -- it
+	re-aims at the target's current position each step, which is what makes it
+	homing. The client's whole job here is to make that ball read as a bolt in
+	flight rather than a marble sliding through the air: a trail behind it in
+	the technique's own palette, and a light so it lands on the ground and on
+	the target as it passes.
+
+	Found by tag rather than by remote, the same way plates find dummies. And
+	nothing here is destroyed by the client: the part's lifetime is the server's,
+	the trail and light are its children, and when the server removes the part
+	on arrival or expiry the dressing goes with it. A client that ran none of
+	this would still see the ball move; it would just be a plainer ball.
+
+	Whose bolt it is carries in the trail's colour, by the same rule damage
+	numbers use: white for yours, the technique's palette for theirs. ]]
+local PROJECTILE_TAG = "Projectile"
+local dressed: { [Instance]: boolean } = {}
+
+local function dressProjectile(part: Instance)
+	if dressed[part] or not part:IsA("BasePart") then
+		return
+	end
+	dressed[part] = true
+
+	local techId = part:GetAttribute("TechId")
+	local casterId = part:GetAttribute("CasterId")
+	local palette = if typeof(techId) == "string" then (PALETTE[techId] or FALLBACK) else FALLBACK
+	local localPlayer = Players.LocalPlayer
+	local mine = localPlayer ~= nil and casterId == localPlayer.UserId
+
+	part.Color = palette.core
+
+	-- A trail needs two attachments to stretch between; a ball has no natural
+	-- front or back, so they sit across its width and the trail is as wide as
+	-- the bolt.
+	local half = InterfaceSpec.Projectile.trailWidth / 2
+	local a0 = Instance.new("Attachment")
+	a0.Name = "TrailA"
+	a0.Position = Vector3.new(0, half, 0)
+	a0.Parent = part
+	local a1 = Instance.new("Attachment")
+	a1.Name = "TrailB"
+	a1.Position = Vector3.new(0, -half, 0)
+	a1.Parent = part
+
+	local trail = Instance.new("Trail")
+	trail.Attachment0 = a0
+	trail.Attachment1 = a1
+	trail.Lifetime = InterfaceSpec.Projectile.trailLifetime
+	trail.LightEmission = 1
+	trail.LightInfluence = 0
+	local tint = if mine then Color3.new(1, 1, 1) else palette.glow
+	trail.Color = ColorSequence.new(palette.core, tint)
+	trail.Transparency = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 0.1),
+		NumberSequenceKeypoint.new(1, 1),
+	})
+	trail.WidthScale = NumberSequence.new({
+		NumberSequenceKeypoint.new(0, 1),
+		NumberSequenceKeypoint.new(1, 0.2),
+	})
+	trail.Parent = part
+
+	local light = Instance.new("PointLight")
+	light.Color = palette.glow
+	light.Range = InterfaceSpec.Projectile.lightRange
+	light.Brightness = InterfaceSpec.Projectile.lightBrightness
+	light.Shadows = false
+	light.Parent = part
+
+	part.AncestryChanged:Connect(function(_, parent)
+		if not parent then
+			dressed[part] = nil
+		end
+	end)
+end
+
+for _, existing in CollectionService:GetTagged(PROJECTILE_TAG) do
+	dressProjectile(existing)
+end
+CollectionService:GetInstanceAddedSignal(PROJECTILE_TAG):Connect(dressProjectile)
 
 return Vfx

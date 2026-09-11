@@ -89,6 +89,7 @@ local SCRIM = color(PALETTE.scrim)
 local DANGER = color(PALETTE.danger)
 local KEYBIND = color(PALETTE.keybind)
 local LOCK = color(PALETTE.lock)
+local SLOW = color(PALETTE.slow)
 local BLACK = Color3.new(0, 0, 0)
 
 local NOTICE_COLOR: { [string]: Color3 } = {
@@ -250,6 +251,7 @@ local vitalsUi: {
 	healthValue: TextLabel,
 	madraFill: Frame,
 	madraValue: TextLabel,
+	slowChip: TextLabel,
 }
 do
 	local stageLabel = caption(vitals, text(VITALS.headerTextSize), CEILING, true)
@@ -306,6 +308,20 @@ do
 	madraValue.Position = UDim2.fromOffset(px(6), 0)
 	madraValue.TextXAlignment = Enum.TextXAlignment.Right
 	madraValue.ZIndex = 3
+
+	--[[ The slow, beside your own vitals. A slow is the first thing in this
+		game that changes what your own keys do, and the vitals are where you
+		look to learn that. Same word and same colour as the cue on another
+		combatant's plate, so it is one status effect and not two. Sits in the
+		header row's right edge, where the power readout is, and takes that
+		space over while a slow is on you -- power is a slow number, a slow is
+		a fast one. ]]
+	local slowChip = caption(vitals, text(InterfaceSpec.Status.chipTextSize), SLOW, true)
+	slowChip.Size = UDim2.new(0.4, 0, 0, headerHeight)
+	slowChip.Position = UDim2.fromScale(0.6, 0)
+	slowChip.TextXAlignment = Enum.TextXAlignment.Right
+	slowChip.Visible = false
+
 	vitalsUi = {
 		stageLabel = stageLabel,
 		powerLabel = powerLabel,
@@ -313,6 +329,7 @@ do
 		healthValue = healthValue,
 		madraFill = madraFill,
 		madraValue = madraValue,
+		slowChip = slowChip,
 	}
 end
 
@@ -1065,6 +1082,16 @@ local function refreshVitals()
 
 	vitalsUi.madraFill.Size = UDim2.fromScale(InterfaceSpec.fraction(madra, maxMadra), 1)
 	vitalsUi.madraValue.Text = `{InterfaceSpec.commas(madra)} / {InterfaceSpec.commas(maxMadra)}`
+
+	local slow = player:GetAttribute("SlowMultiplier")
+	local slowed = typeof(slow) == "number" and slow < 1
+	vitalsUi.slowChip.Visible = slowed
+	vitalsUi.powerLabel.Visible = not slowed
+	if slowed then
+		vitalsUi.slowChip.Text = if InterfaceSpec.Status.showMultiplier
+			then string.format("SLOWED  ×%.1f", slow)
+			else "SLOWED"
+	end
 end
 
 --[[ Locally predicted cooldowns. The server still owns every refusal; this only
@@ -1921,7 +1948,7 @@ local CULTIVATION_ATTRIBUTES = {
 	"SenseRange",
 	"AtCeiling",
 }
-local VITAL_ATTRIBUTES = { "Health", "MaxHealth", "Madra", "MaxMadra" }
+local VITAL_ATTRIBUTES = { "Health", "MaxHealth", "Madra", "MaxMadra", "SlowMultiplier" }
 
 --[[ A breakthrough rebuilds the server's actor with genuinely empty cooldowns,
 	but the local prediction table knew nothing about it -- so a slot could sit

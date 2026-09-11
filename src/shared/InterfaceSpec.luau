@@ -93,6 +93,14 @@ InterfaceSpec.Palette = {
 		meanings the impact layer owns, so a locked frame is not mistaken for a
 		ready slot, a striker, or a killing blow. ]]
 	lock = { r = 255, g = 176, b = 96 } :: Rgb,
+
+	--[[ A slow. The first status effect this game has ever shown, so it gets
+		its own hue rather than borrowing one: cold, desaturated, and unlike
+		every kind colour, the lock, and the three meanings the impact layer
+		owns. It has to read as "something is on you" on a plate at distance
+		and as "something is on me" beside your own vitals, and be the same
+		colour in both places. ]]
+	slow = { r = 168, g = 214, b = 232 } :: Rgb,
 }
 
 --[[ One colour per technique kind, and the reason it is per *kind* rather than
@@ -575,6 +583,34 @@ InterfaceSpec.Picker = {
 	target is unchanged at fully opaque, which is the state that matters. ]]
 InterfaceSpec.Reticle = {
 	idleTransparency = 0.25,
+}
+
+--[[ Status cues: the first one is a slow.
+
+	Two places show it, deliberately in the same colour and the same word. On
+	another combatant's nameplate the third row -- the one a cast bar borrows --
+	says SLOWED with the multiplier, outranked only by a cast in progress, since
+	what they are about to do beats what has been done to them. On your own
+	vitals a chip says the same beside madra, because a slow is the first thing
+	in this game that changes what your own keys do, and the vitals are where
+	you look to learn that. ]]
+InterfaceSpec.Status = {
+	chipHeight = 14,
+	chipTextSize = 10,
+	-- Below this the multiplier is not worth a decimal; "SLOWED" alone is the
+	-- read, and the number is for the reader who has time.
+	showMultiplier = true,
+}
+
+--[[ Projectile dressing. The server owns the part and its motion entirely; the
+	client adds a trail and a light to a part that is already moving, and
+	destroys nothing -- the dressing dies with the part. Sized in studs against
+	the 1.4-stud ball the server spawns. ]]
+InterfaceSpec.Projectile = {
+	trailLifetime = 0.22,
+	trailWidth = 1.1,
+	lightRange = 9,
+	lightBrightness = 2.2,
 }
 
 InterfaceSpec.Notice = {

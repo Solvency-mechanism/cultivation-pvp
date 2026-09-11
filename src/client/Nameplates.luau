@@ -61,6 +61,7 @@ local HEALTH_LOW = color(PALETTE.healthLow)
 local TEXT = color(PALETTE.text)
 local TEXT_DIM = color(PALETTE.textDim)
 local DANGER = color(PALETTE.danger)
+local SLOW = color(PALETTE.slow)
 local BLACK = Color3.new(0, 0, 0)
 
 --[[ The cast registry.
@@ -611,6 +612,22 @@ local function refresh(who: Combatant, plate: Plate)
 			if remaining > 0 then
 				plate.name.TextColor3 = color(InterfaceSpec.kindColor(cast.kind))
 			end
+		end
+
+		--[[ The slow: the first status effect this game has shown. It borrows
+			the third row the way a cast does, and sits below a cast in
+			precedence -- what someone is about to do outranks what has been done
+			to them. Read off the same instance as Health, so a dummy's slow is
+			as visible as a player's, and graded by the magnitude the server
+			publishes rather than guessed from WalkSpeed. ]]
+		local slow = who.source:GetAttribute("SlowMultiplier")
+		if typeof(slow) == "number" and slow < 1 then
+			plate.stage.TextColor3 = SLOW
+			plate.stage.Text = if InterfaceSpec.Status.showMultiplier
+				then string.format("SLOWED  ×%.1f", slow)
+				else "SLOWED"
+		else
+			plate.stage.TextColor3 = TEXT_DIM
 		end
 	end
 end
