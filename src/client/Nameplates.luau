@@ -213,9 +213,11 @@ local function stroked(text: TextLabel): TextLabel
 end
 
 local function buildPlate(who: Combatant, head: BasePart): Plate?
-	local scale = InterfaceSpec.scale(
-		Workspace.CurrentCamera and Workspace.CurrentCamera.ViewportSize.Y or 1080
-	)
+	-- The HUD's own scale, width cap included, so a plate and the pair agree.
+	local viewport = if Workspace.CurrentCamera
+		then Workspace.CurrentCamera.ViewportSize
+		else Vector2.new(1920, 1080)
+	local scale = InterfaceSpec.scale(viewport.Y, viewport.X)
 	local width = math.round(PLATE.width * scale)
 	local nameHeight = math.round(PLATE.nameTextSize * scale) + 4
 	local healthHeight = math.round(PLATE.healthHeight * scale)

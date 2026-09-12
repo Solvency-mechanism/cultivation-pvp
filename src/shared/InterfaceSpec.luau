@@ -229,6 +229,16 @@ InterfaceSpec.Scale = {
 		legibility would prefer. 700px and up are unaffected, because the curve
 		already returns less than the cap there. ]]
 	stackBudget = 0.38,
+
+	--[[ The width the pair may take, as a fraction of the viewport. The
+		second cap, and it arrived with the pair: one vitals block was 37% of
+		a landscape phone and needed no cap; two and a gap are 78% of it at
+		the scale the height budget allows, and on a 4:3 window under 700px
+		tall the curve would push them past the edge. A pair that overflows
+		is a pair with its right half cut off, which is worse than a slightly
+		smaller pair. Same shape as the height budget: applied after the
+		curve, minScale still wins at the very bottom. ]]
+	pairBudget = 0.8,
 }
 
 --[[ Guidance line geometry, which the footprint cap has to know about because
@@ -265,7 +275,7 @@ function InterfaceSpec.stackHeight(): number
 	return cluster + slot.bottomMargin + guidance.gap + guidance.height
 end
 
-function InterfaceSpec.scale(viewportHeight: number): number
+function InterfaceSpec.scale(viewportHeight: number, viewportWidth: number?): number
 	local spec = InterfaceSpec.Scale
 	if viewportHeight <= 0 then
 		return 1
@@ -295,6 +305,12 @@ function InterfaceSpec.scale(viewportHeight: number): number
 		and how big is it allowed to get. ]]
 	local budget = (spec.stackBudget * viewportHeight) / InterfaceSpec.stackHeight()
 	ratio = math.min(ratio, budget)
+
+	-- The pair's width cap, when the caller knows the width. The height-only
+	-- form stays for callers and tests that reason about height alone.
+	if viewportWidth and viewportWidth > 0 then
+		ratio = math.min(ratio, (spec.pairBudget * viewportWidth) / InterfaceSpec.pairWidth())
+	end
 
 	--[[ `minScale` deliberately wins over the cap at the very bottom. Below
 		roughly 390px there is no scale that both fits the budget and keeps text
@@ -417,8 +433,6 @@ InterfaceSpec.Vitals = {
 InterfaceSpec.Cast = {
 	width = 268,
 	height = 15,
-	targetWidth = 296,
-	targetHeight = 13,
 	textSize = 11,
 	windupFloor = 0.15,
 	flashSeconds = 0.18,
@@ -447,20 +461,41 @@ InterfaceSpec.Cast = {
 	snapSeconds = 0.35,
 }
 
---[[ The target frame.
+--[[ The target frame: the player frame's twin.
 
 	There is no targeting system in this game -- the striker raycasts along the
 	camera -- so "target" here means *whoever you are currently aiming at*,
 	resolved client-side and held briefly so the frame does not strobe as the
 	reticle drifts off a moving opponent. `stickySeconds` is that hold. Long
 	enough to survive a strafe, short enough that walking away from someone
-	clears them. ]]
+	clears them.
+
+	It grew up top-centre as a readout of the soft target, with its own rows
+	and its own height. A human playing it asked for it to sit "to the right
+	of the player's health pane so they track as two separate panels but they
+	are really the same panel modified based on the current target" -- which is
+	the player-frame / target-frame PAIR of the register this HUD was built in,
+	described from first principles. So it is now the vitals block filled in
+	with someone else: the same width, the same three rows at the same heights
+	(`InterfaceSpec.Vitals` owns every one of them), adjacent to the right of
+	the vitals with `pairGap` between. The header carries their name and stage
+	where yours carries stage and power; the health bar is the health bar; the
+	slot your madra takes is where their cast runs, and at rest it carries the
+	one line about the fight (the bracket relation, or that they are neutral).
+
+	Always drawn. A pair that only sometimes has a right half reads as a bug
+	the first time it vanishes, so with no target the right half rests: the
+	same silhouette, dimmed, empty troughs, "no target" where a name would be.
+
+	Consolidates rather than claims: there are no corners left, and this takes
+	none -- the cluster grows sideways by one vitals-width, which is the only
+	direction the bottom of the screen has room in. ]]
 InterfaceSpec.Target = {
-	width = 296,
-	top = 54,
+	-- Between the two halves. Wide enough that they are two panels, narrow
+	-- enough that they are one thing.
+	pairGap = 12,
 	nameTextSize = 13,
 	stageTextSize = 11,
-	healthHeight = 16,
 	valueTextSize = 11,
 	stickySeconds = 3.0,
 	--[[ How long a locked target may stay out of reach before the lock lets
@@ -471,36 +506,24 @@ InterfaceSpec.Target = {
 	-- human reads a few times a second.
 	pollSeconds = 0.08,
 	borderThickness = 1,
-
-	--[[ The frame's rows, so its height is summed rather than written.
-
-		The height was a literal, 52, and the third row -- the cast bar or the
-		bracket refusal, which share it -- outgrew it: the refusal sat at 41
-		with 14 of height, bottom at 55, three pixels of descenders under the
-		frame's edge and more at scale. Seen live on a locked dummy, the first
-		time the frame had a real target in it. A literal height is a claim
-		about contents it does not look at; summing the rows makes the claim
-		true by construction and keeps it true when a row changes. ]]
-	padTop = 3,
-	nameHeight = 18,
-	nameToHealthGap = 1,
-	healthToThirdGap = 3,
-	thirdRowHeight = 14,
-	padBottom = 3,
+	-- The resting half is this much dimmer than a live one: present, not
+	-- competing.
+	restTransparency = 0.55,
 }
 
---[[ The target frame's height, from its rows. The third row is the taller of
-	the cast bar and the refusal caption, since they occupy the same band. ]]
-function InterfaceSpec.targetFrameHeight(): number
-	local t = InterfaceSpec.Target
-	local third = math.max(t.thirdRowHeight, InterfaceSpec.Cast.targetHeight)
-	return t.padTop
-		+ t.nameHeight
-		+ t.nameToHealthGap
-		+ t.healthHeight
-		+ t.healthToThirdGap
-		+ third
-		+ t.padBottom
+--[[ The height of a vitals block -- and so of the target frame, which is its
+	twin -- from its rows. The header is its text plus the same 4px the client
+	adds. ]]
+function InterfaceSpec.vitalsHeight(): number
+	local v = InterfaceSpec.Vitals
+	return (v.headerTextSize + 4) + v.healthHeight + v.rowGap + v.madraHeight
+end
+
+--[[ The width of the pair: two vitals blocks and the gap between. The cluster
+	is at least this wide, and the scale curve must leave it inside the
+	viewport on the narrowest aspect the game is played at. ]]
+function InterfaceSpec.pairWidth(): number
+	return InterfaceSpec.Vitals.width * 2 + InterfaceSpec.Target.pairGap
 end
 
 --[[ The refinement rail.

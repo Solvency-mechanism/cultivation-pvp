@@ -123,13 +123,21 @@ check(
 	phoneBar < PHONE_WIDTH / 2,
 	`{math.round(phoneBar)}px of {PHONE_WIDTH}`
 )
--- The vitals cluster sits above the bar and is the wider of the two, so it is
--- the element that actually decides whether the cluster fits.
-local phoneVitals = InterfaceSpec.Vitals.width * InterfaceSpec.scale(PHONE_HEIGHT)
+--[[ The pair -- vitals and the target frame side by side -- sits above the
+	bar and is the widest thing in the cluster, so it decides whether the
+	cluster fits. It cannot take under half: two vitals-widths at phone scale
+	are three quarters of a landscape phone, and that is the pair's honest cost
+	on a phone. The line is the width budget, and the budget is what keeps it
+	from being more than that. ]]
+local phonePair = InterfaceSpec.pairWidth() * InterfaceSpec.scale(PHONE_HEIGHT, PHONE_WIDTH)
 check(
-	"the vitals cluster takes under half a landscape phone's width",
-	phoneVitals < PHONE_WIDTH / 2,
-	`{math.round(phoneVitals)}px of {PHONE_WIDTH}`
+	"the pair stays inside its width budget on a landscape phone",
+	phonePair <= InterfaceSpec.Scale.pairBudget * PHONE_WIDTH + 1,
+	`{math.round(phonePair)}px of {PHONE_WIDTH}`
+)
+check(
+	"the width cap does not shrink a phone below the reference size",
+	InterfaceSpec.scale(PHONE_HEIGHT, PHONE_WIDTH) >= 1.0
 )
 eq("one slot is just the slot", InterfaceSpec.barWidth(1), InterfaceSpec.Slot.size)
 eq("no slots is no bar", InterfaceSpec.barWidth(0), 0)
@@ -323,25 +331,40 @@ check(
 	`{topLevelLocals} top-level locals, ceiling {SOFT_CEILING}, hard limit 200`
 )
 
---[[ The target frame holds its third row. The height was a literal that its
-	contents outgrew -- the refusal caption's descenders ran three pixels under
-	the frame's edge, seen live the first time the frame had a real target. Now
-	summed from the rows, and asserted so a row that grows fails here rather
-	than clips on a screen. ]]
+--[[ The target frame is the vitals block's twin: the same rows at the same
+	heights, so its height is the vitals' height and nothing else. The pair sits
+	side by side at the bottom of the screen, and the scale curve -- which grows
+	the interface on small screens -- must leave both halves inside the viewport
+	on the narrowest aspect the game is played at. A 4:3 tablet is that aspect;
+	a 16:9 phone in landscape is wider at every height. ]]
 do
-	local t = InterfaceSpec.Target
-	local thirdBottom = t.padTop
-		+ t.nameHeight
-		+ t.nameToHealthGap
-		+ t.healthHeight
-		+ t.healthToThirdGap
-		+ math.max(t.thirdRowHeight, InterfaceSpec.Cast.targetHeight)
-	check(
-		"the target frame is tall enough for its third row",
-		InterfaceSpec.targetFrameHeight() >= thirdBottom + t.padBottom,
-		`third row ends at {thirdBottom}, frame is {InterfaceSpec.targetFrameHeight()}`
+	local v = InterfaceSpec.Vitals
+	eq(
+		"the target frame is exactly as tall as the vitals",
+		InterfaceSpec.vitalsHeight(),
+		(v.headerTextSize + 4) + v.healthHeight + v.rowGap + v.madraHeight
 	)
-	check("the refusal caption fits the third row", t.thirdRowHeight >= 14)
+	eq(
+		"the pair is two vitals and the gap",
+		InterfaceSpec.pairWidth(),
+		v.width * 2 + InterfaceSpec.Target.pairGap
+	)
+	for _, height in { 480, 600, 768, 1080 } do
+		local width = height * 4 / 3
+		local scaled = InterfaceSpec.pairWidth() * InterfaceSpec.scale(height, width)
+		check(
+			`the pair fits a 4:3 viewport {height} tall`,
+			scaled <= width,
+			`pair is {math.round(scaled)} of {width}`
+		)
+	end
+	-- Height alone still answers the old question, unchanged.
+	eq(
+		"the height-only scale is the curve alone",
+		InterfaceSpec.scale(1080),
+		InterfaceSpec.scale(1080, 1920)
+	)
+	check("the resting half is dimmed, not hidden", InterfaceSpec.Target.restTransparency < 1)
 end
 
 -- Cooldown countdowns, in the shape an icon prints them.

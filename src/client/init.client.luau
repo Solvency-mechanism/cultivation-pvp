@@ -90,6 +90,7 @@ local DANGER = color(PALETTE.danger)
 local KEYBIND = color(PALETTE.keybind)
 local LOCK = color(PALETTE.lock)
 local SLOW = color(PALETTE.slow)
+local NEUTRAL = color(PALETTE.neutral)
 local BLACK = Color3.new(0, 0, 0)
 
 local NOTICE_COLOR: { [string]: Color3 } = {
@@ -108,7 +109,7 @@ local NOTICE_COLOR: { [string]: Color3 } = {
 	-- Information, not an event: a human asked for it quieter. See NoticeKind.
 	bracket = TEXT_DIM,
 	-- An NPC falling: its own register, never the kill banner's gold.
-	npc = color(PALETTE.neutral),
+	npc = NEUTRAL,
 }
 
 local TIER_COLOR: { [string]: Color3 } = {
@@ -129,8 +130,10 @@ local TIER_COLOR: { [string]: Color3 } = {
 	Resolved once rather than bound to viewport changes: rebuilding the tree on
 	every resize is a lot of machinery for a case that happens when someone drags
 	a window, and a stale scale is survivable where a rebuild mid-fight is not. ]]
-local viewport = Workspace.CurrentCamera and Workspace.CurrentCamera.ViewportSize.Y or 1080
-local SCALE = InterfaceSpec.scale(viewport)
+local viewport = if Workspace.CurrentCamera
+	then Workspace.CurrentCamera.ViewportSize
+	else Vector2.new(1920, 1080)
+local SCALE = InterfaceSpec.scale(viewport.Y, viewport.X)
 
 local function px(value: number): number
 	return math.round(value * SCALE)
@@ -205,6 +208,7 @@ end
 
 local SLOT = InterfaceSpec.Slot
 local VITALS = InterfaceSpec.Vitals
+local TARGET = InterfaceSpec.Target
 local CASTSPEC = InterfaceSpec.Cast
 
 local slotNames = Config.LoadoutSlots
@@ -214,7 +218,9 @@ local slotSize = px(SLOT.size)
 local slotGap = px(SLOT.gap)
 local barWidth = px(InterfaceSpec.barWidth(slotCount))
 local vitalsWidth = px(VITALS.width)
-local clusterWidth = math.max(vitalsWidth, barWidth)
+-- The pair -- vitals and the target frame, side by side -- sets the width.
+local pairGap = px(TARGET.pairGap)
+local clusterWidth = math.max(vitalsWidth * 2 + pairGap, barWidth)
 
 local headerHeight = text(VITALS.headerTextSize) + px(4)
 local healthHeight = px(VITALS.healthHeight)
@@ -222,15 +228,9 @@ local madraHeight = px(VITALS.madraHeight)
 local rowGap = px(VITALS.rowGap)
 local stackGap = px(VITALS.stackGap)
 local castHeight = px(CASTSPEC.height)
+local vitalsHeight = headerHeight + healthHeight + rowGap + madraHeight
 
-local clusterHeight = headerHeight
-	+ healthHeight
-	+ rowGap
-	+ madraHeight
-	+ stackGap
-	+ castHeight
-	+ stackGap
-	+ slotSize
+local clusterHeight = vitalsHeight + stackGap + castHeight + stackGap + slotSize
 
 local cluster = Instance.new("Frame")
 cluster.Name = "Cluster"
@@ -242,9 +242,11 @@ cluster.Parent = screen
 
 local vitals = Instance.new("Frame")
 vitals.Name = "Vitals"
-vitals.AnchorPoint = Vector2.new(0.5, 0)
-vitals.Position = UDim2.fromScale(0.5, 0)
-vitals.Size = UDim2.fromOffset(vitalsWidth, headerHeight + healthHeight + rowGap + madraHeight)
+--[[ The left half of the pair. Right-anchored against the centre line so the
+	target frame, left-anchored against the same line, is its mirror. ]]
+vitals.AnchorPoint = Vector2.new(1, 0)
+vitals.Position = UDim2.new(0.5, -pairGap / 2, 0, 0)
+vitals.Size = UDim2.fromOffset(vitalsWidth, vitalsHeight)
 vitals.BackgroundTransparency = 1
 vitals.Parent = cluster
 
@@ -352,8 +354,7 @@ do
 	local castFrame = Instance.new("Frame")
 	castFrame.Name = "CastBar"
 	castFrame.AnchorPoint = Vector2.new(0.5, 0)
-	castFrame.Position =
-		UDim2.new(0.5, 0, 0, headerHeight + healthHeight + rowGap + madraHeight + stackGap)
+	castFrame.Position = UDim2.new(0.5, 0, 0, vitalsHeight + stackGap)
 	castFrame.Size = UDim2.fromOffset(px(CASTSPEC.width), castHeight)
 	castFrame.BackgroundColor3 = TROUGH
 	castFrame.BackgroundTransparency = 0.1
@@ -701,7 +702,7 @@ do
 end
 
 -- ===================================================================
--- The target frame, top centre.
+-- The target frame: the right half of the pair.
 -- ===================================================================
 
 --[[ There is no targeting system in this game. The striker raycasts along the
@@ -712,10 +713,24 @@ end
 	Presentation only: this claims nothing, sends nothing and changes no
 	outcome. It is a readout of an aim the player is already making.
 
-	Top centre rather than WoW's top left, because the enemy is in front of you
-	near the reticle, and putting their frame in the same vertical column as
-	their body means a telegraph and its resolution are read in one glance. ]]
-local TARGET = InterfaceSpec.Target
+	It is the vitals block's twin: the same width, the same rows at the same
+	heights, built from the same `bar` and `caption`, sitting to the right of
+	the vitals across the cluster's centre line. Your half says who you are;
+	this half says who you are looking at, in the same shape, so the eye that
+	has learned to read one has already learned to read the other. Where your
+	header has stage and power, theirs has name and stage; where your second
+	bar is madra, theirs is the row their cast runs in -- and when nothing is
+	running it carries the one line about the fight: the bracket relation, or
+	that they are neutral and will not start one.
+
+	Always present. With no target the half rests -- same silhouette, dimmed,
+	troughs empty, "no target" where the name goes -- because a pair that only
+	sometimes has a right half reads as a bug the first time it vanishes.
+
+	Nothing is a box here, because the vitals are not a box. The lock still
+	draws its border, and a refused bracket its red one, as the only strokes
+	the pair ever shows: a border on the right half is a fact about the target
+	and never decoration. ]]
 local targetUi: {
 	frame: Frame,
 	stroke: UIStroke,
@@ -723,46 +738,52 @@ local targetUi: {
 	stageLabel: TextLabel,
 	healthFill: Frame,
 	healthValue: TextLabel,
-	castBar: Frame,
-	castBarFill: Frame,
-	castBarName: TextLabel,
-	castBarTimer: TextLabel,
+	troughs: { Frame },
+	castFill: Frame,
+	castName: TextLabel,
+	castTimer: TextLabel,
 	lockTag: TextLabel,
-	refusal: TextLabel,
+	relation: TextLabel,
 }
 do
-	local targetWidth = px(TARGET.width)
-
 	local targetFrame = Instance.new("Frame")
 	targetFrame.Name = "TargetFrame"
-	targetFrame.AnchorPoint = Vector2.new(0.5, 0)
-	targetFrame.Position = UDim2.new(0.5, 0, 0, px(TARGET.top))
-	targetFrame.Size = UDim2.fromOffset(targetWidth, px(InterfaceSpec.targetFrameHeight()))
-	targetFrame.BackgroundColor3 = PANEL
-	targetFrame.BackgroundTransparency = 0.12
-	targetFrame.BorderSizePixel = 0
-	targetFrame.Visible = false
-	targetFrame.Parent = screen
-	corner(targetFrame, 3)
+	targetFrame.AnchorPoint = Vector2.new(0, 0)
+	targetFrame.Position = UDim2.new(0.5, pairGap / 2, 0, 0)
+	targetFrame.Size = UDim2.fromOffset(vitalsWidth, vitalsHeight)
+	targetFrame.BackgroundTransparency = 1
+	targetFrame.Parent = cluster
 	local targetStroke = outline(targetFrame, EDGE, px(TARGET.borderThickness))
+	targetStroke.Transparency = 1
 
+	-- Header row: their name where your stage is, their stage where your
+	-- power is. The name takes the stage's colour, as it does on the plate.
 	local targetName = caption(targetFrame, text(TARGET.nameTextSize), TEXT, true)
-	targetName.Size = UDim2.new(0.6, -px(8), 0, px(TARGET.nameHeight))
-	targetName.Position = UDim2.fromOffset(px(8), px(TARGET.padTop))
+	targetName.Size = UDim2.new(0.6, 0, 0, headerHeight)
+	targetName.TextTruncate = Enum.TextTruncate.AtEnd
 
 	local targetStage = caption(targetFrame, text(TARGET.stageTextSize), TEXT_DIM, true)
-	targetStage.Size = UDim2.new(0.4, -px(8), 0, px(TARGET.nameHeight))
-	targetStage.Position = UDim2.new(0.6, 0, 0, px(TARGET.padTop))
+	targetStage.Size = UDim2.new(0.4, 0, 0, headerHeight)
+	targetStage.Position = UDim2.fromScale(0.6, 0)
 	targetStage.TextXAlignment = Enum.TextXAlignment.Right
 
+	--[[ Says "LOCKED" between the name and the stage when the frame is showing
+		a lock rather than the aim, so the two idioms are told apart by a word
+		and a border rather than left to be inferred. ]]
+	local targetLockTag = caption(targetFrame, text(TARGET.stageTextSize), LOCK, true)
+	targetLockTag.Size = UDim2.fromOffset(px(56), headerHeight)
+	targetLockTag.Position = UDim2.new(0.6, -px(56), 0, 0)
+	targetLockTag.TextXAlignment = Enum.TextXAlignment.Right
+	targetLockTag.Text = "LOCKED"
+	targetLockTag.Visible = false
+
+	-- Health row: the health bar is the health bar.
 	local targetHealthRow = Instance.new("Frame")
-	targetHealthRow.Size = UDim2.new(1, -px(16), 0, px(TARGET.healthHeight))
-	local healthTop = px(TARGET.padTop) + px(TARGET.nameHeight) + px(TARGET.nameToHealthGap)
-	local thirdTop = healthTop + px(TARGET.healthHeight) + px(TARGET.healthToThirdGap)
-	targetHealthRow.Position = UDim2.fromOffset(px(8), healthTop)
+	targetHealthRow.Size = UDim2.new(1, 0, 0, healthHeight)
+	targetHealthRow.Position = UDim2.fromOffset(0, headerHeight)
 	targetHealthRow.BackgroundTransparency = 1
 	targetHealthRow.Parent = targetFrame
-	local _targetBack, targetHealthFill = bar(targetHealthRow, px(TARGET.healthHeight), HEALTH)
+	local targetHealthBack, targetHealthFill = bar(targetHealthRow, healthHeight, HEALTH)
 
 	local targetHealthValue = caption(targetHealthRow, text(TARGET.valueTextSize), TEXT, true)
 	targetHealthValue.Size = UDim2.new(1, -px(6), 1, 0)
@@ -770,57 +791,45 @@ do
 	targetHealthValue.TextXAlignment = Enum.TextXAlignment.Right
 	targetHealthValue.ZIndex = 3
 
-	--[[ The target's cast bar. The whole reason this frame exists tonight: an
-		opponent's windup was, until now, completely invisible -- the server
-		broadcast nothing until the technique had already resolved, so a 1.8s Tempest
-		arrived instantaneously from the defender's side. ]]
-	local targetCast = Instance.new("Frame")
-	targetCast.Size = UDim2.new(1, -px(16), 0, px(CASTSPEC.targetHeight))
-	targetCast.Position = UDim2.fromOffset(px(8), thirdTop)
-	targetCast.BackgroundColor3 = TROUGH
-	targetCast.BackgroundTransparency = 0.1
-	targetCast.BorderSizePixel = 0
-	targetCast.Visible = false
-	targetCast.Parent = targetFrame
-	corner(targetCast, 2)
-
-	local targetCastFill = Instance.new("Frame")
+	--[[ Second row, in the madra slot. Their cast runs here -- the whole
+		reason this frame first existed: an opponent's windup was, until it
+		did, completely invisible, so a 1.8s Tempest arrived instantaneously
+		from the defender's side. A cast and the relation line share the row
+		and the cast wins it: what they are about to do outranks what the
+		fight is, the same precedence the plate uses. ]]
+	local targetSecondRow = Instance.new("Frame")
+	targetSecondRow.Size = UDim2.new(1, 0, 0, madraHeight)
+	targetSecondRow.Position = UDim2.fromOffset(0, headerHeight + healthHeight + rowGap)
+	targetSecondRow.BackgroundTransparency = 1
+	targetSecondRow.Parent = targetFrame
+	local targetCastBack, targetCastFill = bar(targetSecondRow, madraHeight, READY)
 	targetCastFill.Size = UDim2.fromScale(0, 1)
-	targetCastFill.BackgroundColor3 = READY
-	targetCastFill.BorderSizePixel = 0
-	targetCastFill.Parent = targetCast
-	corner(targetCastFill, 2)
 
-	local targetCastName = caption(targetCast, text(CASTSPEC.textSize), TEXT, true)
+	local rowText = text(TARGET.valueTextSize) - 1
+	local targetCastName = caption(targetSecondRow, rowText, TEXT, true)
 	targetCastName.Size = UDim2.new(1, -px(12), 1, 0)
 	targetCastName.Position = UDim2.fromOffset(px(6), 0)
 	targetCastName.ZIndex = 3
 
-	local targetCastTimer = caption(targetCast, text(CASTSPEC.textSize), TEXT, true)
+	local targetCastTimer = caption(targetSecondRow, rowText, TEXT, true)
 	targetCastTimer.Size = UDim2.new(1, -px(12), 1, 0)
 	targetCastTimer.Position = UDim2.fromOffset(px(6), 0)
 	targetCastTimer.TextXAlignment = Enum.TextXAlignment.Right
 	targetCastTimer.ZIndex = 3
 
-	--[[ The bracket line. `Combat.canEngage` refuses cross-stage fights outright,
-		and until now a player discovered that by attacking someone and having
-		nothing whatsoever happen -- indistinguishable from a miss, from lag, or from
-		a broken button. Saying it on the frame turns a mystery into a rule. ]]
-	--[[ Says "LOCKED" beside the stage when the frame is showing a lock rather
-		than the aim, so the two idioms are told apart by a word and a border rather
-		than left to be inferred. ]]
-	local targetLockTag = caption(targetFrame, text(TARGET.stageTextSize), LOCK, true)
-	targetLockTag.Size = UDim2.fromOffset(px(56), px(18))
-	targetLockTag.Position = UDim2.new(0.6, -px(60), 0, px(TARGET.padTop))
-	targetLockTag.TextXAlignment = Enum.TextXAlignment.Right
-	targetLockTag.Text = "LOCKED"
-	targetLockTag.Visible = false
+	--[[ The line about the fight. `Combat.canEngage` refuses cross-stage
+		fights outright under "refuse", and until this line a player discovered
+		that by attacking someone and having nothing whatsoever happen --
+		indistinguishable from a miss, from lag, or from a broken button.
+		Saying it on the frame turns a mystery into a rule. Under "notice" it
+		says the true thing instead, and for a neutral it says what they are. ]]
+	local targetRelation = caption(targetSecondRow, rowText, TEXT_DIM, true)
+	targetRelation.Size = UDim2.new(1, -px(12), 1, 0)
+	targetRelation.Position = UDim2.fromOffset(px(6), 0)
+	targetRelation.TextTruncate = Enum.TextTruncate.AtEnd
+	targetRelation.ZIndex = 3
+	targetRelation.Visible = false
 
-	local targetRefusal = caption(targetFrame, text(TARGET.stageTextSize), DANGER, true)
-	targetRefusal.Size = UDim2.new(1, -px(16), 0, px(TARGET.thirdRowHeight))
-	targetRefusal.Position = UDim2.fromOffset(px(8), thirdTop)
-	targetRefusal.TextXAlignment = Enum.TextXAlignment.Center
-	targetRefusal.Visible = false
 	targetUi = {
 		frame = targetFrame,
 		stroke = targetStroke,
@@ -828,12 +837,12 @@ do
 		stageLabel = targetStage,
 		healthFill = targetHealthFill,
 		healthValue = targetHealthValue,
-		castBar = targetCast,
-		castBarFill = targetCastFill,
-		castBarName = targetCastName,
-		castBarTimer = targetCastTimer,
+		troughs = { targetHealthBack, targetCastBack },
+		castFill = targetCastFill,
+		castName = targetCastName,
+		castTimer = targetCastTimer,
 		lockTag = targetLockTag,
-		refusal = targetRefusal,
+		relation = targetRelation,
 	}
 end
 
@@ -890,7 +899,7 @@ do
 end
 
 -- ===================================================================
--- Notices, top centre above the target frame.
+-- Notices, top centre. The band the target frame left when it joined the pair.
 -- ===================================================================
 
 local NOTICE = InterfaceSpec.Notice
@@ -1756,20 +1765,45 @@ local function refreshReticle()
 	end
 end
 
+--[[ The right half at rest: the same silhouette with nothing in it. The
+	troughs stay, dimmed, so the pair is always a pair; the words say why it is
+	empty. ]]
+local function restTarget()
+	targetUi.nameLabel.Text = "no target"
+	targetUi.nameLabel.TextColor3 = TEXT_FAINT
+	targetUi.stageLabel.Text = ""
+	targetUi.lockTag.Visible = false
+	targetUi.stroke.Transparency = 1
+	targetUi.healthFill.Size = UDim2.fromScale(0, 1)
+	targetUi.healthValue.Text = ""
+	targetUi.castFill.Size = UDim2.fromScale(0, 1)
+	targetUi.castName.Text = ""
+	targetUi.castTimer.Text = ""
+	targetUi.relation.Visible = false
+	for _, trough in targetUi.troughs do
+		trough.BackgroundTransparency = TARGET.restTransparency
+	end
+end
+
 local function refreshTarget()
 	-- The lock outranks the soft target: once you have chosen someone, the
 	-- frame stays on them however the reticle wanders.
 	local target = lockedTarget or currentTarget
 	if not target or not Nameplates.isLive(target) then
-		targetUi.frame.Visible = false
+		restTarget()
 		return
 	end
 
-	targetUi.frame.Visible = true
+	-- Live: the troughs at the vitals' own weight.
+	for _, trough in targetUi.troughs do
+		trough.BackgroundTransparency = 0.1
+	end
 	targetUi.nameLabel.Text = target.name
+	targetUi.nameLabel.TextColor3 = TEXT
 	--[[ The frame says which idiom it is showing. A locked target is a choice
 		the player made and the border is the lock colour, solid; a soft target
-		is a readout of the aim and the border is the ordinary edge. ]]
+		is a readout of the aim and shows no border at all, the same as your own
+		half. ]]
 	local locked = lockedTarget ~= nil
 	targetUi.lockTag.Visible = locked
 
@@ -1804,50 +1838,53 @@ local function refreshTarget()
 	local drawingCast = cast ~= nil
 		and (InterfaceSpec.telegraphs(cast.duration) or Nameplates.isSnapped(cast))
 
-	--[[ The line under the health bar says what the fight is, in the register
+	--[[ The second row's resting line says what the fight is, in the register
 		the bracket notices use. Under "refuse" it says the server will not
 		apply the hit, as it always did. Under "notice" the hit lands and the
 		line says the true thing instead: out of your bracket, open for
-		testing, not a fair fight. A neutral gets no line at all -- it has no
-		bracket relation to anyone, and telling a player that a practice target
-		is "out of bracket" would be inventing a rule. ]]
+		testing, not a fair fight. A neutral gets no bracket line at all -- it
+		has no bracket relation to anyone, and telling a player that a practice
+		target is "out of bracket" would be inventing a rule -- but it is told
+		for what it is, in the plate's words and colour. ]]
 	if relation == "refused" then
 		targetUi.stroke.Color = DANGER
-		targetUi.refusal.Visible = not drawingCast
-		targetUi.refusal.TextColor3 = DANGER
-		targetUi.refusal.Text = "different bracket — neither of you can hit the other"
+		targetUi.relation.TextColor3 = DANGER
+		targetUi.relation.Text = "different bracket — neither of you can hit the other"
 	elseif relation == "open" then
-		targetUi.stroke.Color = if locked then LOCK else EDGE
-		targetUi.refusal.Visible = not drawingCast
-		targetUi.refusal.TextColor3 = TEXT_DIM
-		targetUi.refusal.Text = "out of your bracket — open for testing, and not a fair fight"
+		targetUi.stroke.Color = LOCK
+		targetUi.relation.TextColor3 = TEXT_DIM
+		targetUi.relation.Text = "out of your bracket — open for testing, and not a fair fight"
+	elseif relation == "neutral" then
+		targetUi.stroke.Color = LOCK
+		targetUi.relation.TextColor3 = NEUTRAL
+		targetUi.relation.Text = "NEUTRAL  ·  will not start it"
 	else
-		targetUi.stroke.Color = if locked then LOCK else EDGE
-		targetUi.refusal.Visible = false
+		targetUi.stroke.Color = LOCK
+		targetUi.relation.Text = ""
 	end
+	targetUi.stroke.Transparency = if locked or relation == "refused" then 0 else 1
+	targetUi.relation.Visible = not drawingCast and targetUi.relation.Text ~= ""
 
 	if cast and drawingCast then
-		targetUi.castBar.Visible = true
 		local tech = Config.Techniques[cast.techId]
-		targetUi.castBarName.Text = if tech
-			then string.upper(tech.name)
-			else string.upper(cast.techId)
+		targetUi.castName.Text = if tech then string.upper(tech.name) else string.upper(cast.techId)
 		if Nameplates.isSnapped(cast) then
 			-- Broken, not finished: the whole bar in the danger hue for a beat,
 			-- and no timer, because there is no time left to count.
-			targetUi.castBarFill.Size = UDim2.fromScale(1, 1)
-			targetUi.castBarFill.BackgroundColor3 = DANGER
-			targetUi.castBarTimer.Text = ""
+			targetUi.castFill.Size = UDim2.fromScale(1, 1)
+			targetUi.castFill.BackgroundColor3 = DANGER
+			targetUi.castTimer.Text = ""
 		else
 			local elapsed = os.clock() - cast.startedAt
 			local remaining = math.max(cast.duration - elapsed, 0)
-			targetUi.castBarFill.Size =
-				UDim2.fromScale(math.clamp(elapsed / cast.duration, 0, 1), 1)
-			targetUi.castBarFill.BackgroundColor3 = color(InterfaceSpec.kindColor(cast.kind))
-			targetUi.castBarTimer.Text = string.format("%.1f", remaining)
+			targetUi.castFill.Size = UDim2.fromScale(math.clamp(elapsed / cast.duration, 0, 1), 1)
+			targetUi.castFill.BackgroundColor3 = color(InterfaceSpec.kindColor(cast.kind))
+			targetUi.castTimer.Text = string.format("%.1f", remaining)
 		end
 	else
-		targetUi.castBar.Visible = false
+		targetUi.castFill.Size = UDim2.fromScale(0, 1)
+		targetUi.castName.Text = ""
+		targetUi.castTimer.Text = ""
 	end
 end
 
