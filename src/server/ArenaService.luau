@@ -1633,7 +1633,7 @@ local PATROLS: { PatrolSpec } = {
 		name = "Grove Walker",
 		region = "rich",
 		stage = "lowgold",
-		walkSpeed = 10,
+		walkSpeed = 6,
 		pingPong = true,
 		points = { { -93.5, -18.8 }, { -114.0, -98.6 } },
 	},
@@ -1648,7 +1648,7 @@ local PATROLS: { PatrolSpec } = {
 		name = "Ash Sentinel",
 		region = "barren",
 		stage = "foundation",
-		walkSpeed = 10,
+		walkSpeed = 6,
 		pingPong = true,
 		points = {
 			{ 126.8, -19.2 },
@@ -1666,7 +1666,7 @@ local PATROLS: { PatrolSpec } = {
 		name = "Pool Warden",
 		region = "wellspring",
 		stage = "highgold",
-		walkSpeed = 8,
+		walkSpeed = 6,
 		pingPong = false,
 		points = {
 			{ 30.0, 172.0 },
