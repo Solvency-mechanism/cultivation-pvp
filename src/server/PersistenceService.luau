@@ -113,13 +113,13 @@ function PersistenceService.save(player: Player): boolean
 		return false
 	end
 
-	local record = {
-		stageIndex = state.stageIndex,
-		tier = state.tier,
-		progress = state.progress,
-		catalysts = state.catalysts,
-		savedAt = os.time(),
-	}
+	-- The closed set lives in exactly one place, Progression.toStore, so
+	-- this file has nothing left to enumerate and therefore nothing left
+	-- to silently drop the next time State grows a field. savedAt is
+	-- persistence's own metadata, not part of State, so it is added here
+	-- rather than inside toStore.
+	local record = Progression.toStore(state)
+	record.savedAt = os.time()
 
 	local ok = withRetry(`save {player.UserId}`, function()
 		active:SetAsync(keyFor(player.UserId), record)
