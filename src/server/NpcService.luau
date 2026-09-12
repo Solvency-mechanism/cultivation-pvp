@@ -32,6 +32,7 @@
 ]]
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 
 local Combat = require(ReplicatedStorage.Shared.Combat)
@@ -60,6 +61,7 @@ export type Patrol = {
 type Npc = {
 	model: Model,
 	root: BasePart,
+	target: BasePart,
 	actor: Combat.Actor,
 	route: { Vector3 },
 	pingPong: boolean,
@@ -108,7 +110,28 @@ local function stageIndexOf(stageName: string): number
 	return 1
 end
 
-local function buildRig(name: string): (Model, BasePart)
+--[[ Unanchored and constraint-driven, not a direct CFrame write, per the
+	human's own live-session finding: an anchored part's CFrame replicates
+	as discrete throttled property updates with no client interpolation, so
+	a perfectly continuous server-side step() was still thrown away at the
+	network boundary and read as teleporting. `target` is a separate,
+	invisible, anchored part the tick moves along the route; `root` is
+	unanchored and physics-driven toward it by AlignPosition (rigid --
+	exact tracking, not spring lag, since the smoothing this fixes comes
+	from the network layer interpolating an unanchored physics body, not
+	from slack in the constraint) and AlignOrientation (bounded angular
+	velocity, deliberately NOT rigid, so a ping-pong reversal turns over a
+	fraction of a second instead of snapping -- the same complaint,
+	"reads as an object on rails," closed in the same fix).
+
+	`root:SetNetworkOwner(nil)` happens in `spawnPatrol`, after parenting --
+	it errors on a part not yet descended from Workspace. Permanent server
+	ownership, not the engine's default nearest-player heuristic, is what
+	makes "not shovable by players" true: without it, whichever player
+	walks closest could be handed simulation of an NPC standing right next
+	to them. `CanCollide = false` on both parts is the other half of that --
+	nothing to push, nothing pushes them off their own path either. ]]
+local function buildRig(name: string): (Model, BasePart, BasePart)
 	local model = Instance.new("Model")
 	model.Name = name
 
@@ -117,11 +140,45 @@ local function buildRig(name: string): (Model, BasePart)
 	root.Size = Vector3.new(2, 5, 1)
 	root.Color = NPC_COLOR
 	root.Material = Enum.Material.SmoothPlastic
-	root.Anchored = true
-	root.CanCollide = true
+	root.Anchored = false
+	root.CanCollide = false
 	root.TopSurface = Enum.SurfaceType.Smooth
 	root.BottomSurface = Enum.SurfaceType.Smooth
 	root.Parent = model
+
+	local rootAttachment = Instance.new("Attachment")
+	rootAttachment.Name = "PatrolAttachment"
+	rootAttachment.Parent = root
+
+	-- Invisible and unqueryable: a raycast or GetPartBoundsInRadius must
+	-- find `root` for a lock or a hit, never this. CanQuery = false is
+	-- what excludes it, the same property the ruling's own projectile
+	-- dressing relies on the client never needing to touch.
+	local target = Instance.new("Part")
+	target.Name = "PatrolTarget"
+	target.Size = Vector3.new(0.2, 0.2, 0.2)
+	target.Transparency = 1
+	target.Anchored = true
+	target.CanCollide = false
+	target.CanQuery = false
+	target.CanTouch = false
+	target.Parent = model
+
+	local targetAttachment = Instance.new("Attachment")
+	targetAttachment.Name = "PatrolTargetAttachment"
+	targetAttachment.Parent = target
+
+	local alignPosition = Instance.new("AlignPosition")
+	alignPosition.Attachment0 = rootAttachment
+	alignPosition.Attachment1 = targetAttachment
+	alignPosition.RigidityEnabled = true
+	alignPosition.Parent = root
+
+	local alignOrientation = Instance.new("AlignOrientation")
+	alignOrientation.Attachment0 = rootAttachment
+	alignOrientation.Attachment1 = targetAttachment
+	alignOrientation.MaxAngularVelocity = 6
+	alignOrientation.Parent = root
 
 	model.PrimaryPart = root
 	model:SetAttribute("DisplayName", name)
@@ -131,7 +188,7 @@ local function buildRig(name: string): (Model, BasePart)
 	-- presentation are interface's to adjust.
 	model:SetAttribute("Neutral", true)
 
-	return model, root
+	return model, root, target
 end
 
 local function findByModel(model: Model): Npc?
@@ -164,22 +221,38 @@ local function advanceWaypoint(npc: Npc)
 	end
 end
 
+--[[ Moves the ATTACHMENT TARGET along the route at walkSpeed, not `root`
+	itself -- `root` is physics-driven toward wherever `target` is by the
+	constraints `buildRig` set up, which is what gives the network layer an
+	unanchored body to interpolate instead of a discrete CFrame write to
+	replicate as-is. `target`'s own CFrame is built facing the direction of
+	travel, so AlignOrientation turns `root` to face it for free -- an NPC
+	that walks its route now looks like it is walking it, not sliding along
+	rails with the same facing throughout. ]]
 local function walk(npc: Npc, deltaSeconds: number)
-	local target = npc.route[npc.waypointIndex]
-	if not target then
+	local waypoint = npc.route[npc.waypointIndex]
+	if not waypoint then
 		return
 	end
-	local current = npc.root.Position
-	local toTarget = target - current
-	local distance = toTarget.Magnitude
+	local current = npc.target.Position
+	local toWaypoint = waypoint - current
+	local distance = toWaypoint.Magnitude
 	if distance <= ARRIVE_RADIUS then
 		advanceWaypoint(npc)
 		return
 	end
 	local step = math.min(npc.walkSpeed * deltaSeconds, distance)
-	npc.root.CFrame = CFrame.new(current + toTarget.Unit * step)
+	local direction = toWaypoint.Unit
+	local nextPosition = current + direction * step
+	npc.target.CFrame = CFrame.lookAt(nextPosition, nextPosition + direction)
 end
 
+--[[ Sets `target` and `root` to the SAME CFrame together, per the human's
+	own constraint: resetting only `root` would leave `target` wherever the
+	route last put it, and a rigid AlignPosition would snap `root` straight
+	back across the map toward it the instant physics next stepped.
+	Velocity is zeroed too, so momentum from the moment of death does not
+	carry into the teleport. ]]
 local function respawn(npc: Npc)
 	npc.deadAt = nil
 	npc.waypointIndex = 1
@@ -187,7 +260,13 @@ local function respawn(npc: Npc)
 	npc.hasBeenHit = false
 	npc.attackerCombatantId = nil
 	npc.nextCastAt = nil
-	npc.root.CFrame = CFrame.new(npc.route[1])
+
+	local start = CFrame.new(npc.route[1])
+	npc.target.CFrame = start
+	npc.root.CFrame = start
+	npc.root.AssemblyLinearVelocity = Vector3.zero
+	npc.root.AssemblyAngularVelocity = Vector3.zero
+
 	CombatService.resetCombatantHealth(npc.model)
 end
 
@@ -197,9 +276,14 @@ local function spawnPatrol(spec: Patrol)
 		return
 	end
 
-	local model, root = buildRig(spec.name)
-	root.CFrame = CFrame.new(spec.route[1])
+	local model, root, target = buildRig(spec.name)
+	local start = CFrame.new(spec.route[1])
+	root.CFrame = start
+	target.CFrame = start
 	model.Parent = ensureFolder()
+	-- Only meaningful once the part is descended from Workspace, hence
+	-- after parenting -- permanent server ownership, not a one-time grab.
+	root:SetNetworkOwner(nil)
 
 	local actor = CombatService.registerCombatant(model, stageIndexOf(spec.stage), "npc")
 	if not actor then
@@ -211,6 +295,7 @@ local function spawnPatrol(spec: Patrol)
 	table.insert(npcs, {
 		model = model,
 		root = root,
+		target = target,
 		actor = actor,
 		route = spec.route,
 		pingPong = spec.pingPong,
@@ -224,18 +309,17 @@ local function spawnPatrol(spec: Patrol)
 	})
 end
 
---[[ Patrol, respawn, and the retaliation loop, all in one pass -- the exact
-	shape DummyService.tick already has for its own three variants. `now` is
-	the only argument, matching DummyService's own tick signature, so
-	whichever tickService wiring calls one calls the other identically;
-	delta is derived internally the same way DummyService's patrol phase
-	accumulator already does. ]]
-local lastTickAt: number? = nil
-
+--[[ Respawn timing and the retaliation loop -- deliberately NOT the walk
+	step, which needs a frame's cadence and gets its own Heartbeat
+	connection in `start` below. Whatever cadence external wiring calls
+	this at (the coarse, once-a-second tickService loop CombatService's own
+	non-motion ticking already runs on) is fine for both: a respawn timer
+	and a retaliation cast schedule are event-driven checks, not continuous
+	motion, the same reason DummyService's own reset/cast scheduling has
+	never needed a finer cadence either. `now` is the only argument, so
+	whichever tickService wiring calls DummyService.tick calls this
+	identically. ]]
 function NpcService.tick(now: number)
-	local delta = if lastTickAt then now - lastTickAt else 0
-	lastTickAt = now
-
 	for _, npc in npcs do
 		if npc.actor.health <= 0 then
 			if not npc.deadAt then
@@ -245,8 +329,6 @@ function NpcService.tick(now: number)
 			end
 			continue
 		end
-
-		walk(npc, delta)
 
 		if npc.hasBeenHit then
 			if
@@ -270,6 +352,25 @@ function NpcService.start()
 	for _, spec in ArenaService.patrols() do
 		spawnPatrol(spec)
 	end
+
+	--[[ The walk step's own Heartbeat connection, NOT the coarse tick above
+		-- this is the actual fix for the human's live-session finding.
+		CombatService.tick runs at Config.Field.cycleTickSeconds (1s),
+		coarse on purpose for regen and construct zoning, and moving
+		`target` only once a second would still read as teleporting no
+		matter how the physics between `root` and `target` is set up:
+		rigid tracking follows `target` exactly, so a choppy target produces
+		a choppy root regardless. Motion needs a frame's cadence; nothing
+		else about an NPC does -- the identical reasoning CombatService's
+		own stepProjectiles already established for exactly this shape of
+		problem. ]]
+	RunService.Heartbeat:Connect(function(deltaSeconds: number)
+		for _, npc in npcs do
+			if npc.actor.health > 0 then
+				walk(npc, deltaSeconds)
+			end
+		end
+	end)
 
 	--[[ The has-been-hit flag itself lives here, not in CombatService --
 		damageCombatant only ever tells this service a hit happened, the
