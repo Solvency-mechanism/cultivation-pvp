@@ -272,8 +272,24 @@ local vitalsUi: {
 	coreGradient: UIGradient,
 	coreRing: UIStroke,
 	slowChip: TextLabel,
+	nodeBar: Frame,
+	nodeFill: Frame,
 }
 do
+	--[[ The node you are standing in: its reserve, draining, directly above
+		your vitals in the guidance gap. The thing you are spending, above the
+		vessel you spend it into. Tier-coloured, unlabelled, gone when you
+		step out. See InterfaceSpec.NodeBar. ]]
+	local nodeBarHeight = px(InterfaceSpec.NodeBar.height)
+	local nodeBar = Instance.new("Frame")
+	nodeBar.Name = "NodeBar"
+	nodeBar.AnchorPoint = Vector2.new(0, 1)
+	nodeBar.Position = UDim2.fromOffset(0, -px(InterfaceSpec.NodeBar.margin))
+	nodeBar.Size = UDim2.new(1, 0, 0, nodeBarHeight)
+	nodeBar.BackgroundTransparency = 1
+	nodeBar.Visible = false
+	nodeBar.Parent = vitals
+	local _nodeBack, nodeFill = bar(nodeBar, nodeBarHeight, CEILING)
 	--[[ The core chip: what you have processed, ever, as a disc of colour
 		bands in the proportions of your composition. Permanent and static --
 		it does not move during a fight, which is what tells identity apart
@@ -376,6 +392,8 @@ do
 		coreGradient = coreGradient,
 		coreRing = coreRing,
 		slowChip = slowChip,
+		nodeBar = nodeBar,
+		nodeFill = nodeFill,
 	}
 end
 
@@ -2086,7 +2104,32 @@ local function arrowTo(x: number, z: number): string
 	return ARROWS[index + 1]
 end
 
+--[[ The node bar follows the nearest node inside the capture radius -- the
+	one the server is cycling you on -- and hides otherwise. Reserve is read
+	off the same payload the Sense rows use, so the row and the bar cannot
+	disagree about how much is left. ]]
+local function refreshNodeBar(nodes: { any })
+	local inside: any = nil
+	local nearest = math.huge
+	for _, entry in nodes do
+		local distance = tonumber(entry.distance)
+		if distance and distance <= Config.Field.captureRadius and distance < nearest then
+			nearest = distance
+			inside = entry
+		end
+	end
+	if not inside or typeof(inside.maxReserve) ~= "number" or inside.maxReserve <= 0 then
+		vitalsUi.nodeBar.Visible = false
+		return
+	end
+	local reserve = if typeof(inside.reserve) == "number" then inside.reserve else 0
+	vitalsUi.nodeBar.Visible = true
+	vitalsUi.nodeFill.Size = UDim2.fromScale(InterfaceSpec.fraction(reserve, inside.maxReserve), 1)
+	vitalsUi.nodeFill.BackgroundColor3 = TIER_COLOR[inside.tier] or TEXT_DIM
+end
+
 local function refreshSense(nodes: { any })
+	refreshNodeBar(nodes)
 	for index, row in senseUi.rows do
 		local entry = nodes[index]
 		if not entry then

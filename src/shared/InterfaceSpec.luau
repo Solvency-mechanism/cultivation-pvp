@@ -258,6 +258,26 @@ InterfaceSpec.Guidance = {
 	gap = 10,
 }
 
+--[[ The node you are standing in, read as a bar.
+
+	Every node is finite (human ruling): commons drain and end, not only
+	primes, and a spot that evaporates with no indication reads as the game
+	taking something away rather than a resource the player spent. So while
+	you cycle, the node's reserve draws as a thin bar directly above your own
+	vitals -- the thing being spent, right above the vessel it is spent into,
+	draining as the vessel fills, in the node's tier colour, without a label.
+	The same shape the vessel has, read the same way.
+
+	It lives in the gap between the guidance line and the cluster, and must
+	fit there: a bar taller than the gap would be a new row, and a new row
+	that is not in `stackHeight()` is the silent overflow the design names.
+	Asserted. Hidden the moment you step out, so the gap is a gap again. ]]
+InterfaceSpec.NodeBar = {
+	height = 4,
+	-- Between the bar's bottom edge and the top of the vitals.
+	margin = 3,
+}
+
 --[[ The full height of the bottom stack at scale 1: vitals, cast bar, action
 	bar, the margin under it, and the guidance line above it.
 

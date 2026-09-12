@@ -476,6 +476,15 @@ do
 	check("the meter is a fixed width", #InterfaceSpec.drainMeter(700, 1200) == D.cells)
 end
 
+--[[ The node bar lives in the guidance gap and must fit there: taller and it
+	is a new row, and a new row absent from stackHeight() is the silent
+	overflow the design names. ]]
+check(
+	"the node bar fits inside the guidance gap",
+	InterfaceSpec.NodeBar.height + InterfaceSpec.NodeBar.margin < InterfaceSpec.Guidance.gap
+)
+check("the node bar is a bar, not a line", InterfaceSpec.NodeBar.height >= 3)
+
 -- Cooldown countdowns, in the shape an icon prints them.
 eq("a sub-second cooldown shows a decimal", InterfaceSpec.countdown(0.8), "0.8")
 eq("a long cooldown rounds up to whole seconds", InterfaceSpec.countdown(15.2), "16")
