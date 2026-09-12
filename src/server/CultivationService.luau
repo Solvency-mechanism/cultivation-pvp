@@ -99,9 +99,33 @@ local function releaseFrom(player: Player, nodeId: string)
 	occupying[player.UserId] = nil
 end
 
---[[ Grant a catalyst to everyone still holding a drained node. ]]
+--[[ Grant a catalyst to everyone who held a drained node, weighted by their
+	own share of the drain -- occupants who held it to the end, not whoever
+	happens to be standing there at the instant it completes. drainedBy is
+	already the share-weighted structure (a bigger number IS a bigger
+	share); nothing further needs computing from it here. Falls back to
+	occupants when drainedBy is empty -- the compatibility guarantee: a
+	node that simply aged out (nobody ever occupied it while AuraNodes.drain
+	could run) still yields exactly as it did before the drain existed. ]]
 function CultivationService.onNodeDrained(node: AuraNodes.Node)
-	for userIdStr in node.occupants do
+	-- Normalised into one set before the reward loop rather than iterating
+	-- drainedBy/occupants through a shared reference: they are tables of
+	-- different value types ({number} vs {boolean}), and storing "whichever
+	-- one" in one variable is a union luau-lsp correctly refuses to iterate
+	-- (TypeError: cannot call a value in that union). Only the KEYS are
+	-- ever read below, so each branch just copies its own keys in.
+	local contributorIds: { [string]: boolean } = {}
+	if next(node.drainedBy) then
+		for userIdStr in node.drainedBy do
+			contributorIds[userIdStr] = true
+		end
+	else
+		for userIdStr in node.occupants do
+			contributorIds[userIdStr] = true
+		end
+	end
+
+	for userIdStr in contributorIds do
 		local userId = tonumber(userIdStr)
 		if userId and states[userId] and AuraNodes.rollCatalyst(Config, node.tier, math.random) then
 			states[userId] = Progression.grantCatalysts(states[userId], 1)
