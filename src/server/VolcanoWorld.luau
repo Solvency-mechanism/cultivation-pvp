@@ -2,6 +2,7 @@
 -- Authored discovery routes around Worldcraft's existing hollow volcano.
 -- No runtime connections: VolcanoService owns interactions and breathing.
 local Worldcraft = require(script.Parent.Worldcraft)
+local VolcanoCave = require(script.Parent.VolcanoCave)
 
 local VolcanoWorld = {}
 local STONE = Color3.fromRGB(53, 43, 46)
@@ -156,107 +157,7 @@ function VolcanoWorld.build(kit: Worldcraft.Kit, centre: Vector3)
 		"Give the cold bowl a little fire.\nA small breath is enough.",
 		GOLD
 	)
-	-- Keep every original dragon part intact. A light-tight black chamber,
-	-- rather than stone across its face, conceals the space around the creature.
-	for _, item in root:GetChildren() do
-		if item:IsA("Model") and item:GetAttribute("Vendor") == "dragon" then
-			for _, p in item:GetDescendants() do
-				if p:IsA("BasePart") then
-					p.CFrame = p.CFrame + frame:VectorToWorldSpace(Vector3.new(0, 0, 28))
-				elseif p:IsA("PointLight") then
-					p.Brightness = 0.3
-					p.Range = 12
-					p.Shadows = true
-				end
-			end
-		elseif item:IsA("BasePart") then
-			local at = frame:PointToObjectSpace(item.CFrame.Position)
-			if
-				(
-					string.find(item.Name, "VolcanoFacet")
-					and at.Z > 20
-					and math.abs(at.X) < 44
-					and at.Y < 65
-				)
-				or string.find(item.Name, "DragonPool")
-				or string.find(item.Name, "LavaFall")
-			then
-				item:Destroy()
-			end
-		end
-	end
-	-- Existing exterior rivers and climb dressing must not shine through the pocket.
-	for _, p in root:GetChildren() do
-		if p:IsA("BasePart") then
-			local at = frame:PointToObjectSpace(p.CFrame.Position)
-			if at.Z > 20 and math.abs(at.X) < 35 and at.Y < 62 then
-				p.Color = Color3.new(0, 0, 0)
-				p.Material = Enum.Material.Neon
-				for _, light in p:GetChildren() do
-					if light:IsA("Light") then
-						light:Destroy()
-					end
-				end
-			end
-		end
-	end
-	for _, p in ground:GetChildren() do
-		if p:IsA("BasePart") then
-			local at = frame:PointToObjectSpace(p.CFrame.Position)
-			if at.Z > 32 and math.abs(at.X) < 35 and at.Y < 62 then
-				p.Color = Color3.new(0, 0, 0)
-				p.Material = Enum.Material.Neon
-			end
-		end
-	end
-	local function darkness(name: string, size: Vector3, at: Vector3)
-		local p = block(name, size, CFrame.new(at), Color3.new(0, 0, 0), false)
-		-- Zero-radiance black avoids ambient lighting revealing the box walls.
-		p.Material = Enum.Material.Neon
-		p.CanCollide = true
-		p.CastShadow = true
-		return p
-	end
-	darkness("DragonCaveBack", Vector3.new(96, 120, 6), Vector3.new(0, 5, 134))
-	darkness("DragonCaveRoof", Vector3.new(96, 6, 118), Vector3.new(0, 65, 78))
-	darkness("DragonCaveBottom", Vector3.new(96, 6, 118), Vector3.new(0, -55, 78))
-	for side = -1, 1, 2 do
-		darkness("DragonCaveWall", Vector3.new(6, 120, 106), Vector3.new(side * 26, 5, 85))
-		darkness("DragonCaveLightSeal", Vector3.new(24, 120, 6), Vector3.new(side * 35, 5, 32))
-		-- The exterior rock joins the volcano wall around the opening only.
-		block(
-			"DragonCaveShoulder",
-			Vector3.new(13, 62, 12),
-			CFrame.new(side * 36, 29, 12),
-			STONE,
-			false
-		)
-		block(
-			"DragonCaveBrow",
-			Vector3.new(43, 13, 14),
-			CFrame.new(side * 20, 61, 14) * CFrame.Angles(0, 0, side * 0.08),
-			STONE,
-			false
-		)
-		for i = 0, 2 do
-			block(
-				"DragonCaveRim",
-				Vector3.new(8, 18, 9),
-				CFrame.new(side * (30 + i % 2), 9 + i * 17, 13)
-					* CFrame.Angles(0, side * 0.15, side * 0.12),
-				STONE,
-				false
-			)
-		end
-	end
-	local caveFloor = block(
-		"DragonCaveFloor",
-		Vector3.new(62, 2, 100),
-		CFrame.new(0, 1, 69),
-		Color3.new(0, 0, 0),
-		true
-	)
-	caveFloor.Material = Enum.Material.Neon
+	VolcanoCave.build(root, ground, frame)
 	bridge("DragonAudiencePath", Vector3.new(0, 1, 14), Vector3.new(0, 1, 29), 16)
 	action("DragonOffer", "dragon", Vector3.new(0, 4, 12), GOLD)
 	local forge = action("ForgeAnvil", "forge", Vector3.new(-13, 4, 4), EMBER)

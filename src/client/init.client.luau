@@ -2687,7 +2687,7 @@ local function guidanceText(): string
 
 	local senseRange = player:GetAttribute("SenseRange") or 0
 	if #latest > 0 then
-		return "Refinement comes only from aura nodes. Follow your sense."
+		return "Seek aura nodes, or cultivate and purify mana in the volcano."
 	end
 	if senseRange <= 0 then
 		return "No aura sense at this stage. Search on foot."

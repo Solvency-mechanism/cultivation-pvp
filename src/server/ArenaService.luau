@@ -87,6 +87,9 @@ local Workspace = game:GetService("Workspace")
 
 local Config = require(ReplicatedStorage.Shared.Config)
 local VolcanoWorld = require(script.Parent.VolcanoWorld)
+local VolcanoProps = require(script.Parent.VolcanoProps)
+local VolcanoSurfaceDetail = require(script.Parent.VolcanoSurfaceDetail)
+local VolcanoDragonDetail = require(script.Parent.VolcanoDragonDetail)
 local Worldcraft = require(script.Parent.Worldcraft)
 
 local ArenaService = {}
@@ -2001,7 +2004,13 @@ function ArenaService.start()
 			end
 			return Random.new(seed)
 		end
-		VolcanoWorld.build({ rngFor = volcanoRng, decor = decor, ground = ground }, volcanoCentre)
+		local volcano = VolcanoWorld.build(
+			{ rngFor = volcanoRng, decor = decor, ground = ground },
+			volcanoCentre
+		)
+		VolcanoSurfaceDetail.build(volcano.root)
+		VolcanoProps.build(volcano.root, volcano.ground)
+		VolcanoDragonDetail.build(volcano.root)
 		local approach = Worldcraft.volcanoApproach(volcanoCentre)
 		buildRoad(
 			"volcano",

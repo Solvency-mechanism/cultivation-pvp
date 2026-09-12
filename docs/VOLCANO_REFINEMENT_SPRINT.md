@@ -1,6 +1,6 @@
-# Sleeping Furnace — volcano refinement sprint
+# Sleeping Furnace â€” volcano refinement sprint
 
-Status: proposed sprint, not dispatched. Branch: `feature/volcano-art-refinement`. Protected baseline: `346f85e` on `feature/volcano-experience`. Duration: ten working days, with a review at each gate; revise estimates after the asset and performance audit. No refinement implementation has started.
+Status: in progress, authorized by the user. Branch: `feature/volcano-art-refinement`. Protected baseline: `346f85e` on `feature/volcano-experience`. Duration: ten working days, with a review at each gate; revise estimates after the asset and performance audit. Implementation and Studio verification are underway; full quality and device gates remain open.
 
 ## Goal and creative direction
 
@@ -8,7 +8,7 @@ Make a compact volcano expedition with exceptional art direction, material detai
 
 A living mountain shelters something vastly larger than the visitor. Outside: fractured, weathered basalt, ash deposits and restrained molten seams. Inside: scale, silence, an irregular cave mouth, and the complete red dragon head suspended against unreadable darkness. Warm light has a source and a purpose. Detail rewards approach rather than making every surface equally busy.
 
-The approved head is the immutable control asset. Preserve every part, shape, relative pose, proportion, color and material in this sprint's production candidate. Refine its presentation through light, framing, breathing and sound. Any proposed remesh or anatomical revision belongs in a separate comparison variant and requires visual approval before replacing it. The cave must enclose the head rather than crop it. Preserve darkness on either side and behind it; do not reveal box walls or place stone across the face.
+The approved head remains the comparison control on the baseline branch. During execution the user explicitly authorized expanding the sculpture for fidelity and awe. The candidate may refine the muzzle, eyes, teeth and silhouette; retain original control parts and their provenance for comparison. The cave must enclose the head rather than crop it. Preserve darkness on either side and behind it; do not reveal box walls or place stone across the face.
 
 ## Approach choice
 
@@ -16,11 +16,11 @@ The approved head is the immutable control asset. Preserve every part, shape, re
 | --- | --- | --- |
 | Polish existing procedural primitives | Fastest, easiest to maintain | Repeated blocks and material uniformity limit the ceiling |
 | Entirely custom sculpted environment | Maximum control of silhouette and surface detail | Large asset workload, iteration and collision cost |
-| Authored hero assets plus reusable procedural assembly — recommended | Strong focal spaces with manageable asset and runtime budgets | Requires a disciplined seam, scale and material system |
+| Authored hero assets plus reusable procedural assembly â€” recommended | Strong focal spaces with manageable asset and runtime budgets | Requires a disciplined seam, scale and material system |
 
 Use custom modular rock, cave threshold and landmark props where the player looks closely. Keep assembly, interactions and distant structure code driven. Preserve the original dragon. Do not expand the playable map or introduce new progression systems during the art sprint.
 
-## Days 1–2: references, scene surgery and composition
+## Days 1â€“2: references, scene surgery and composition
 
 Deliverables: a licensed/reference-only visual board; three selected current Roblox reference experiences with dates and comparable screenshots; a camera sheet; measured performance baseline; a cleaned greybox candidate. References are for composition and quality comparison, never copied assets.
 
@@ -30,7 +30,7 @@ Author five beats: distant volcano silhouette; compressed entrance; first glimps
 
 Gate A: uninterrupted avatar walk from approach through cave, trial and crater; side and rear views contain no exposed box, gaps or intersecting climb. Approve matched greybox views before detailed asset work.
 
-## Days 3–4: geology and material craft
+## Days 3â€“4: geology and material craft
 
 Build a small coherent basalt kit: large fractured masses, two medium fracture families, irregular cave lip segments, ledges, rubble clusters, stalactites and ash deposits. Use large and medium shapes first; add small detail only where it reinforces erosion, heat or traversal. Break straight brow and shoulder edges without making the cave a pile of disconnected rocks.
 
@@ -38,7 +38,7 @@ Create a consistent material palette with believable scale: cooled basalt, fresh
 
 Gate B: unlit geometry still reads as a volcanic cave integrated into the mountain. No obvious repeated block rhythm at the entrance; material scale holds from avatar distance and from the crater. The original head comparison test remains green.
 
-## Days 5–6: darkness, dragon presentation and atmosphere
+## Days 5â€“6: darkness, dragon presentation and atmosphere
 
 Replace broad blackout overrides with a bounded, owned light enclosure. Preserve absolute visual darkness behind and alongside the head across supported settings. Shape a restrained facial light so teeth, brow, horns and snout read without lighting the enclosure. Reduce competing altar and path brightness; nine equally bright action markers should become distinct objects with different visual priority.
 
@@ -48,7 +48,7 @@ Layer positional rumble, distant stone movement and restrained ember sounds usin
 
 Gate C: audience and side views show the intact head against darkness at rest and peak exhale. No light leaks, visible backdrop planes, competing neon glare, camera clipping or excessive particles. Review silent footage first, then audio separately.
 
-## Days 7–8: discovery detail and expedition continuity
+## Days 7â€“8: discovery detail and expedition continuity
 
 Replace generic action plinths with readable silhouettes: a worked anvil with cooled slag, a quiet purification basin, an offering surface worn by repeated use. Keep server actions, ranges and resource costs intact. Place environmental clues for refuge and brazier discovery; reduce signage only when unfamiliar players can still find the action.
 
@@ -58,7 +58,7 @@ Run a full fresh-state expedition, returning-player persistence check and two-cl
 
 Gate D: unfamiliar players can find the entrance, read the dragon reveal, use the offering and navigate the trial without narration. Log confusion and fix repeated issues. No new combat/economy systems are added to conceal presentation problems.
 
-## Days 9–10: performance, critique and release candidate
+## Days 9â€“10: performance, critique and release candidate
 
 Capture identical camera positions, avatar scale, FOV, graphics settings and breath phases for baseline and candidate: approach, entrance, audience, lateral audience, trial, refuge, crater and rear exterior. Include a continuous gameplay-camera walk; beauty shots alone are insufficient.
 

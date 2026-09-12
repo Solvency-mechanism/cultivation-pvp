@@ -65,6 +65,9 @@
       },
       "VolcanoRouteQA": {
         "$path": "qa/VolcanoRouteQA.luau"
+      },
+      "VolcanoTraversalQA": {
+        "$path": "qa/VolcanoTraversalQA.luau"
       }
     },
     "StarterPlayer": {

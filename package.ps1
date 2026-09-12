@@ -72,12 +72,14 @@ if ($profile -ne "release") {
     Write-Output "  !! This artifact is NOT FOR PLAYERS. Set Config.Profile = `"release`" to ship."
 }
 
+$sourceState = if (git status --porcelain) { "working tree changes; commit is ancestry only" } else { "clean commit" }
 $hash = (Get-FileHash $out -Algorithm SHA256).Hash
 $size = [math]::Round((Get-Item $out).Length / 1KB)
 
 @"
 build:   $Version
 commit:  $(git rev-parse HEAD)
+source:  $sourceState
 built:   $(Get-Date -Format "yyyy-MM-dd HH:mm:ss K")
 file:    $(Split-Path $out -Leaf)
 size:    $size KB

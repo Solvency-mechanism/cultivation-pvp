@@ -208,6 +208,12 @@ local function run()
 	print(
 		`[volcano-qa] PASS {passed} checks. Real services and Roblox collision queries; explicit QA relocations, not player traversal.`
 	)
+	local traversal = ServerScriptService:FindFirstChild("VolcanoTraversalQA")
+	if traversal and traversal:IsA("ModuleScript") then
+		task.spawn(function()
+			require(traversal).run(subject)
+		end)
+	end
 end
 
 task.spawn(function()

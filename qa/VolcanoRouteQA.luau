@@ -13,6 +13,8 @@ function VolcanoRouteQA.run()
 	local arenaGround = assert(Workspace:FindFirstChild("ArenaWalkable"), "ArenaWalkable missing")
 	local ground = assert(arenaGround:FindFirstChild("VolcanoWalkable"), "VolcanoWalkable missing")
 	local passed = 0
+	local coverage: { [string]: number } =
+		{ originalSpiral = 0, craterStairs = 0, authoredRoutes = 0, caveBoundary = 0 }
 	local failures: { string } = {}
 	local function check(ok: boolean, detail: string)
 		if ok then
@@ -76,6 +78,8 @@ function VolcanoRouteQA.run()
 		end
 		if
 			p.Name == "AshPilgrimRoad"
+			or p.Name:match("^VolcanoRamp%d+$")
+			or p.Name:match("^VolcanoCraterStair%d+$")
 			or p.Name:match("^VolcanoTunnelFloor")
 			or p.Name == "SanctuaryEntry"
 			or p.Name == "FissureFloor"
@@ -85,16 +89,126 @@ function VolcanoRouteQA.run()
 			or p.Name == "TrialLanding"
 			or p.Name == "CinderShortcutLanding"
 			or p.Name == "ShortcutDescent"
+			or p.Name == "DragonAudiencePath"
 		then
+			local category = if p.Name:match("^VolcanoRamp%d+$")
+				then "originalSpiral"
+				elseif p.Name:match("^VolcanoCraterStair%d+$") then "craterStairs"
+				else "authoredRoutes"
+			coverage[category] += 1
 			for step = -4, 4 do
 				local point = p.CFrame * Vector3.new(0, 0, p.Size.Z * step / 10)
 				sample(`route {p.Name}[{step}]`, point + Vector3.new(0, 4, 0))
 			end
 		end
 	end
+	check(
+		coverage.originalSpiral == 64,
+		`original spiral coverage: expected 64 slabs, found {coverage.originalSpiral}`
+	)
+	check(
+		coverage.craterStairs == 6,
+		`crater stair coverage: expected 6 steps, found {coverage.craterStairs}`
+	)
+	-- Visual enclosure probes use CanQuery, separately from physical clearance.
+	-- They catch visible backside/head leaks even when the black cave intentionally
+	-- has noncolliding scenic walls. They do not claim exterior ground traversal.
+	local offer = root:FindFirstChild("DragonOffer", true)
+	local head = root:FindFirstChild("Head", true)
+	local centre = root:GetAttribute("Centre")
+	check(
+		offer ~= nil
+			and offer:IsA("BasePart")
+			and head ~= nil
+			and head:IsA("BasePart")
+			and typeof(centre) == "Vector3",
+		"cave boundary frame/head missing"
+	)
+	if
+		offer
+		and offer:IsA("BasePart")
+		and head
+		and head:IsA("BasePart")
+		and typeof(centre) == "Vector3"
+	then
+		local frame = CFrame.new(centre) * offer.CFrame.Rotation
+		local headAt = frame:PointToObjectSpace(head.Position)
+		-- The rear black slab is a scenic pedestal below/behind the sculpture,
+		-- not a path through its neck. Require that intent in production metadata
+		-- AND a physical audience boundary; merely dropping failed probes is not
+		-- sufficient evidence. This checks walking clearance, not jump prevention.
+		local caveFloor = ground:FindFirstChild("DragonCaveFloor", true)
+		check(
+			caveFloor ~= nil
+				and caveFloor:GetAttribute("VolcanoScenicFloor") == true
+				and caveFloor:GetAttribute("VolcanoVisitorMaxZ") == 29,
+			"cave floor lacks explicit visitor/scenic boundary contract"
+		)
+		for _, z in { 18, 22, 26, 28 } do
+			for _, x in { -6, 0, 6 } do
+				sample(`visitor audience x{x} z{z}`, frame:PointToWorldSpace(Vector3.new(x, 5, z)))
+			end
+		end
+		local boundaryParams = RaycastParams.new()
+		boundaryParams.FilterType = Enum.RaycastFilterType.Include
+		boundaryParams.FilterDescendantsInstances = { root, ground }
+		boundaryParams.RespectCanCollide = true
+		for _, x in { -20, -10, 0, 10, 20 } do
+			local start = frame:PointToWorldSpace(Vector3.new(x, 3, 29))
+			local hit = Workspace:Raycast(
+				start,
+				frame:VectorToWorldSpace(Vector3.new(0, 0, 6)),
+				boundaryParams
+			)
+			check(
+				hit ~= nil and hit.Instance:GetAttribute("VolcanoVisitorBoundary") == true,
+				`visitor boundary at x{x} does not prevent walking behind audience: {if hit
+					then hit.Instance.Name
+					else "no collision"}`
+			)
+		end
+		local visualParams = RaycastParams.new()
+		visualParams.FilterType = Enum.RaycastFilterType.Include
+		visualParams.FilterDescendantsInstances = { root, ground }
+		visualParams.RespectCanCollide = false
+		for _, y in { 8, 24, 45 } do
+			for _, side in { -1, 1 } do
+				local origin = frame:PointToWorldSpace(Vector3.new(side * 160, y, headAt.Z))
+				local target = frame:PointToWorldSpace(Vector3.new(0, y, headAt.Z))
+				local hit = Workspace:Raycast(origin, target - origin, visualParams)
+				coverage.caveBoundary += 1
+				check(
+					hit ~= nil
+						and (
+							hit.Instance:GetAttribute("VolcanoCaveOwned") == true
+							or hit.Instance.Name:find("Cave", 1, true) ~= nil
+							or hit.Instance.Name:find("VolcanoFacet", 1, true) ~= nil
+						),
+					`cave exterior side {side} height {y}: first visible surface {if hit
+						then hit.Instance:GetFullName()
+						else "none"}`
+				)
+			end
+			local origin = frame:PointToWorldSpace(Vector3.new(0, y, 180))
+			local target = frame:PointToWorldSpace(Vector3.new(0, y, headAt.Z))
+			local hit = Workspace:Raycast(origin, target - origin, visualParams)
+			coverage.caveBoundary += 1
+			check(
+				hit ~= nil
+					and (
+						hit.Instance:GetAttribute("VolcanoCaveOwned") == true
+						or hit.Instance.Name:find("Cave", 1, true) ~= nil
+						or hit.Instance.Name:find("VolcanoFacet", 1, true) ~= nil
+					),
+				`cave rear height {y}: first visible surface {if hit
+					then hit.Instance:GetFullName()
+					else "none"}`
+			)
+		end
+	end
 	probe:Destroy()
 	local summary =
-		`{passed} engine spatial checks passed; {#failures} failed. Raycast support and exact part overlap; not character traversal.`
+		`{passed} engine spatial checks passed; {#failures} failed. Spiral {coverage.originalSpiral}/64, stairs {coverage.craterStairs}/6, boundary rays {coverage.caveBoundary}/9. Studio geometry only, not character traversal.`
 	Workspace:SetAttribute("VolcanoRouteQASummary", summary)
 	Workspace:SetAttribute("VolcanoRouteQAStatus", if #failures == 0 then "Passed" else "Failed")
 	Workspace:SetAttribute("VolcanoRouteQAFailures", table.concat(failures, "\n"))

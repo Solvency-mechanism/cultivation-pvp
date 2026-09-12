@@ -121,7 +121,7 @@ local cinder = button("Q · Step (25)", -126, "cinder")
 
 -- Local animation interpolates from the shared server epoch: no replicated
 -- per-frame CFrames, and late arrivals see the same point in the breath.
-local breathingParts: { BasePart } = {}
+local breathingParts: { [BasePart]: number } = {}
 local jawParts: { [BasePart]: CFrame } = {}
 local jawPivot: CFrame? = nil
 local emitters: { [BasePart]: ParticleEmitter } = {}
@@ -137,7 +137,7 @@ local function registerVisual(object: Instance)
 		or object:GetAttribute("VolcanoEye")
 		or object:GetAttribute("VolcanoLava")
 	then
-		table.insert(breathingParts, object)
+		breathingParts[object] = object.Transparency
 	end
 	if object:GetAttribute("VolcanoJaw") then
 		jawParts[object] = object.CFrame
@@ -176,10 +176,11 @@ RunService.RenderStepped:Connect(function()
 		return
 	end
 	local phase = Volcano.phase(Workspace:GetServerTimeNow() - epoch)
-	for _, part in breathingParts do
+	for part, originalTransparency in breathingParts do
 		part.Transparency = if part:GetAttribute("VolcanoClue")
 			then 0.96 - 0.9 * phase.intensity
-			else 0.3 - phase.intensity * 0.25
+			elseif part:GetAttribute("VolcanoEye") then originalTransparency
+			else math.clamp(originalTransparency + 0.08 * (1 - phase.intensity), 0, 1)
 	end
 	if jawPivot then
 		local delta = jawPivot

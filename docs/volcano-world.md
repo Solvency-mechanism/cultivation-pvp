@@ -4,6 +4,9 @@
 dragon, pools, spiral ramp, crater floor and stairs. It returns `{centre, root,
 ground, frame}`. Nothing connects to a heartbeat or owns a prompt in this builder.
 The service owns interactions, reward eligibility, resource spending and animation.
+`VolcanoCave.build(root, ground, frame)` owns the fitted black interior, authored
+rear basalt mass and replacement spiral. Parent integration may layer separate
+prop/dragon-detail modules after this build returns.
 
 The `VolcanoExperience` folder lives under `kit.decor`; `VolcanoWalkable` lives
 under `kit.ground`. This preserves ArenaService's floor-placement distinction.
@@ -21,7 +24,7 @@ positive Z points toward the dragon. Local +X is bearing mouth + pi/2.
 * Entry brazier: (7, 3.5, -43), with a nearby instruction to offer a small breath.
   An ash seal at (11.6, 4.7, -43) hides a small recess, relic and carved clue.
 * Sanctuary: 47 by 39 studs, top Y 2, centre (0, 1, -1). Dragon offering at
-  (0, 4, 8), forge at (-13, 4, 4), purification at (14, 4, -4). The sanctuary
+  (0, 4, 12), forge at (-13, 4, 4), purification at (14, 4, -4). The sanctuary
   is an authored dry floor; any combat exclusion must be enforced by gameplay.
 * Side fissure: 10-stud floor from (20, 1.2, -10) to (88, 1.2, -10), lined by
   basalt ribs and ember threads. Low shell facets with local X > 45,
@@ -46,6 +49,44 @@ All nine action marker parts are anchored and noncolliding. Decorative additions
 are noncolliding except for the intentionally sealed ash recess; traversable
 surfaces are colliding slate beneath `ground`.
 This avoids a secret or reward becoming inaccessible behind a decorative rib.
+
+## Visual refinement: fitted cave and rear mountain
+
+The previous approved head-in-darkness composition is retained as the visual
+goal, while its projecting rectangular enclosure is replaced. Every original
+dragon part retains its size, relative transform, color and material. The whole
+sculpture takes a rigid 12-degree raised-chin pose around chamber X, with head
+centre local (0,22.6,28). This directs the intact neck down into the mountain:
+translation alone left Plate2/Plate3 visibly outside the rear wall in Studio.
+The regression checks every exposed dragon corner against the sloping rear
+backing with 0.9 studs of margin. No original anatomy is deleted or remodeled.
+
+`DragonCaveArchitecture/BlackInterior` contains eight sloping rear seal bands,
+paired side bands and a roof. The rear recedes from local Z 75 at Y 0 to Z 57 at
+Y 68; sides are X +/-24. Roof is Y 69 with underside 68, supporting additive horn
+detail below that height. All eight corners of every black enclosure part are
+checked within the original radius 80 footprint. Its floor is real collidable
+geometry under `VolcanoWalkable`; darkness is never substituted for spiral floor.
+The sculpture's backing floor carries `VolcanoScenicFloor` and a visitor extent
+of local Z29. A visible colliding basalt barrier at Z31 spans X +/-24, reaches
+Y5.5, and carries `VolcanoVisitorBoundary`. This separates the audience space
+from the neck/scenic interior. It is a walking boundary, not an anti-jump barrier.
+
+`DragonCaveArchitecture/BasaltEnvelope` supplies 112 staggered rear rock faces,
+fractured threshold ribs and crown pieces. The rear mass tapers from radius 78
+at ground to 66 at Y 68, then joins the original cone at Y 88. The opening frames
+the complete head rather than covering it. Every architecture part carries
+`VolcanoCaveOwned`; structural rock faces also carry `VolcanoRockFace`.
+
+Replacement selection is explicit: named rear VolcanoFacet/VolcanoRiver parts
+below Y 88, original ramp posts/flames, dragon pool and lava fall are removed.
+No arbitrary nearby surfaces are painted black. The front original shell stays.
+
+The 64 original ramp slabs are replaced with eight-stud-wide solid cobblestone
+slabs outside the new rear buttress. Start and arrival bearings remain unchanged;
+the outer offset eases from 7.5 back to 3.5 near the summit to meet existing crater
+stairs. Low basalt kerbs mark exposed edges, with regular landing gaps. All ramp
+names remain `VolcanoRamp1` through `VolcanoRamp64` for engine QA compatibility.
 
 ## Runtime seams
 
@@ -79,11 +120,12 @@ runtime cultivation owner, not a separate reward timer in the world builder.
 * StyLua applied; Selene reports zero errors, warnings or parse errors.
 * Existing compile gate: 25 source files compiled, zero failed at the time of
   the world change.
-* `lune run tests/volcano-world.test.luau` executes both builders and performs
-  24,173 construction checks, including marker support estimates, nine-point
-  body clearance samples along trial/fissure/shortcut geometry, dragon-facing
-  direction, action uniqueness and metadata. It generates 423 decor descendants
-  and 96 walkable descendants. The harness uses midpoint RNG,
+* `lune run tests/volcano-world.test.luau` executes the builders and performs
+  over 244,000 construction checks, including marker support estimates, nine-point
+  body clearance samples along all 64 spiral slabs and trial/fissure/shortcut geometry, dragon-facing
+  direction, baseline dragon anatomy preservation, enclosure bounds, action
+  uniqueness and metadata. The integrated harness also constructs the separate
+  prop and dragon-detail modules before its assertions. The harness uses midpoint RNG,
   stub service lookup, removed the legacy prompt event hookup (Lune has no live
   Roblox signals), and replaced the Part Position read with CFrame.Position
   because Lune does not synthesize that derived property. It supplies the standard
