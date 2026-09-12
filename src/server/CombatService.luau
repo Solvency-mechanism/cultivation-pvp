@@ -384,8 +384,8 @@ local function publish(player: Player)
 		return
 	end
 	publishHealth(player, actor)
-	player:SetAttribute("Madra", math.floor(actor.madra))
-	player:SetAttribute("MaxMadra", math.floor(Combat.maxMadra(Config, actor.stageIndex)))
+	player:SetAttribute("Aura", math.floor(actor.aura))
+	player:SetAttribute("MaxAura", math.floor(Combat.auraCapacity(Config, actor.stageIndex)))
 end
 
 --[[ The actor is authoritative; the Humanoid is a readout, so the default health
@@ -424,7 +424,7 @@ end
 
 local function ensureActor(player: Player): Combat.Actor?
 	-- No actor exists between death and respawn, so a corpse cannot be hit
-	-- again and the dead player cannot spend madra.
+	-- again and the dead player cannot spend aura.
 	if dying[player.UserId] then
 		return nil
 	end
@@ -812,7 +812,7 @@ local function damageCombatant(source: Combat.Actor, target: Combatant, raw: num
 	mirrorHumanoid(target.humanoid, target.actor)
 	publishHealth((target.player :: Instance?) or target.model, target.actor)
 	if target.kind == "player" and target.player then
-		-- Madra/MaxMadra are player-only; dummies neither spend nor need to
+		-- Aura/MaxAura are player-only; dummies neither spend nor need to
 		-- show them.
 		publish(target.player)
 	end
@@ -1614,7 +1614,7 @@ end
 	which would cost the weight `kill`/`death` notices just earned. The slot
 	bar's own cooldown sweep already shows it as a shape; that is enough. ]]
 local REFUSAL_MESSAGES: { [string]: string } = {
-	insufficient_madra = "Not enough madra.",
+	insufficient_aura = "Not enough aura.",
 	dead = "You cannot act while dead.",
 	no_target = "You have no target.",
 	out_of_range = "Target is out of range.",

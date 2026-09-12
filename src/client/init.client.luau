@@ -4,7 +4,7 @@
 	Rebuilt out of the Roblox-traditional register -- big panels pinned to the
 	four corners -- and into the dense, anchored one this game's combat now
 	needs. The argument is not aesthetic. The old HUD carried four facts and
-	carried them well; the fight it has to describe now involves health, madra,
+	carried them well; the fight it has to describe now involves health, aura,
 	a per-technique cooldown, a global cooldown, a windup you must react to, an
 	opponent whose state you have never once been able to see, and a bracket rule
 	that silently refuses fights. Corner panels cannot carry that, and the
@@ -13,7 +13,7 @@
 	**The organising rule: combat-critical state is anchored to the action bar,
 	everything else is exiled to the edges.** The action bar's position is the
 	one thing that was already right -- bottom centre, under the character -- so
-	health, madra and the cast bar stack directly on top of it. Reading your own
+	health, aura and the cast bar stack directly on top of it. Reading your own
 	health used to cost a diagonal saccade to the far corner and back, mid
 	exchange. It now costs a few degrees.
 
@@ -79,7 +79,7 @@ local TEXT_DIM = color(PALETTE.textDim)
 local TEXT_FAINT = color(PALETTE.textFaint)
 local HEALTH = color(PALETTE.health)
 local HEALTH_LOW = color(PALETTE.healthLow)
-local MADRA = color(PALETTE.madra)
+local AURA = color(PALETTE.aura)
 local REFINEMENT = color(PALETTE.refinement)
 local CEILING = color(PALETTE.ceiling)
 local READY = color(PALETTE.ready)
@@ -177,8 +177,8 @@ end
 
 --[[ A bar is a trough plus a fill, and nothing else.
 
-	The old HUD centred `madra 174 / 200` inside every bar. That is correct when
-	madra is the only pool you manage and wrong the moment there are several:
+	The old HUD centred `aura 174 / 200` inside every bar. That is correct when
+	aura is the only pool you manage and wrong the moment there are several:
 	centred numbers fight the fill for the same pixels, and the bars stop reading
 	as *shapes* -- which is the entire reason a bar beats a number in peripheral
 	vision. Numbers move to the ends and get small. The fill carries the reading;
@@ -224,11 +224,11 @@ local clusterWidth = math.max(vitalsWidth * 2 + pairGap, barWidth)
 
 local headerHeight = text(VITALS.headerTextSize) + px(4)
 local healthHeight = px(VITALS.healthHeight)
-local madraHeight = px(VITALS.madraHeight)
+local auraHeight = px(VITALS.auraHeight)
 local rowGap = px(VITALS.rowGap)
 local stackGap = px(VITALS.stackGap)
 local castHeight = px(CASTSPEC.height)
-local vitalsHeight = headerHeight + healthHeight + rowGap + madraHeight
+local vitalsHeight = headerHeight + healthHeight + rowGap + auraHeight
 
 local clusterHeight = vitalsHeight + stackGap + castHeight + stackGap + slotSize
 
@@ -258,8 +258,8 @@ local vitalsUi: {
 	powerLabel: TextLabel,
 	healthFill: Frame,
 	healthValue: TextLabel,
-	madraFill: Frame,
-	madraValue: TextLabel,
+	auraFill: Frame,
+	auraValue: TextLabel,
 	slowChip: TextLabel,
 }
 do
@@ -285,38 +285,38 @@ do
 	healthValue.TextXAlignment = Enum.TextXAlignment.Right
 	healthValue.ZIndex = 3
 
-	local madraRow = Instance.new("Frame")
-	madraRow.Size = UDim2.new(1, 0, 0, madraHeight)
-	madraRow.Position = UDim2.fromOffset(0, headerHeight + healthHeight + rowGap)
-	madraRow.BackgroundTransparency = 1
-	madraRow.Parent = vitals
-	local _madraBack, madraFill = bar(madraRow, madraHeight, MADRA)
+	local auraRow = Instance.new("Frame")
+	auraRow.Size = UDim2.new(1, 0, 0, auraHeight)
+	auraRow.Position = UDim2.fromOffset(0, headerHeight + healthHeight + rowGap)
+	auraRow.BackgroundTransparency = 1
+	auraRow.Parent = vitals
+	local _auraBack, auraFill = bar(auraRow, auraHeight, AURA)
 
 	--[[ The resource is named, and health is not.
 
 		Moving the numbers to the ends of the bars dropped the word the old HUD
-		carried -- it read `madra 174 / 200`, this read `174 / 200` -- and that was a
+		carried -- it read `aura 174 / 200`, this read `174 / 200` -- and that was a
 		real loss rather than a tidy-up. A red bar that empties when you are hit
-		needs no label in any game anyone has played. "Madra" is a word from this
+		needs no label in any game anyone has played. "Aura" is a word from this
 		game's own fiction, on an unlabelled blue bar, with the cost on every slot a
 		bare number in the same blue: colour was carrying the entire meaning of a
 		term nobody arrives knowing.
 
-		So the bar is labelled and the slot cost is not. Once the bar says MADRA in
+		So the bar is labelled and the slot cost is not. Once the bar says AURA in
 		this blue, the blue number on a technique is joined to it by colour, which is
 		the association the palette was built to make -- and a unit printed four
 		times across the action bar would cost more room than it buys. ]]
-	local madraLabel = caption(madraRow, text(VITALS.valueTextSize) - 1, TEXT_DIM, true)
-	madraLabel.Size = UDim2.new(1, -px(12), 1, 0)
-	madraLabel.Position = UDim2.fromOffset(px(6), 0)
-	madraLabel.ZIndex = 3
-	madraLabel.Text = "MADRA"
+	local auraLabel = caption(auraRow, text(VITALS.valueTextSize) - 1, TEXT_DIM, true)
+	auraLabel.Size = UDim2.new(1, -px(12), 1, 0)
+	auraLabel.Position = UDim2.fromOffset(px(6), 0)
+	auraLabel.ZIndex = 3
+	auraLabel.Text = "AURA"
 
-	local madraValue = caption(madraRow, text(VITALS.valueTextSize) - 1, TEXT_DIM, true)
-	madraValue.Size = UDim2.new(1, -px(6), 1, 0)
-	madraValue.Position = UDim2.fromOffset(px(6), 0)
-	madraValue.TextXAlignment = Enum.TextXAlignment.Right
-	madraValue.ZIndex = 3
+	local auraValue = caption(auraRow, text(VITALS.valueTextSize) - 1, TEXT_DIM, true)
+	auraValue.Size = UDim2.new(1, -px(6), 1, 0)
+	auraValue.Position = UDim2.fromOffset(px(6), 0)
+	auraValue.TextXAlignment = Enum.TextXAlignment.Right
+	auraValue.ZIndex = 3
 
 	--[[ The slow, beside your own vitals. A slow is the first thing in this
 		game that changes what your own keys do, and the vitals are where you
@@ -336,8 +336,8 @@ do
 		powerLabel = powerLabel,
 		healthFill = healthFill,
 		healthValue = healthValue,
-		madraFill = madraFill,
-		madraValue = madraValue,
+		auraFill = auraFill,
+		auraValue = auraValue,
 		slowChip = slowChip,
 	}
 end
@@ -593,7 +593,7 @@ for index = 1, slotCount do
 	name.ZIndex = 4
 	name.Text = "--"
 
-	local cost = caption(root, text(SLOT.costTextSize), MADRA, false)
+	local cost = caption(root, text(SLOT.costTextSize), AURA, false)
 	cost.Size = UDim2.new(1, -px(6), 0, px(12))
 	cost.Position = UDim2.fromOffset(px(4), px(34))
 	cost.TextXAlignment = Enum.TextXAlignment.Center
@@ -656,7 +656,7 @@ end
 --[[ The refinement rail, at the very bottom edge of the screen.
 
 	Demoted out of the combat cluster on purpose. Refinement moves over hours;
-	health and madra move over frames. Interleaving them puts a bar that never
+	health and aura move over frames. Interleaving them puts a bar that never
 	visibly changes between two that change constantly, which teaches the eye to
 	skip the whole region. Ambient is the correct register for it -- always
 	available, never competing. ]]
@@ -719,7 +719,7 @@ end
 	this half says who you are looking at, in the same shape, so the eye that
 	has learned to read one has already learned to read the other. Where your
 	header has stage and power, theirs has name and stage; where your second
-	bar is madra, theirs is the row their cast runs in -- and when nothing is
+	bar is aura, theirs is the row their cast runs in -- and when nothing is
 	running it carries the one line about the fight: the bracket relation, or
 	that they are neutral and will not start one.
 
@@ -791,18 +791,18 @@ do
 	targetHealthValue.TextXAlignment = Enum.TextXAlignment.Right
 	targetHealthValue.ZIndex = 3
 
-	--[[ Second row, in the madra slot. Their cast runs here -- the whole
+	--[[ Second row, in the aura slot. Their cast runs here -- the whole
 		reason this frame first existed: an opponent's windup was, until it
 		did, completely invisible, so a 1.8s Tempest arrived instantaneously
 		from the defender's side. A cast and the relation line share the row
 		and the cast wins it: what they are about to do outranks what the
 		fight is, the same precedence the plate uses. ]]
 	local targetSecondRow = Instance.new("Frame")
-	targetSecondRow.Size = UDim2.new(1, 0, 0, madraHeight)
+	targetSecondRow.Size = UDim2.new(1, 0, 0, auraHeight)
 	targetSecondRow.Position = UDim2.fromOffset(0, headerHeight + healthHeight + rowGap)
 	targetSecondRow.BackgroundTransparency = 1
 	targetSecondRow.Parent = targetFrame
-	local targetCastBack, targetCastFill = bar(targetSecondRow, madraHeight, READY)
+	local targetCastBack, targetCastFill = bar(targetSecondRow, auraHeight, READY)
 	targetCastFill.Size = UDim2.fromScale(0, 1)
 
 	local rowText = text(TARGET.valueTextSize) - 1
@@ -951,7 +951,7 @@ end
 -- ===================================================================
 
 --[[ Every other piece of text in this file is a state *readout* -- stage, tier,
-	power, health, madra, a list of distant dots. None of it tells a player who
+	power, health, aura, a list of distant dots. None of it tells a player who
 	has never seen this game what to actually do, and a tier now rolls over in
 	two minutes, which is worth nothing at all if nobody knows to stand in the
 	node.
@@ -1092,8 +1092,8 @@ end
 local function refreshVitals()
 	local health = player:GetAttribute("Health") or 0
 	local maxHealth = player:GetAttribute("MaxHealth") or 0
-	local madra = player:GetAttribute("Madra") or 0
-	local maxMadra = player:GetAttribute("MaxMadra") or 0
+	local aura = player:GetAttribute("Aura") or 0
+	local auraCapacity = player:GetAttribute("MaxAura") or 0
 
 	local healthFraction = InterfaceSpec.fraction(health, maxHealth)
 	vitalsUi.healthFill.Size = UDim2.fromScale(healthFraction, 1)
@@ -1102,8 +1102,8 @@ local function refreshVitals()
 		else HEALTH
 	vitalsUi.healthValue.Text = `{InterfaceSpec.commas(health)} / {InterfaceSpec.commas(maxHealth)}`
 
-	vitalsUi.madraFill.Size = UDim2.fromScale(InterfaceSpec.fraction(madra, maxMadra), 1)
-	vitalsUi.madraValue.Text = `{InterfaceSpec.commas(madra)} / {InterfaceSpec.commas(maxMadra)}`
+	vitalsUi.auraFill.Size = UDim2.fromScale(InterfaceSpec.fraction(aura, auraCapacity), 1)
+	vitalsUi.auraValue.Text = `{InterfaceSpec.commas(aura)} / {InterfaceSpec.commas(auraCapacity)}`
 
 	local slow = player:GetAttribute("SlowMultiplier")
 	local slowed = typeof(slow) == "number" and slow < 1
@@ -1281,7 +1281,7 @@ end
 
 local function refreshSlots()
 	local now = os.clock()
-	local madra = player:GetAttribute("Madra") or 0
+	local aura = player:GetAttribute("Aura") or 0
 	local gcdRemaining = gcdUntil - now
 	local gcdLength = Config.Combat.globalCooldown
 	--[[ Resolved once per frame rather than per slot: a loadout can hold more
@@ -1301,12 +1301,12 @@ local function refreshSlots()
 		end
 
 		widget.name.Text = tech.name
-		widget.cost.Text = tostring(tech.madraCost)
+		widget.cost.Text = tostring(tech.auraCost)
 		local kind = color(InterfaceSpec.kindColor(tech.kind))
 		widget.stripe.BackgroundColor3 = kind
 
 		local remaining = (cooldownUntil[tech.id] or 0) - now
-		local affordable = madra >= tech.madraCost
+		local affordable = aura >= tech.auraCost
 
 		if remaining > 0 and tech.cooldown > 0 then
 			setSweep(widget, math.clamp(remaining / tech.cooldown, 0, 1))
@@ -1323,7 +1323,7 @@ local function refreshSlots()
 			widget.stripe.BackgroundTransparency = 0
 			widget.stroke.Color = if affordable then kind else UNAFFORDABLE
 			widget.name.TextColor3 = if affordable then TEXT else UNAFFORDABLE
-			widget.cost.TextColor3 = if affordable then MADRA else UNAFFORDABLE
+			widget.cost.TextColor3 = if affordable then AURA else UNAFFORDABLE
 		end
 
 		--[[ Reach. Only kinds whose reach can actually fail get a pip; for
@@ -1385,7 +1385,7 @@ end
 	So the client writes the speed the instant the key goes down, and stops
 	waiting for permission to *start* moving. It is not a second authority. It
 	reads `moveSpeed` and `buffDuration` from the same Config the server charges
-	from, exactly as the cooldown prediction reads `madraCost` and `cooldown`,
+	from, exactly as the cooldown prediction reads `auraCost` and `cooldown`,
 	and it holds no copy of anything.
 
 	The seam, named explicitly rather than discovered:
@@ -2044,7 +2044,7 @@ local CULTIVATION_ATTRIBUTES = {
 	"SenseRange",
 	"AtCeiling",
 }
-local VITAL_ATTRIBUTES = { "Health", "MaxHealth", "Madra", "MaxMadra", "SlowMultiplier" }
+local VITAL_ATTRIBUTES = { "Health", "MaxHealth", "Aura", "MaxAura", "SlowMultiplier" }
 
 --[[ A breakthrough rebuilds the server's actor with genuinely empty cooldowns,
 	but the local prediction table knew nothing about it -- so a slot could sit
@@ -2110,7 +2110,7 @@ local castCompleted = remotes:FindFirstChild("CastCompleted")
 	itself off the `Slot_<slot>` attribute the server publishes back. No new
 	screen at all.
 
-	Options are enumerated from the replicated `Config`, ordered by madra cost so
+	Options are enumerated from the replicated `Config`, ordered by aura cost so
 	cycling reads cheap-to-dear rather than in hash order. That client-side guess
 	only decides what to *ask for*; the server validates the slot, the technique,
 	the kind match, and whether the technique being swapped away is mid-cooldown
@@ -2125,8 +2125,8 @@ for _, slot in slotNames do
 	end
 	table.sort(options, function(a: string, b: string): boolean
 		local left, right = Config.Techniques[a], Config.Techniques[b]
-		if left.madraCost ~= right.madraCost then
-			return left.madraCost < right.madraCost
+		if left.auraCost ~= right.auraCost then
+			return left.auraCost < right.auraCost
 		end
 		-- Ties broken by id so the order is stable across clients and sessions.
 		return a < b
@@ -2337,7 +2337,7 @@ local function buildPicker()
 			label.Size = UDim2.fromScale(1, 1)
 			label.TextXAlignment = Enum.TextXAlignment.Center
 			label.TextTruncate = Enum.TextTruncate.AtEnd
-			label.Text = if tech then `{tech.name}  {tech.madraCost}` else techId
+			label.Text = if tech then `{tech.name}  {tech.auraCost}` else techId
 
 			button.Activated:Connect(function()
 				requestLoadout(slot, techId)
@@ -2381,7 +2381,7 @@ local function refreshPicker()
 		chip.label.TextTransparency = if blocked then PICKER.unavailableTransparency else 0
 		chip.label.TextColor3 = if equipped then TEXT else TEXT_DIM
 		if tech then
-			chip.label.Text = `{tech.name}  {tech.madraCost}`
+			chip.label.Text = `{tech.name}  {tech.auraCost}`
 		end
 	end
 end

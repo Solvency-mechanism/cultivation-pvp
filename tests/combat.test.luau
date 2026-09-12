@@ -38,7 +38,7 @@ end
 
 -- Resource pools
 eq("Lowgold health", Combat.maxHealth(Config, LOWGOLD), 100 * 4)
-eq("Lowgold madra", Combat.maxMadra(Config, LOWGOLD), 100 * 2)
+eq("Lowgold aura", Combat.auraCapacity(Config, LOWGOLD), 100 * 2)
 check(
 	"health grows across brackets",
 	Combat.maxHealth(Config, TRUEGOLD) > Combat.maxHealth(Config, LOWGOLD)
@@ -74,19 +74,19 @@ end
 near("TTK constant Lowgold vs Highgold", ttkAt(LOWGOLD), ttkAt(6), 1e-9)
 near("TTK constant Lowgold vs Truegold", ttkAt(LOWGOLD), ttkAt(TRUEGOLD), 1e-9)
 
--- Madra gating
+-- Aura gating
 local actor = Combat.newActor(Config, "p1", LOWGOLD)
 check("can open with a striker", (Combat.canUse(Config, actor, "lance", 0)))
-actor.madra = 5
+actor.aura = 5
 local okPoor, reasonPoor = Combat.canUse(Config, actor, "lance", 0)
 check("blocked when drained", not okPoor)
-eq("drained reason", reasonPoor, "insufficient_madra")
+eq("drained reason", reasonPoor, "insufficient_aura")
 
 -- Cooldowns and the global cooldown
 local a2 = Combat.newActor(Config, "p2", LOWGOLD)
 local used = Combat.use(Config, a2, "lance", 100)
 check("use succeeded", used.ok)
-near("madra spent", a2.madra, 200 - Config.Techniques.lance.madraCost, 1e-9)
+near("aura spent", a2.aura, 200 - Config.Techniques.lance.auraCost, 1e-9)
 
 local okGcd, reasonGcd = Combat.canUse(Config, a2, "volley", 100.1)
 check("global cooldown blocks a follow-up", not okGcd)
@@ -372,24 +372,24 @@ local okDead, reasonDead = Combat.canUse(Config, deadActor, "lance", 0)
 check("the dead cannot act", not okDead)
 eq("dead reason", reasonDead, "dead")
 
---[[ Madra regen. The expectation is DERIVED from Config rather than written as
+--[[ Aura regen. The expectation is DERIVED from Config rather than written as
 	a literal: what this proves is that `Combat.regen` applies the configured
 	fraction of the pool per second, not that the fraction holds any particular
 	value. The development tuning profile legitimately raises it to 0.60 so that
 	cooldowns become the only constraint while testing, and a literal here turned
 	that into a test failure when nothing was broken. ]]
 local g = Combat.newActor(Config, "p7", LOWGOLD)
-local madraPool = Combat.maxMadra(Config, LOWGOLD)
-g.madra = 0
+local auraPool = Combat.auraCapacity(Config, LOWGOLD)
+g.aura = 0
 Combat.regen(Config, g, 1)
 near(
 	"regen is the configured fraction of the pool per second",
-	g.madra,
-	math.min(madraPool, madraPool * Config.Combat.madraRegenFraction),
+	g.aura,
+	math.min(auraPool, auraPool * Config.Combat.auraRegenFraction),
 	1e-9
 )
 Combat.regen(Config, g, 9999)
-near("regen never exceeds the pool", g.madra, madraPool, 1e-9)
+near("regen never exceeds the pool", g.aura, auraPool, 1e-9)
 
 -- Brackets
 local low = Combat.newActor(Config, "low", LOWGOLD)
@@ -422,7 +422,7 @@ check(
 local byKind: { [string]: number } = {}
 for id, tech in Config.Techniques do
 	eq(`{id} id matches its key`, tech.id, id)
-	check(`{id} costs madra`, tech.madraCost > 0)
+	check(`{id} costs aura`, tech.auraCost > 0)
 	check(`{id} has a cooldown`, tech.cooldown > 0)
 	byKind[tech.kind] = (byKind[tech.kind] or 0) + 1
 end

@@ -33,7 +33,7 @@ export type Actor = {
 	id: string,
 	stageIndex: number,
 	health: number,
-	madra: number,
+	aura: number,
 	cooldowns: { [string]: number },
 	gcdUntil: number,
 	buffs: { Buff },
@@ -70,8 +70,8 @@ function Combat.maxHealth(config: any, stageIndex: number): number
 	return stageData(config, stageIndex).basePower * config.Combat.healthMultiplier
 end
 
-function Combat.maxMadra(config: any, stageIndex: number): number
-	return stageData(config, stageIndex).basePower * config.Combat.madraMultiplier
+function Combat.auraCapacity(config: any, stageIndex: number): number
+	return stageData(config, stageIndex).basePower * config.Combat.auraMultiplier
 end
 
 function Combat.newActor(config: any, id: string, stageIndex: number): Actor
@@ -79,7 +79,7 @@ function Combat.newActor(config: any, id: string, stageIndex: number): Actor
 		id = id,
 		stageIndex = stageIndex,
 		health = Combat.maxHealth(config, stageIndex),
-		madra = Combat.maxMadra(config, stageIndex),
+		aura = Combat.auraCapacity(config, stageIndex),
 		cooldowns = {},
 		gcdUntil = 0,
 		buffs = {},
@@ -259,8 +259,8 @@ function Combat.canUse(config: any, actor: Actor, techId: string, now: number): 
 	if readyAt and now < readyAt then
 		return false, "cooling_down"
 	end
-	if actor.madra < tech.madraCost then
-		return false, "insufficient_madra"
+	if actor.aura < tech.auraCost then
+		return false, "insufficient_aura"
 	end
 	return true, "ok"
 end
@@ -289,7 +289,7 @@ function Combat.outgoingDamage(
 	return damage
 end
 
---[[ Spend madra, start cooldowns, and apply any self-buff the technique
+--[[ Spend aura, start cooldowns, and apply any self-buff the technique
 	carries. Mutates and returns the actor. ]]
 function Combat.use(config: any, actor: Actor, techId: string, now: number): UseResult
 	local ok, reason = Combat.canUse(config, actor, techId, now)
@@ -298,7 +298,7 @@ function Combat.use(config: any, actor: Actor, techId: string, now: number): Use
 	end
 
 	local tech = techniqueData(config, techId)
-	actor.madra -= tech.madraCost
+	actor.aura -= tech.auraCost
 	actor.cooldowns[techId] = now + tech.cooldown
 	actor.gcdUntil = now + config.Combat.globalCooldown
 
@@ -344,9 +344,8 @@ function Combat.applyDamage(_config: any, target: Actor, raw: number, now: numbe
 end
 
 function Combat.regen(config: any, actor: Actor, deltaSeconds: number)
-	local pool = Combat.maxMadra(config, actor.stageIndex)
-	actor.madra =
-		math.min(pool, actor.madra + pool * config.Combat.madraRegenFraction * deltaSeconds)
+	local pool = Combat.auraCapacity(config, actor.stageIndex)
+	actor.aura = math.min(pool, actor.aura + pool * config.Combat.auraRegenFraction * deltaSeconds)
 end
 
 --[[ Refinement lost on death, for the caller to hand to Progression.applyLoss.

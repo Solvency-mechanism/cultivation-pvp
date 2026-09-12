@@ -245,9 +245,9 @@ Config.Combat = {
 	-- constant across brackets while numbers still grow.
 	referencePower = 100,
 	healthMultiplier = 4.0,
-	madraMultiplier = 2.0,
-	-- Fraction of the madra pool regenerated per second.
-	madraRegenFraction = 0.06,
+	auraMultiplier = 2.0,
+	-- Fraction of the aura pool regenerated per second.
+	auraRegenFraction = 0.06,
 	-- A death costs this fraction of one refinement tier. The ratchet in
 	-- Progression guarantees it can never cost the stage itself.
 	deathLossTierFraction = 0.35,
@@ -359,7 +359,7 @@ export type Technique = {
 	id: string,
 	name: string,
 	kind: "striker" | "enforcer" | "forger" | "ruler" | "strider",
-	madraCost: number,
+	auraCost: number,
 	cooldown: number,
 	windup: number,
 	damage: number,
@@ -382,7 +382,7 @@ Config.Techniques = {
 		id = "lance",
 		name = "Lance",
 		kind = "striker",
-		madraCost = 18,
+		auraCost = 18,
 		cooldown = 1.2,
 		windup = 0.15,
 		damage = 42,
@@ -400,7 +400,7 @@ Config.Techniques = {
 		id = "volley",
 		name = "Volley",
 		kind = "striker",
-		madraCost = 30,
+		auraCost = 30,
 		cooldown = 2.6,
 		windup = 0.35,
 		damage = 66,
@@ -418,7 +418,7 @@ Config.Techniques = {
 		id = "pierce",
 		name = "Pierce",
 		kind = "striker",
-		madraCost = 44,
+		auraCost = 44,
 		cooldown = 5.0,
 		windup = 0.9,
 		damage = 128,
@@ -445,7 +445,7 @@ Config.Techniques = {
 		id = "draught",
 		name = "Draught",
 		kind = "striker",
-		madraCost = 28,
+		auraCost = 28,
 		cooldown = 2.0,
 		windup = 0.32,
 		damage = 50,
@@ -470,7 +470,7 @@ Config.Techniques = {
 		id = "brace",
 		name = "Brace",
 		kind = "striker",
-		madraCost = 32,
+		auraCost = 32,
 		cooldown = 3.0,
 		windup = 0.55,
 		damage = 72,
@@ -494,7 +494,7 @@ Config.Techniques = {
 		id = "verdict",
 		name = "Verdict",
 		kind = "striker",
-		madraCost = 60,
+		auraCost = 60,
 		cooldown = 14.0,
 		windup = 1.6,
 		damage = 220,
@@ -533,7 +533,7 @@ Config.Techniques = {
 		id = "frostbolt",
 		name = "Frostbolt",
 		kind = "striker",
-		madraCost = 60,
+		auraCost = 60,
 		cooldown = 12.0,
 		windup = 0,
 		damage = 230,
@@ -568,7 +568,7 @@ Config.Techniques = {
 		id = "rime",
 		name = "Rime",
 		kind = "striker",
-		madraCost = 90,
+		auraCost = 90,
 		cooldown = 20.0,
 		windup = 0,
 		damage = 320,
@@ -603,7 +603,7 @@ Config.Techniques = {
 		id = "hoarfrost",
 		name = "Hoarfrost",
 		kind = "striker",
-		madraCost = 20,
+		auraCost = 20,
 		cooldown = 5.0,
 		windup = 0,
 		damage = 20,
@@ -634,7 +634,7 @@ Config.Techniques = {
 		id = "shard",
 		name = "Shard",
 		kind = "striker",
-		madraCost = 14,
+		auraCost = 14,
 		cooldown = 0.9,
 		windup = 0,
 		damage = 20,
@@ -662,7 +662,7 @@ Config.Techniques = {
 		id = "chill",
 		name = "Chill",
 		kind = "striker",
-		madraCost = 16,
+		auraCost = 16,
 		cooldown = 4.0,
 		windup = 0.15,
 		damage = 20,
@@ -692,7 +692,7 @@ Config.Techniques = {
 		id = "glacier",
 		name = "Glacier",
 		kind = "striker",
-		madraCost = 44,
+		auraCost = 44,
 		cooldown = 8.0,
 		windup = 0,
 		damage = 160,
@@ -726,7 +726,7 @@ Config.Techniques = {
 		id = "scorch",
 		name = "Scorch",
 		kind = "striker",
-		madraCost = 40,
+		auraCost = 40,
 		cooldown = 6.0,
 		windup = 0,
 		damage = 100,
@@ -753,7 +753,7 @@ Config.Techniques = {
 		id = "thornlash",
 		name = "Thornlash",
 		kind = "striker",
-		madraCost = 20,
+		auraCost = 20,
 		cooldown = 1.6,
 		windup = 0.15,
 		damage = 34,
@@ -775,7 +775,7 @@ Config.Techniques = {
 		id = "surge",
 		name = "Surge",
 		kind = "enforcer",
-		madraCost = 32,
+		auraCost = 32,
 		cooldown = 9.0,
 		windup = 0.1,
 		damage = 0,
@@ -793,7 +793,7 @@ Config.Techniques = {
 		id = "bulwark",
 		name = "Bulwark",
 		kind = "enforcer",
-		madraCost = 28,
+		auraCost = 28,
 		cooldown = 11.0,
 		windup = 0.1,
 		damage = 0,
@@ -819,7 +819,7 @@ Config.Techniques = {
 		id = "abandon",
 		name = "Abandon",
 		kind = "enforcer",
-		madraCost = 30,
+		auraCost = 30,
 		cooldown = 12.0,
 		windup = 0.1,
 		damage = 0,
@@ -844,7 +844,7 @@ Config.Techniques = {
 		id = "wildfire",
 		name = "Wildfire",
 		kind = "enforcer",
-		madraCost = 30,
+		auraCost = 30,
 		cooldown = 11.0,
 		windup = 0.1,
 		damage = 0,
@@ -869,7 +869,7 @@ Config.Techniques = {
 		id = "ironroot",
 		name = "Ironroot",
 		kind = "enforcer",
-		madraCost = 34,
+		auraCost = 34,
 		cooldown = 12.0,
 		windup = 0.1,
 		damage = 0,
@@ -889,7 +889,7 @@ Config.Techniques = {
 		id = "barrier",
 		name = "Barrier",
 		kind = "forger",
-		madraCost = 40,
+		auraCost = 40,
 		cooldown = 12.0,
 		windup = 0.4,
 		damage = 0,
@@ -907,7 +907,7 @@ Config.Techniques = {
 		id = "caltrops",
 		name = "Caltrops",
 		kind = "forger",
-		madraCost = 45,
+		auraCost = 45,
 		cooldown = 10.0,
 		windup = 0.5,
 		damage = 30,
@@ -925,7 +925,7 @@ Config.Techniques = {
 		id = "sentry",
 		name = "Sentry",
 		kind = "forger",
-		madraCost = 55,
+		auraCost = 55,
 		cooldown = 16.0,
 		windup = 0.7,
 		damage = 24,
@@ -953,7 +953,7 @@ Config.Techniques = {
 		id = "bastion",
 		name = "Bastion",
 		kind = "forger",
-		madraCost = 50,
+		auraCost = 50,
 		cooldown = 14.0,
 		windup = 0.5,
 		damage = 18,
@@ -974,7 +974,7 @@ Config.Techniques = {
 		id = "upheaval",
 		name = "Upheaval",
 		kind = "ruler",
-		madraCost = 70,
+		auraCost = 70,
 		cooldown = 14.0,
 		windup = 1.4,
 		damage = 95,
@@ -992,7 +992,7 @@ Config.Techniques = {
 		id = "siphon",
 		name = "Siphon",
 		kind = "ruler",
-		madraCost = 50,
+		auraCost = 50,
 		cooldown = 11.0,
 		windup = 0.8,
 		damage = 55,
@@ -1010,7 +1010,7 @@ Config.Techniques = {
 		id = "tempest",
 		name = "Tempest",
 		kind = "ruler",
-		madraCost = 85,
+		auraCost = 85,
 		cooldown = 20.0,
 		windup = 1.8,
 		damage = 140,
@@ -1035,7 +1035,7 @@ Config.Techniques = {
 		id = "pulse",
 		name = "Pulse",
 		kind = "ruler",
-		madraCost = 40,
+		auraCost = 40,
 		cooldown = 8.0,
 		windup = 0.6,
 		damage = 45,
@@ -1064,7 +1064,7 @@ Config.Techniques = {
 		id = "lunge",
 		name = "Lunge",
 		kind = "strider",
-		madraCost = 20,
+		auraCost = 20,
 		cooldown = 4.0,
 		windup = 0.05,
 		damage = 0,
@@ -1082,7 +1082,7 @@ Config.Techniques = {
 		id = "swiftstep",
 		name = "Swiftstep",
 		kind = "strider",
-		madraCost = 22,
+		auraCost = 22,
 		cooldown = 7.0,
 		windup = 0.05,
 		damage = 0,
@@ -1100,7 +1100,7 @@ Config.Techniques = {
 		id = "windstride",
 		name = "Windstride",
 		kind = "strider",
-		madraCost = 30,
+		auraCost = 30,
 		cooldown = 12.0,
 		windup = 0.1,
 		damage = 0,
@@ -1157,10 +1157,10 @@ Config.DefaultLoadout = {
 	  release     -- MEASUREMENT. Use it for any number you intend to act on.
 
 	The trap, stated plainly because it is easy to walk into and expensive:
-	`madraRegenFraction = 0.60` refills a Lowgold pool in 1.7 seconds, so under
-	`development` MADRA STOPS BEING A CONSTRAINT AT ALL and a fighter is limited
+	`auraRegenFraction = 0.60` refills a Lowgold pool in 1.7 seconds, so under
+	`development` AURA STOPS BEING A CONSTRAINT AT ALL and a fighter is limited
 	only by cooldowns. A time-to-kill measured there is the cooldown-limited
-	FLOOR, not the real fight. Under `release` the pool regenerates 12 madra per
+	FLOOR, not the real fight. Under `release` the pool regenerates 12 aura per
 	second, and the gap between that and what a loadout spends is precisely what
 	makes an expensive loadout play differently from a cheap one -- Lance at 18
 	on a 1.2s cooldown is roughly break-even, Volley at 30 and Pierce are not.
@@ -1202,13 +1202,13 @@ if Config.Profile == "development" then
 	Config.Stages[6].perTierProgress = 490 -- release 24000
 	Config.Stages[7].perTierProgress = 900 -- release 45000
 
-	--[[ Madra regen is the single biggest limit on testing throughput. At the
+	--[[ Aura regen is the single biggest limit on testing throughput. At the
 		release 6%/sec a tester spends most of their time waiting on a pool
 		rather than exercising techniques; at 60% the pool refills in under two
 		seconds and COOLDOWNS BECOME THE ONLY CONSTRAINT, which is exactly what
 		you want when the job is "press all twelve of these and watch what
 		happens". This is the number the human asked for by name. ]]
-	Config.Combat.madraRegenFraction = 0.60 -- release 0.06
+	Config.Combat.auraRegenFraction = 0.60 -- release 0.06
 
 	--[[ Cross-bracket combat, per bracket-tone.md. The human's own words
 		called this temporary; it stays behind the profile rather than

@@ -1322,7 +1322,7 @@ function Vfx.charge(techId: string, casterId: number)
 	local seconds = tech.windup
 	-- Heavier techniques gather more. Tempest at 1.8s should look like a
 	-- decision; Swiftstep at 0.05s should barely register.
-	local heft = math.clamp(tech.madraCost / 45, 0.55, 1.9)
+	local heft = math.clamp(tech.auraCost / 45, 0.55, 1.9)
 	local hold = seconds + 0.45
 	--[[ Held out in FRONT of the caster and off to one side -- never on the
 		torso. A gathering orb centred on the root is a white disc over the
@@ -2268,7 +2268,7 @@ end
 
 --[[ Ruler techniques command terrain across a 42 stud radius -- fifteen
 	character-heights -- and are the most expensive things a player can spend
-	madra on. They are the only casts that throw real geometry and leave the
+	aura on. They are the only casts that throw real geometry and leave the
 	ground altered for seconds afterwards. All three fill the same circle, so they
 	are told apart by direction of motion: out, in, up. ]]
 
@@ -2751,8 +2751,8 @@ function Vfx.predictWindup(slot: string): boolean
 	if now < gcdUntil or now < (confirmedUntil[techId] or 0) then
 		return false
 	end
-	local madra = player:GetAttribute("Madra")
-	if typeof(madra) == "number" and madra < tech.madraCost then
+	local aura = player:GetAttribute("Aura")
+	if typeof(aura) == "number" and aura < tech.auraCost then
 		return false
 	end
 

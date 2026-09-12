@@ -230,7 +230,7 @@ ImpactSpec.Audio = {
 		forger    switch3.wav  0.366s   a mechanism latching -- something placed
 		ruler     bass.wav     1.008s   a low swell -- the ground answering
 
-	Twelve techniques out of four files: pitch tracks madra cost, so Lance,
+	Twelve techniques out of four files: pitch tracks aura cost, so Lance,
 	Volley and Pierce share a crack and are told apart by weight -- which is
 	also how they are told apart in the fight. ]]
 ImpactSpec.Cast = {
@@ -383,13 +383,13 @@ local function costWeight(config: any, techId: string): number
 	end
 	local cheapest, dearest = math.huge, 0
 	for _, entry in config.Techniques do
-		cheapest = math.min(cheapest, entry.madraCost)
-		dearest = math.max(dearest, entry.madraCost)
+		cheapest = math.min(cheapest, entry.auraCost)
+		dearest = math.max(dearest, entry.auraCost)
 	end
 	if dearest <= cheapest then
 		return 0.5
 	end
-	return clamp01((tech.madraCost - cheapest) / (dearest - cheapest))
+	return clamp01((tech.auraCost - cheapest) / (dearest - cheapest))
 end
 
 function ImpactSpec.castSound(kind: string): string

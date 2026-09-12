@@ -68,7 +68,7 @@ InterfaceSpec.Palette = {
 	-- Vitals. Health red agrees with `ImpactSpec.Palette.vignette`'s meaning.
 	health = { r = 208, g = 62, b = 62 } :: Rgb,
 	healthLow = { r = 244, g = 96, b = 76 } :: Rgb,
-	madra = { r = 96, g = 124, b = 255 } :: Rgb,
+	aura = { r = 96, g = 124, b = 255 } :: Rgb,
 
 	-- Progression. Blue while climbing, gold at the ceiling -- the one place
 	-- gold is allowed outside a killing blow, because it is the same kind of
@@ -267,7 +267,7 @@ function InterfaceSpec.stackHeight(): number
 	local cluster = header
 		+ vitals.healthHeight
 		+ vitals.rowGap
-		+ vitals.madraHeight
+		+ vitals.auraHeight
 		+ vitals.stackGap
 		+ cast.height
 		+ vitals.stackGap
@@ -367,7 +367,7 @@ InterfaceSpec.Slot = {
 		square stops being readable if any of them has to say two things at once.
 
 		Deliberately small and quiet. This is a *soft* state -- unlike a cooldown
-		or an empty madra pool, nothing refuses the press. It is information
+		or an empty aura pool, nothing refuses the press. It is information
 		about the world, not about the button. ]]
 	reachPip = 5,
 }
@@ -399,14 +399,14 @@ end
 	time you want to know whether you are winning. Stacking vitals on the action
 	bar collapses that to a few degrees of eye travel.
 
-	Health is widest and tallest because it is checked most. Madra is the same
+	Health is widest and tallest because it is checked most. Aura is the same
 	*shape* on purpose -- both are depth-of-reserve quantities that drain and
 	refill -- and is told apart by size and hue. The resources round 7 adds are
 	deliberately *not* bars, so that this similarity stays meaningful. ]]
 InterfaceSpec.Vitals = {
 	width = 316,
 	healthHeight = 17,
-	madraHeight = 10,
+	auraHeight = 10,
 	rowGap = 3,
 	-- Space between the vitals block and the cast bar under it.
 	stackGap = 7,
@@ -480,7 +480,7 @@ InterfaceSpec.Cast = {
 	(`InterfaceSpec.Vitals` owns every one of them), adjacent to the right of
 	the vitals with `pairGap` between. The header carries their name and stage
 	where yours carries stage and power; the health bar is the health bar; the
-	slot your madra takes is where their cast runs, and at rest it carries the
+	slot your aura takes is where their cast runs, and at rest it carries the
 	one line about the fight (the bracket relation, or that they are neutral).
 
 	Always drawn. A pair that only sometimes has a right half reads as a bug
@@ -516,7 +516,7 @@ InterfaceSpec.Target = {
 	adds. ]]
 function InterfaceSpec.vitalsHeight(): number
 	local v = InterfaceSpec.Vitals
-	return (v.headerTextSize + 4) + v.healthHeight + v.rowGap + v.madraHeight
+	return (v.headerTextSize + 4) + v.healthHeight + v.rowGap + v.auraHeight
 end
 
 --[[ The width of the pair: two vitals blocks and the gap between. The cluster
@@ -529,7 +529,7 @@ end
 --[[ The refinement rail.
 
 	Demoted out of the combat cluster entirely. Refinement moves over hours;
-	health and madra move over frames. Interleaving them puts a bar that never
+	health and aura move over frames. Interleaving them puts a bar that never
 	visibly changes between two that change constantly, which teaches the eye to
 	skip the whole region. As a thin full-width rail at the very bottom edge it
 	is ambient -- always available, never competing. ]]
@@ -666,7 +666,7 @@ InterfaceSpec.Reticle = {
 	another combatant's nameplate the third row -- the one a cast bar borrows --
 	says SLOWED with the multiplier, outranked only by a cast in progress, since
 	what they are about to do beats what has been done to them. On your own
-	vitals a chip says the same beside madra, because a slow is the first thing
+	vitals a chip says the same beside aura, because a slow is the first thing
 	in this game that changes what your own keys do, and the vitals are where
 	you look to learn that. ]]
 InterfaceSpec.Status = {

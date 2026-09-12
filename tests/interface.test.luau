@@ -342,7 +342,7 @@ do
 	eq(
 		"the target frame is exactly as tall as the vitals",
 		InterfaceSpec.vitalsHeight(),
-		(v.headerTextSize + 4) + v.healthHeight + v.rowGap + v.madraHeight
+		(v.headerTextSize + 4) + v.healthHeight + v.rowGap + v.auraHeight
 	)
 	eq(
 		"the pair is two vitals and the gap",
