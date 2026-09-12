@@ -754,6 +754,110 @@ function InterfaceSpec.noticeKind(kind: string)
 	return InterfaceSpec.NoticeKind[kind] or InterfaceSpec.NoticeKind["local"]
 end
 
+--[[ The vessel and the core, read as colour.
+
+	The Core replaces the blue aura bar with a resource that remembers what you
+	cultivated (core-and-map.md b). Two quantities want drawing: the VESSEL --
+	what you are holding, typed, spendable -- and the CORE -- what you have
+	processed, ever, permanent. Both are proportions of a handful of aura types,
+	and the whole point of drawing them is that a player reads the mix at a
+	glance: "mostly ash with some lumen" before "seven hundred of twelve hundred".
+
+	One fill, not four. The vessel bar's fill is a single frame whose width is
+	the total held over capacity, carrying a hard-stop gradient that divides it
+	in the proportions held -- so there is never a sum of four widths to keep
+	honest, and the shape the eye already reads (a bar that fills and drains)
+	is unchanged; only its colour gained meaning. The core chip is the same
+	gradient rotated onto a disc. `vesselStops` is the one function that turns
+	amounts into stops, pure so Lune can hold it to its invariants: the stops
+	start at 0 and end at 1, strictly increase (a gradient with two keypoints at
+	one time is undefined), and divide the run in the proportions given, in the
+	order given, dropping only a share too thin to draw.
+
+	Colours are the aura's own, from `Config.AuraTypes[key].color` as integers;
+	this module never names an aura, so the four stay roster's. ]]
+InterfaceSpec.Vessel = {
+	-- The order the segments are drawn in, left to right. Committed types
+	-- first, neutral last: what you are becoming before what you are merely
+	-- holding.
+	order = { "ash", "verdant", "lumen" },
+	-- Neutral is spendable and never enters the core, so it draws on the
+	-- vessel and not on the chip.
+	vesselOrder = { "ash", "verdant", "lumen", "neutral" },
+	-- The gap between one segment's last stop and the next segment's first,
+	-- as a fraction of the run. A hard edge, and still strictly increasing.
+	stopGap = 0.002,
+	-- A share thinner than this is not drawn: it would be under a pixel, and
+	-- its stops would collide with its neighbours'.
+	minShare = 0.004,
+	-- The core chip: a disc the header row's height less this inset, and the
+	-- gap between it and the stage name.
+	chipInset = 2,
+	chipGap = 6,
+	-- The chip's bands run top to bottom; the vessel's run left to right.
+	chipRotation = 90,
+}
+
+export type VesselStop = { at: number, color: Rgb }
+
+function InterfaceSpec.vesselStops(
+	held: { [string]: number },
+	order: { string },
+	colors: { [string]: Rgb }
+): { VesselStop }
+	local spec = InterfaceSpec.Vessel
+	local total = 0
+	for _, key in order do
+		local amount = held[key]
+		if typeof(amount) == "number" and amount > 0 then
+			total += amount
+		end
+	end
+	if total <= 0 then
+		return {}
+	end
+
+	local stops: { VesselStop } = {}
+	local at = 0
+	for _, key in order do
+		local amount = held[key]
+		local share = if typeof(amount) == "number" and amount > 0 then amount / total else 0
+		if share < spec.minShare then
+			continue
+		end
+		local color = colors[key]
+		if not color then
+			continue
+		end
+		local from = if #stops == 0 then 0 else at + spec.stopGap
+		local to = math.min(at + share, 1)
+		table.insert(stops, { at = from, color = color })
+		table.insert(stops, { at = to, color = color })
+		at = to
+	end
+	if #stops > 0 then
+		-- Rounding and a dropped sliver can leave the last stop short of 1;
+		-- the last colour runs to the end regardless.
+		stops[#stops].at = 1
+	end
+	return stops
+end
+
+--[[ The aura with the largest share, or nil for nothing held. The chip's
+	headline. ]]
+function InterfaceSpec.dominantAura(held: { [string]: number }, order: { string }): string?
+	local best: string? = nil
+	local bestAmount = 0
+	for _, key in order do
+		local amount = held[key]
+		if typeof(amount) == "number" and amount > bestAmount then
+			best = key
+			bestAmount = amount
+		end
+	end
+	return best
+end
+
 --[[ Fraction of a bar, guarded. Every bar in the HUD goes through this rather
 	than dividing inline, because a zero maximum arrives routinely -- a client
 	renders before the server has published anything at all. ]]
