@@ -105,7 +105,10 @@ local NOTICE_COLOR: { [string]: Color3 } = {
 	-- A cross-bracket warning in either direction. Same hue as a refusal,
 	-- because it is one kind of thing: the fight you are in is not the fight
 	-- you think it is.
-	bracket = DANGER,
+	-- Information, not an event: a human asked for it quieter. See NoticeKind.
+	bracket = TEXT_DIM,
+	-- An NPC falling: its own register, never the kill banner's gold.
+	npc = color(PALETTE.neutral),
 }
 
 local TIER_COLOR: { [string]: Color3 } = {
@@ -1156,6 +1159,49 @@ local function slotTechnique(slot: string): Config.Technique?
 	return Config.Techniques[techId]
 end
 
+--[[ Can a fight be had with this combatant -- the ONE answer every reader uses.
+
+	Four things read the bracket: the reach pip's striker and ruler checks, the
+	reticle's tint, and the target frame's line. When cross-bracket combat was
+	opened behind the development profile, the server's one chokepoint learned
+	the new rule and these four did not: the frame kept saying "neither of you
+	can hit the other" over a hit that had just landed, and a player caught
+	it. Same flag, second reader, missed -- the shape from the day before. So
+	the four readers now call this, and this reads the flag.
+
+	  "same"    same bracket -- always a fight.
+	  "neutral" an NPC -- always a fight, in every mode. It has no bracket
+	            relation to anyone; a practice target must not be refused.
+	            Read off the Neutral attribute NpcService publishes, never
+	            inferred from StageIndex, which an NPC also carries.
+	  "open"    cross-bracket, and Config.Combat.crossBracket is "notice": the
+	            fight can be had, and it is lopsided.
+	  "refused" cross-bracket under "refuse": the server will not apply it.
+
+	Config is replicated, so the client reads the same flag the chokepoint
+	does. Presentation only; the server still decides. ]]
+type FightRelation = "same" | "neutral" | "open" | "refused"
+
+local function fightRelation(source: Instance): FightRelation
+	if source:GetAttribute("Neutral") == true then
+		return "neutral"
+	end
+	local ownStage = player:GetAttribute("StageIndex")
+	local theirStage = source:GetAttribute("StageIndex")
+	if
+		typeof(ownStage) == "number"
+		and typeof(theirStage) == "number"
+		and ownStage == theirStage
+	then
+		return "same"
+	end
+	return if Config.Combat.crossBracket == "notice" then "open" else "refused"
+end
+
+local function canFight(source: Instance): boolean
+	return fightRelation(source) ~= "refused"
+end
+
 --[[ Is anyone we are allowed to fight standing inside a radius around us.
 
 	The ruler half of the reach question. Bracket is checked as well as distance,
@@ -1172,16 +1218,11 @@ local function anyEngageableWithin(radius: number): boolean
 	if not root or not root:IsA("BasePart") then
 		return false
 	end
-	local ownStage = player:GetAttribute("StageIndex")
-	if typeof(ownStage) ~= "number" then
-		return false
-	end
-
 	for _, other in Players:GetPlayers() do
 		if other == player then
 			continue
 		end
-		if other:GetAttribute("StageIndex") ~= ownStage then
+		if not canFight(other) then
 			continue
 		end
 		local health = other:GetAttribute("Health")
@@ -1208,9 +1249,7 @@ local function strikerInReach(): boolean
 	if not aimOnTarget or not currentTarget then
 		return false
 	end
-	local ownStage = player:GetAttribute("StageIndex")
-	local theirStage = currentTarget.source:GetAttribute("StageIndex")
-	return typeof(ownStage) == "number" and ownStage == theirStage
+	return canFight(currentTarget.source)
 end
 
 --[[ Drive the cooldown sweep from the fraction of cooldown REMAINING.
@@ -1703,14 +1742,12 @@ local function refreshReticle()
 	local transparency = InterfaceSpec.Reticle.idleTransparency
 
 	if aimOnTarget and currentTarget then
-		local ownStage = player:GetAttribute("StageIndex")
-		local theirStage = currentTarget.source:GetAttribute("StageIndex")
-		local sameBracket = typeof(ownStage) == "number"
-			and typeof(theirStage) == "number"
-			and ownStage == theirStage
-		-- Lit for a fight you can have, dim red for one the bracket refuses.
-		tint = if sameBracket then READY else UNAFFORDABLE
-		transparency = if sameBracket then 0 else 0.25
+		-- Lit for a fight you can have -- same bracket, a neutral, or a
+		-- cross-bracket fight the profile has opened -- dim red only for one
+		-- the server will refuse.
+		local fightable = canFight(currentTarget.source)
+		tint = if fightable then READY else UNAFFORDABLE
+		transparency = if fightable then 0 else 0.25
 	end
 
 	for _, tick in reticleUi.ticks do
@@ -1759,11 +1796,7 @@ local function refreshTarget()
 	targetUi.healthValue.Text =
 		`{InterfaceSpec.commas(numericHealth)} / {InterfaceSpec.commas(numericMax)}`
 
-	-- Bracket check, mirroring Combat.canEngage's only rule.
-	local ownStage = player:GetAttribute("StageIndex")
-	local sameBracket = typeof(ownStage) == "number"
-		and typeof(stageIndex) == "number"
-		and ownStage == stageIndex
+	local relation = fightRelation(target.source)
 
 	local cast = Nameplates.castOf(target.id)
 	-- A snap is drawn even for a cast under the floor: the bar could not be
@@ -1771,10 +1804,23 @@ local function refreshTarget()
 	local drawingCast = cast ~= nil
 		and (InterfaceSpec.telegraphs(cast.duration) or Nameplates.isSnapped(cast))
 
-	if not sameBracket then
+	--[[ The line under the health bar says what the fight is, in the register
+		the bracket notices use. Under "refuse" it says the server will not
+		apply the hit, as it always did. Under "notice" the hit lands and the
+		line says the true thing instead: out of your bracket, open for
+		testing, not a fair fight. A neutral gets no line at all -- it has no
+		bracket relation to anyone, and telling a player that a practice target
+		is "out of bracket" would be inventing a rule. ]]
+	if relation == "refused" then
 		targetUi.stroke.Color = DANGER
 		targetUi.refusal.Visible = not drawingCast
+		targetUi.refusal.TextColor3 = DANGER
 		targetUi.refusal.Text = "different bracket — neither of you can hit the other"
+	elseif relation == "open" then
+		targetUi.stroke.Color = if locked then LOCK else EDGE
+		targetUi.refusal.Visible = not drawingCast
+		targetUi.refusal.TextColor3 = TEXT_DIM
+		targetUi.refusal.Text = "out of your bracket — open for testing, and not a fair fight"
 	else
 		targetUi.stroke.Color = if locked then LOCK else EDGE
 		targetUi.refusal.Visible = false

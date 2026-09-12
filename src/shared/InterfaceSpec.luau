@@ -101,6 +101,13 @@ InterfaceSpec.Palette = {
 		and as "something is on me" beside your own vitals, and be the same
 		colour in both places. ]]
 	slow = { r = 168, g = 214, b = 232 } :: Rgb,
+
+	--[[ A neutral NPC, and the notice when one falls. Calm and unsaturated:
+		it must read as "not a player, not a threat unless you make it one",
+		and it must not borrow the lock's warmth, the slow's cold, or any
+		kind colour. Green-grey, the colour of something that belongs to the
+		world rather than to a side. ]]
+	neutral = { r = 178, g = 196, b = 170 } :: Rgb,
 }
 
 --[[ One colour per technique kind, and the reason it is per *kind* rather than
@@ -695,15 +702,25 @@ InterfaceSpec.NoticeKind = {
 	death = { scale = 1.34, seconds = 7.0, priority = 4, floor = 3.0 },
 	kill = { scale = 1.22, seconds = 5.5, priority = 4, floor = 2.5 },
 	--[[ A cross-bracket hit: "you are punching up" or "you are punching down".
-		A warning in both directions -- one wastes you, the other kills you --
-		so it takes the danger hue. Above `server` so a Prime banner cannot
-		erase it in the half-second after a hit; below `kill` and `death` so a
-		death mid-duel still wins the line. Held longer than a refusal because
-		it is information about the fight, not about a button. The server
-		debounces it per opponent, so this weight is spent once per duel and
-		not once per hit -- the only reason a red line this long is affordable.
-		Copy is in bracket-tone.md and is combat's to send. ]]
-	bracket = { scale = 1.1, seconds = 7.0, priority = 3, floor = 2.0 },
+		This was pitched into the hierarchy as an event -- danger hue, oversized,
+		held seven seconds, above a Prime banner -- before anyone had seen it
+		fire. A human then saw it fire, repeatedly, on dummies, and asked for it
+		to be "a little more inconspicuous". That is the hierarchy being tuned
+		by the only instrument that can, so: information, not an event. Dim
+		text at the base size, a short hold, and the informational band with a
+		refusal -- anything may replace it and it claims no floor. Not silent;
+		silent was the bug before this one. Copy is in bracket-tone.md and is
+		combat's to send; the server debounces it per opponent. ]]
+	bracket = { scale = 1.0, seconds = 4.5, priority = 1, floor = 0.0 },
+	--[[ A neutral NPC falling. The first PvE kill in this game was silent,
+		because every exclusion that keeps NPCs out of the PvP signals worked
+		exactly as specified and composed into nothing. So an NPC death
+		acknowledges itself in ITS OWN register: never the kill banner, never
+		gold. Neutral colour, ordinary size, a short hold; above a Prime
+		banner so the acknowledgment is not erased by one, far below a real
+		kill. The Remnant, when it lands, is the physical acknowledgment; this
+		is the minimum until then. ]]
+	npc = { scale = 1.0, seconds = 3.5, priority = 3, floor = 1.0 },
 	server = { scale = 1.0, seconds = 6.0, priority = 2, floor = 1.5 },
 	refused = { scale = 1.0, seconds = 4.0, priority = 1, floor = 0.0 },
 	regional = { scale = 1.0, seconds = 6.0, priority = 1, floor = 0.0 },

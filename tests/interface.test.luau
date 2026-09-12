@@ -237,16 +237,20 @@ check("a death is held longer than a plain notice", death.seconds > plain.second
 check("a death is drawn larger than a plain notice", death.scale > plain.scale)
 check("a kill cannot be erased immediately", kill.floor > 0)
 
---[[ The bracket warning sits between a Prime banner and a death: a banner in
-	the half-second after a cross-bracket hit must not erase it, and a death
-	mid-duel must still win the line. Both directions asserted. ]]
+--[[ The bracket line is information, not an event: a human saw it fire and
+	asked for it quieter. So it sits in the informational band with a refusal,
+	below everything that is an event, and claims no floor. ]]
 local bracket = InterfaceSpec.noticeKind("bracket")
-check("a bracket warning outranks a server announcement", bracket.priority > server.priority)
-check("a death outranks a bracket warning", death.priority > bracket.priority)
-check(
-	"a bracket warning is held longer than a refusal",
-	bracket.seconds > InterfaceSpec.noticeKind("refused").seconds
-)
+check("a bracket line is below a server announcement", bracket.priority < server.priority)
+check("a bracket line is not silent", bracket.seconds > 0 and bracket.scale >= 1)
+check("a bracket line claims no floor", bracket.floor == 0)
+
+--[[ An NPC's death acknowledges itself in its own register: above a Prime
+	banner so it is not erased by one, far below a real kill, and brief. ]]
+local npc = InterfaceSpec.noticeKind("npc")
+check("an npc death outranks a server announcement", npc.priority > server.priority)
+check("a kill outranks an npc death", kill.priority > npc.priority)
+check("an npc death is brief", npc.seconds < kill.seconds)
 check("a plain notice claims no floor", plain.floor == 0)
 eq("an unknown kind degrades to the plain weight", InterfaceSpec.noticeKind("nonsense"), plain)
 

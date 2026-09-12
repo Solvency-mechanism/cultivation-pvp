@@ -62,6 +62,7 @@ local TEXT = color(PALETTE.text)
 local TEXT_DIM = color(PALETTE.textDim)
 local DANGER = color(PALETTE.danger)
 local SLOW = color(PALETTE.slow)
+local NEUTRAL = color(PALETTE.neutral)
 local BLACK = Color3.new(0, 0, 0)
 
 --[[ The cast registry.
@@ -631,6 +632,16 @@ local function refresh(who: Combatant, plate: Plate)
 			plate.stage.Text = if InterfaceSpec.Status.showMultiplier
 				then string.format("SLOWED  ×%.1f", slow)
 				else "SLOWED"
+		elseif who.source:GetAttribute("Neutral") == true then
+			--[[ A neutral NPC: the first thing a player learns about it is what
+				it is. "Will not start it" rather than "harmless", per the
+				human's correction -- it does not aggro, and it retaliates once
+				hit. Read off the Neutral attribute NpcService publishes, never
+				inferred from stage, which an NPC also carries. Sits below a
+				slow and a cast in this row: what is happening to it or what it
+				is about to do still outranks what it is. ]]
+			plate.stage.TextColor3 = NEUTRAL
+			plate.stage.Text = "NEUTRAL  ·  will not start it"
 		else
 			plate.stage.TextColor3 = TEXT_DIM
 		end
