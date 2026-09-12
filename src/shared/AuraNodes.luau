@@ -19,6 +19,8 @@ export type Node = {
 	occupants: { [string]: boolean },
 	occupantCount: number,
 	drained: boolean,
+	reserve: number,
+	drainedBy: { [string]: number },
 }
 
 export type Sensed = {
@@ -100,6 +102,8 @@ function AuraNodes.create(
 		occupants = {},
 		occupantCount = 0,
 		drained = false,
+		reserve = tier.drainReserve,
+		drainedBy = {},
 	}
 end
 
@@ -140,6 +144,37 @@ function AuraNodes.removeOccupant(node: Node, userId: string): boolean
 	node.occupants[userId] = nil
 	node.occupantCount -= 1
 	return true
+end
+
+--[[ The prime drain fight. `reserve` starts at the tier's `drainReserve`
+	(commons small, primes large -- roster's pricing) and is spent down by
+	whoever stands on the node, crediting each occupant's own contribution
+	into `drainedBy` as it goes. `drained = true` the instant reserve hits
+	zero -- the first place this field is ever set. An unoccupied node never
+	drains: this is deliberately a no-op when occupantCount is 0, so an
+	abandoned node still only ages out via `expiresAt`, exactly as before
+	this existed. That is the compatibility guarantee, not a fallback bolted
+	on afterward -- a node nobody holds was never a fight to begin with.
+
+	Priced in the same unit and at the same rate accrual already uses:
+	`cycleRate` IS the drain rate per occupant, so a node's reserve is
+	literally the aura it would otherwise have handed out. No second rate to
+	keep in sync with the first. ]]
+function AuraNodes.drain(config: any, node: Node, dt: number)
+	if node.drained or node.occupantCount <= 0 then
+		return
+	end
+
+	local perOccupant = AuraNodes.cycleRate(config, node, node.region, true) * dt
+	node.reserve = math.max(0, node.reserve - perOccupant * node.occupantCount)
+
+	for userId in node.occupants do
+		node.drainedBy[userId] = (node.drainedBy[userId] or 0) + perOccupant
+	end
+
+	if node.reserve <= 0 then
+		node.drained = true
+	end
 end
 
 --[[ Refinement progress per second for one occupant.

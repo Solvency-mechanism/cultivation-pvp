@@ -340,6 +340,119 @@ do
 	eq("prime reaches the blind", AuraNodes.shouldAnnounce(Config, prime, 0, 0), true)
 end
 
+--[[ The prime drain fight. `drainReserve` is not priced in Config yet (roster
+	prices it against this formula), so these build Node literals directly
+	rather than going through AuraNodes.create -- unit-testing drain() itself,
+	not the creation pipeline, and not blocked on a number that is not there
+	yet. A separate small test below confirms create() wires reserve from
+	tierData once a config actually carries drainReserve, using a minimal
+	stand-in rather than the real Config.NodeTiers. ]]
+do
+	local function drainNode(reserve: number, region: string, tier: string): AuraNodes.Node
+		return {
+			id = "drain-test",
+			tier = tier,
+			position = ORIGIN,
+			region = region,
+			spawnedAt = 0,
+			expiresAt = 99999,
+			occupants = {},
+			occupantCount = 0,
+			drained = false,
+			reserve = reserve,
+			drainedBy = {},
+		}
+	end
+
+	-- Solo common on open ground: rate is BaseCycleRate * commonMultiplier(3) *
+	-- openMultiplier(1.0) = 3/s. 10s of dt at one occupant should remove 30.
+	local solo = drainNode(100, "open", "common")
+	AuraNodes.addOccupant(Config, solo, "u1", 0)
+	AuraNodes.drain(Config, solo, 10)
+	near("solo drain removes rate * dt", solo.reserve, 70, 1e-9)
+	near("solo occupant credited their own contribution", solo.drainedBy.u1, 30, 1e-9)
+	check("not drained until reserve reaches zero", not solo.drained)
+
+	-- Two occupants drain twice as fast, and each is credited their OWN share,
+	-- not half of the total -- crediting contribution, not splitting a pot.
+	local duo = drainNode(100, "open", "common")
+	AuraNodes.addOccupant(Config, duo, "a", 0)
+	AuraNodes.addOccupant(Config, duo, "b", 0)
+	AuraNodes.drain(Config, duo, 5)
+	near("two occupants drain at double the rate", duo.reserve, 70, 1e-9)
+	near("first occupant credited their own rate, not half the total", duo.drainedBy.a, 15, 1e-9)
+	near("second occupant credited identically", duo.drainedBy.b, 15, 1e-9)
+
+	-- Repeated calls accumulate in drainedBy rather than overwrite -- the
+	-- ledger is contribution OVER TIME, not a snapshot at any one instant.
+	AuraNodes.drain(Config, duo, 5)
+	near(
+		"a second drain call adds to the ledger rather than replacing it",
+		duo.drainedBy.a,
+		30,
+		1e-9
+	)
+
+	-- Reaching zero sets drained -- the first and only place this flag is
+	-- ever set -- and never goes negative.
+	local nearlyDone = drainNode(9, "open", "common")
+	AuraNodes.addOccupant(Config, nearlyDone, "u1", 0)
+	AuraNodes.drain(Config, nearlyDone, 10)
+	eq("reserve floors at zero, never negative", nearlyDone.reserve, 0)
+	check("drained flips true when reserve is exhausted", nearlyDone.drained)
+
+	-- An unoccupied node never drains -- the compatibility guarantee. It
+	-- still only ages out via expiresAt, exactly as before this existed.
+	local unoccupied = drainNode(100, "open", "common")
+	AuraNodes.drain(Config, unoccupied, 999)
+	eq("no occupants, no drain", unoccupied.reserve, 100)
+	eq("no occupants, no ledger entries", next(unoccupied.drainedBy), nil)
+
+	-- A drained node is inert -- draining it further is a no-op, not a
+	-- negative reserve or a re-credited ledger.
+	local finished = drainNode(0, "open", "common")
+	finished.drained = true
+	AuraNodes.addOccupant(Config, finished, "u1", 0)
+	AuraNodes.drain(Config, finished, 10)
+	eq("a drained node does not drain further", finished.reserve, 0)
+	eq("a drained node does not keep crediting", next(finished.drainedBy), nil)
+
+	-- Priced in the same unit accrual already uses: draining a wellspring
+	-- prime is exactly AuraNodes.cycleRate for that node, not a second rate.
+	local prime = drainNode(1000, "wellspring", "prime")
+	AuraNodes.addOccupant(Config, prime, "u1", 0)
+	AuraNodes.drain(Config, prime, 1)
+	near(
+		"drain rate equals cycleRate for the node's own tier and region",
+		1000 - prime.reserve,
+		AuraNodes.cycleRate(Config, prime, "wellspring", true),
+		1e-9
+	)
+end
+
+-- create() seeds reserve from the tier's drainReserve, once a config has one
+-- -- a minimal stand-in, not the real Config.NodeTiers, so this is not
+-- blocked on roster's pricing.
+do
+	local stub = {
+		NodeTiers = {
+			test = {
+				id = "test",
+				cycleMultiplier = 1,
+				capacity = 3,
+				lifetime = 100,
+				catalystChance = 0,
+				telegraph = "local",
+				drainReserve = 42,
+			},
+		},
+	}
+	local seeded = AuraNodes.create(stub, "n-seed", "test", ORIGIN, "open", 0)
+	eq("create seeds reserve from the tier's drainReserve", seeded.reserve, 42)
+	eq("create seeds an empty ledger", next(seeded.drainedBy), nil)
+	check("create leaves drained false", not seeded.drained)
+end
+
 print(`\n  passed: {passed}   failed: {failed}`)
 if failed > 0 then
 	for _, f in failures do
