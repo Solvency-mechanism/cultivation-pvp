@@ -455,6 +455,27 @@ eq(
 	"MYSTERY"
 )
 
+--[[ The drain meter fills with the drained fraction, and any drain at all
+	lights a cell -- a node whose reserve has moved is a node somebody has
+	been on. An unpublished reserve reads as untouched, never as drained. ]]
+do
+	local D = InterfaceSpec.Drain
+	eq(
+		"a full node is an empty meter",
+		InterfaceSpec.drainMeter(2600, 2600),
+		string.rep(D.empty, D.cells)
+	)
+	eq(
+		"a drained node is a full meter",
+		InterfaceSpec.drainMeter(0, 2600),
+		string.rep(D.filled, D.cells)
+	)
+	eq("half drained is half lit", InterfaceSpec.drainMeter(1300, 2600), "##..")
+	eq("any drain lights the first cell", InterfaceSpec.drainMeter(2590, 2600), "#...")
+	eq("an unpublished reserve reads as untouched", InterfaceSpec.drainMeter(0, 0), "....")
+	check("the meter is a fixed width", #InterfaceSpec.drainMeter(700, 1200) == D.cells)
+end
+
 -- Cooldown countdowns, in the shape an icon prints them.
 eq("a sub-second cooldown shows a decimal", InterfaceSpec.countdown(0.8), "0.8")
 eq("a long cooldown rounds up to whole seconds", InterfaceSpec.countdown(15.2), "16")

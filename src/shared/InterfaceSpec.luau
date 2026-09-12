@@ -865,6 +865,40 @@ function InterfaceSpec.dominantAura(held: { [string]: number }, order: { string 
 	return best
 end
 
+--[[ The drain, in a Sense row.
+
+	A node now ends two ways (frostbolt-ruling.md, THE PRIME DRAIN): AGED, when
+	its lifetime runs out, or DRAINED, when bodies standing on it have taken
+	its reserve -- and only the second is the fight. Lifetime and drain are
+	two different clocks, so they do not share a readout: the Sense rows never
+	showed the lifetime and still do not; they now show the drain, as a meter
+	that FILLS with the drained fraction, so a prime under three bodies
+	visibly races its own timer.
+
+	A meter in text because the rows are text -- one monospaced line per node,
+	and a column is what a line can carry. Plain ASCII cells, because a block
+	glyph that Roboto Mono lacks falls back to another face at another width
+	and breaks the column. Any drain at all lights the first cell: a node whose
+	reserve has moved is a node somebody has been on, and that fact alone is
+	worth a mark. ]]
+InterfaceSpec.Drain = {
+	cells = 4,
+	filled = "#",
+	empty = ".",
+}
+
+function InterfaceSpec.drainMeter(reserve: number, maxReserve: number): string
+	local spec = InterfaceSpec.Drain
+	local drained = 1 - InterfaceSpec.fraction(reserve, maxReserve)
+	if maxReserve <= 0 then
+		drained = 0
+	end
+	local lit = if drained <= 0
+		then 0
+		else math.clamp(math.ceil(drained * spec.cells), 1, spec.cells)
+	return string.rep(spec.filled, lit) .. string.rep(spec.empty, spec.cells - lit)
+end
+
 --[[ Fraction of a bar, guarded. Every bar in the HUD goes through this rather
 	than dividing inline, because a zero maximum arrives routinely -- a client
 	renders before the server has published anything at all. ]]

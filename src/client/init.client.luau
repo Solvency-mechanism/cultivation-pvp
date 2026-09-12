@@ -918,7 +918,7 @@ do
 	senseColumns.Size = UDim2.new(1, -px(16), 0, px(SENSE.columnHeight))
 	senseColumns.Position = UDim2.fromOffset(px(8), px(18))
 	senseColumns.Font = Enum.Font.RobotoMono
-	senseColumns.Text = string.format("%s %-6s %4s  %s", " ", "aura", "away", "held")
+	senseColumns.Text = string.format("%s %-6s %4s  %s  %s", " ", "aura", "away", "held", "drain")
 
 	local senseRows: { TextLabel } = {}
 	for index = 1, SENSE.rows do
@@ -2094,13 +2094,18 @@ local function refreshSense(nodes: { any })
 			continue
 		end
 		row.TextColor3 = TIER_COLOR[entry.tier] or TEXT_DIM
+		-- Reserve is ALWAYS in the payload once the driver lands; until then a
+		-- missing pair reads as an untouched node rather than a broken row.
+		local reserve = if typeof(entry.reserve) == "number" then entry.reserve else 0
+		local maxReserve = if typeof(entry.maxReserve) == "number" then entry.maxReserve else 0
 		row.Text = string.format(
-			"%s %-6s %4d  %d/%d",
+			"%s %-6s %4d  %d/%d  %s",
 			arrowTo(entry.x, entry.z),
 			entry.tier,
 			math.floor(entry.distance),
 			entry.occupants,
-			entry.capacity
+			entry.capacity,
+			InterfaceSpec.drainMeter(reserve, maxReserve)
 		)
 	end
 
