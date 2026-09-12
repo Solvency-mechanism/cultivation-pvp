@@ -1983,8 +1983,8 @@ local function refreshTarget()
 	targetUi.relation.Visible = not drawingCast and targetUi.relation.Text ~= ""
 
 	if cast and drawingCast then
-		local tech = Config.Techniques[cast.techId]
-		targetUi.castName.Text = if tech then string.upper(tech.name) else string.upper(cast.techId)
+		targetUi.castName.Text =
+			InterfaceSpec.castLabel(cast.techId, Config.Techniques[cast.techId])
 		if Nameplates.isSnapped(cast) then
 			-- Broken, not finished: the whole bar in the danger hue for a beat,
 			-- and no timer, because there is no time left to count.
@@ -2031,9 +2031,8 @@ local function refreshOwnCast()
 		return
 	end
 
-	local tech = Config.Techniques[cast.techId]
 	castUi.frame.Visible = true
-	castUi.name.Text = if tech then string.upper(tech.name) else string.upper(cast.techId)
+	castUi.name.Text = InterfaceSpec.castLabel(cast.techId, Config.Techniques[cast.techId])
 	if Nameplates.isSnapped(cast) then
 		castUi.fill.Size = UDim2.fromScale(1, 1)
 		castUi.fill.BackgroundColor3 = DANGER

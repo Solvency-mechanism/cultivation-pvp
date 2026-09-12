@@ -131,6 +131,13 @@ InterfaceSpec.KindColor = {
 	-- entry exists now so the slot bar does not fall back to grey the day it
 	-- does, which is the same failure `ImpactSpec.Cast.byKind` is flagged for.
 	strider = { r = 96, g = 220, b = 226 } :: Rgb,
+	--[[ Processing: the Core's verb, a synthetic cast through the same three
+		events every channel uses (frostbolt-ruling.md, Processing). Not a
+		technique and never in the picker, so it has no kind of its own to
+		borrow a colour from. Warm and unsaturated, near the neutral aura --
+		the bar says "busy, becoming" without claiming any one aura, because
+		what is being processed is the vessel's whole mix. ]]
+	process = { r = 226, g = 204, b = 170 } :: Rgb,
 }
 
 --[[ The ladder read as colour, for nameplates and the target frame.
@@ -909,6 +916,23 @@ end
 
 function InterfaceSpec.kindColor(kind: string): Rgb
 	return InterfaceSpec.KindColor[kind] or InterfaceSpec.Palette.ready
+end
+
+--[[ What a cast bar prints. A technique prints its name; a synthetic cast --
+	one whose techId is deliberately not a Config.Techniques key -- prints the
+	word for what it is, and an unknown id prints itself rather than nothing,
+	so a bar is never blank. Every bar that names a cast (your own, the
+	target frame's, the plate's) goes through here so the three cannot
+	disagree about the word. ]]
+InterfaceSpec.SyntheticCast = {
+	process = "PROCESSING",
+}
+
+function InterfaceSpec.castLabel(techId: string, tech: { name: string }?): string
+	if tech then
+		return string.upper(tech.name)
+	end
+	return InterfaceSpec.SyntheticCast[techId] or string.upper(techId)
 end
 
 --[[ The width the action bar needs for a given slot count, so the caller does

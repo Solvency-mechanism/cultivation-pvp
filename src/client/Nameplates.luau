@@ -608,7 +608,8 @@ local function refresh(who: Combatant, plate: Plate)
 			plate.castFill.Size = UDim2.fromScale(progress, 1)
 			plate.castFill.BackgroundColor3 = color(InterfaceSpec.kindColor(cast.kind))
 		end
-		plate.castLabel.Text = string.upper(cast.techId)
+		-- The plate has no Config; it prints the id, or the word for a synthetic cast.
+		plate.castLabel.Text = InterfaceSpec.castLabel(cast.techId, nil)
 	else
 		plate.castRow.Visible = false
 		plate.stage.Visible = true

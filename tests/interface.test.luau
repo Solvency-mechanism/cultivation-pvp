@@ -443,6 +443,18 @@ do
 	check("the core chip is not a new row", header - V.chipInset * 2 <= header)
 end
 
+--[[ Processing is a synthetic cast through the real cast events, and never
+	a technique. The bars must have a colour and a word for it, and the word
+	must be the same on all three bars. ]]
+check("processing has a cast colour of its own", InterfaceSpec.KindColor.process ~= nil)
+eq("a technique prints its name", InterfaceSpec.castLabel("lance", { name = "Lance" }), "LANCE")
+eq("processing prints what it is", InterfaceSpec.castLabel("process", nil), "PROCESSING")
+eq(
+	"an unknown id prints itself rather than nothing",
+	InterfaceSpec.castLabel("mystery", nil),
+	"MYSTERY"
+)
+
 -- Cooldown countdowns, in the shape an icon prints them.
 eq("a sub-second cooldown shows a decimal", InterfaceSpec.countdown(0.8), "0.8")
 eq("a long cooldown rounds up to whole seconds", InterfaceSpec.countdown(15.2), "16")
