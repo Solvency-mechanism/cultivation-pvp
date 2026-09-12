@@ -541,6 +541,17 @@ local function isNpcActor(actor: Combat.Actor): boolean
 	return combatant ~= nil and combatant.kind == "npc"
 end
 
+-- NpcService sets this at spawn (buildRig); falls back to the Instance name
+-- for anything that somehow reaches this without it rather than reading a
+-- blank into a notice.
+local function npcDisplayName(model: Model): string
+	local name = model:GetAttribute("DisplayName")
+	if typeof(name) == "string" then
+		return name
+	end
+	return model.Name
+end
+
 -- The last bracket notice already told to each attacker, keyed by
 -- (relation, targetCombatantId) per bracket-tone.md -- a duel against one
 -- person says it once, and a new target says it again.
@@ -827,6 +838,26 @@ local function damageCombatant(source: Combat.Actor, target: Combatant, raw: num
 	if result.died then
 		if target.kind == "player" and target.player then
 			handleDeath(target.player, source)
+		elseif target.kind == "npc" then
+			--[[ Per npcs.md's own finding: every exclusion an NPC death goes
+				through (no bracket relation, no kill notice, no leaderboard)
+				composed into the first PvE kill in this game producing zero
+				feedback at all. Voiced in the NPC's own register, "npc", never
+				the PvP kill banner -- a practice target dying is not the same
+				moment as beating another player. Silent on an unresolvable
+				killer (a construct outlives its caster, a dummy's own
+				loop-cast) the same way every other notify here already is. ]]
+			local killerId = tonumber(source.id)
+			local killer = if killerId and killerId > 0
+				then Players:GetPlayerByUserId(killerId)
+				else nil
+			if killer then
+				AwarenessService.notify(
+					killer,
+					"npc",
+					`{npcDisplayName(target.model)} falls. It will return.`
+				)
+			end
 		end
 		-- A dummy's "death" is not routed anywhere: DummyService holds the
 		-- same `Combat.Actor` table this mutated and polls `health <= 0` on
