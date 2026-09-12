@@ -26,11 +26,39 @@ function Line { Write-Host "  --------------------------------------------------
 Write-Host ""; Line
 
 # --- identity ---------------------------------------------------------------
+# `main` is the integration branch: the game as it currently stands, with every
+# workstream merged. A work branch is one team's slice and is routinely missing
+# the other team's half -- which is exactly how a deploy once shipped the Core
+# branch, whose whole point at that stage was that nothing read it yet, and no
+# volcano, because the volcano was on `map`. So this defaults to main and says
+# so, and building anything else has to be asked for.
+$branch = (git rev-parse --abbrev-ref HEAD 2>$null)
+if (-not $branch) { Write-Host "  NOT A GIT REPO -- cannot say what this is." -ForegroundColor Red; Read-Host "  Enter"; exit 1 }
+
+if ($branch -ne "main") {
+    Write-Host "  ================================================================" -ForegroundColor Yellow
+    Write-Host "  YOU ARE ON BRANCH '$branch', NOT main." -ForegroundColor Yellow
+    Write-Host "  ================================================================" -ForegroundColor Yellow
+    Write-Host "  A work branch is ONE TEAM'S SLICE. It is routinely missing the"
+    Write-Host "  other team's half, and a half-built mechanic is often DELIBERATELY"
+    Write-Host "  INVISIBLE at that stage -- so the game can look unchanged while a"
+    Write-Host "  great deal has happened somewhere else."
+    Write-Host ""
+    Write-Host "  To play the game as it currently stands, in another terminal:"
+    Write-Host "      git checkout main" -ForegroundColor Cyan
+    Write-Host "  then run this again. (A checkout will refuse if someone has"
+    Write-Host "  uncommitted work here -- that is git protecting them, not an error.)"
+    Write-Host ""
+    if ((Read-Host "  Build '$branch' anyway? (y/N)") -ne "y") {
+        Write-Host "  Stopped. Nothing built, nothing opened." -ForegroundColor Yellow
+        Read-Host "  Enter"; exit 1
+    }
+}
+
 $sha     = (git rev-parse --short HEAD 2>$null)
 $full    = (git rev-parse HEAD 2>$null)
 $subject = (git log -1 --pretty=%s 2>$null)
 $dirty   = (git status --porcelain 2>$null)
-if (-not $sha) { Write-Host "  NOT A GIT REPO -- cannot say what this is." -ForegroundColor Red; Read-Host "  Enter"; exit 1 }
 
 # Is this commit on the remote? If not, the build is not recoverable by anyone else.
 git rev-parse --verify --quiet "origin/combat-vision" *> $null
@@ -86,6 +114,8 @@ if ($blockers.Count -eq 0) {
     Write-Host "  It will still open and play. Do not publish it."
 }
 Line
+Write-Host "    branch   $branch" -NoNewline
+if ($branch -eq "main") { Write-Host "   (the game as it stands)" -ForegroundColor Green } else { Write-Host "   (A WORK BRANCH -- not the whole game)" -ForegroundColor Yellow }
 Write-Host "    commit   $sha  $subject"
 Write-Host "    profile  $prof" -NoNewline
 if ($prof -eq "development") { Write-Host "   (test tuning -- NOT what players get)" -ForegroundColor Yellow } else { Write-Host "" }
