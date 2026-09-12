@@ -577,6 +577,56 @@ end
 	the point is that a technique without one is the same hazard as a remote
 	with an optional field on the read side, and the build that finally gates
 	should find every entry already carrying an answer. ]]
+--[[ The seam between the Core and the Map, as data. Every region the game can
+	name accrues exactly one of the four aura types, and there are exactly four.
+	This is the one place the two teams can silently break each other -- a biome
+	added to RegionNames without a RegionAura line accrues nothing and nobody
+	errors -- so it is asserted from the Config side before anything reads it. ]]
+do
+	local auraCount = 0
+	for key, aura in Config.AuraTypes do
+		auraCount += 1
+		check(`aura type {key} is named`, type(aura.name) == "string" and #aura.name > 0)
+		for _, channel in { "r", "g", "b" } do
+			local value = aura.color[channel]
+			check(
+				`aura type {key} colour {channel} is an integer 0-255`,
+				type(value) == "number"
+					and value == math.floor(value)
+					and value >= 0
+					and value <= 255
+			)
+		end
+	end
+	eq("exactly four aura types", auraCount, 4)
+
+	for region in Config.RegionNames do
+		local aura = Config.RegionAura[region]
+		check(
+			`region {region} accrues a known aura`,
+			aura ~= nil and Config.AuraTypes[aura] ~= nil,
+			`RegionAura[{region}] is {tostring(aura)}`
+		)
+	end
+	for region, aura in Config.RegionAura do
+		check(
+			`RegionAura key {region} is a region the game names`,
+			Config.RegionNames[region] ~= nil
+		)
+		check(`RegionAura value {aura} for {region} is an aura type`, Config.AuraTypes[aura] ~= nil)
+	end
+	eq("open ground accrues neutral", Config.RegionAura.open, "neutral")
+
+	-- Core vocabulary: shape and bounds only; nothing reads it yet.
+	local core = Config.Core
+	check("vessel capacity is larger than the old pool", core.capacityMultiplier > 1)
+	check("processing takes time", core.processSeconds > 0)
+	check("the process floor is a fraction", core.processFloor > 0 and core.processFloor < 1)
+	check("process yield is positive", core.processYield > 0)
+	check("passive fraction is a fraction", core.passiveFraction >= 0 and core.passiveFraction <= 1)
+	check("the floor trickle is non-negative", core.floorTrickleFraction >= 0)
+end
+
 local UNLOCK_KINDS: { [string]: boolean } =
 	{ always = true, auraDepth = true, tier = true, path = true }
 for id, tech in Config.Techniques do

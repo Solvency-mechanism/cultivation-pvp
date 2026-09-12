@@ -224,6 +224,61 @@ Config.StaticRegionMultipliers = {
 	wellspring = 2.6,
 }
 
+--[[ ======================= AURA TYPES (owner: roster) =======================
+
+	The seam between the Core and the Map, as data. Exactly four, and it stays
+	four: new ground maps ONTO one of these, never adds a fifth. A fixed record
+	rather than a map keyed by string, so a typo is a compile error caught by
+	tests/compile.test rather than a silent zero forever.
+
+	color is r g b integers, never a Color3 -- src/shared stays Lune-loadable.
+	The values are first-pass; interface owns whether they read on the vessel
+	bar and hands roster the numbers to land. regionHint is prose for a reader,
+	not a key anything joins on: the join is Config.RegionAura below. ]]
+export type AuraType = {
+	name: string,
+	color: { r: number, g: number, b: number },
+	regionHint: string,
+}
+
+Config.AuraTypes = {
+	ash = { name = "Ash", color = { r = 255, g = 120, b = 60 }, regionHint = "the Ember Barrens" },
+	verdant = {
+		name = "Verdant",
+		color = { r = 90, g = 200, b = 110 },
+		regionHint = "the Verdant Reach",
+	},
+	lumen = { name = "Lumen", color = { r = 120, g = 200, b = 255 }, regionHint = "a Wellspring" },
+	neutral = {
+		name = "Neutral",
+		color = { r = 200, g = 200, b = 200 },
+		regionHint = "open ground",
+	},
+} :: { ash: AuraType, verdant: AuraType, lumen: AuraType, neutral: AuraType }
+
+--[[ ============ REGION AURA (map team appends; roster owns these lines) ============
+
+	Which aura a region's ground accrues. Read by exactly one pure function once
+	the Core lands, so no prose ever performs this mapping again. Every key in
+	Config.RegionNames must appear here and every value must be a key of
+	Config.AuraTypes -- asserted in tests/combat.test.
+
+	open accrues neutral at 1.0x through StaticRegionMultipliers, not nothing:
+	neutral is spendable and processable but flavourless, so a fight on the
+	plaza is not a fight lost by attrition, while committed ground stays the
+	only way to BECOME something. The header comment on Field.regionWeights
+	that called open "affinity-inactive" is superseded by this table.
+
+	MAP TEAM: add one line per new biome below the marker. Never rename a key;
+	region ids are frozen strings. ]]
+Config.RegionAura = {
+	barren = "ash",
+	rich = "verdant",
+	wellspring = "lumen",
+	open = "neutral",
+	-- map team: new biomes below this line --
+} :: { [string]: "ash" | "verdant" | "lumen" | "neutral" }
+
 --[[ Persistence. Bump storeName rather than migrating when the shape of a
 	saved state changes incompatibly; Progression.sanitizeState absorbs the
 	compatible drift. ]]
@@ -286,6 +341,51 @@ Config.Combat = {
 	-- expiry, so a round duration delivers `duration / tick` ticks and no
 	-- construct below needs to pad past a multiple to get its last one.
 	constructTickSeconds = 2.0,
+}
+
+--[[ ========================= THE CORE (owner: roster) =========================
+
+	The resource that remembers what you cultivated. Nothing reads these yet;
+	they are the vocabulary the Core team builds against, landed first so both
+	teams unblock on one contract. Three quantities, kept distinct on purpose:
+	the VESSEL (raw aura, typed, one shared capacity), the CORE (what you have
+	processed, permanent), and the spendable pool -- which IS the vessel.
+
+	capacityMultiplier -- vessel capacity is Combat.auraCapacity(stage) times
+		this: 1200 at Lowgold. Sized by TIME TO FILL, not by the ability pool --
+		pegged to the pool (200) a wellspring prime at 52 aura/s filled it in
+		3.8 s and processing became a button to mash every four seconds. At 6:
+		a wellspring prime fills it in 23 s (a decision made a couple of times
+		during a drain fight), a common node on rich ground in 3.7 min (a
+		rhythm, not a chore), and twenty casts of the default loadout spend
+		about half of it (the pool keeps a fight role and ground-as-regen keeps
+		its teeth). Costs stay where they are; "not prohibitive" is the bigger
+		vessel, not cheaper techniques.
+	processYield -- progress granted per point of aura processed. At this
+		capacity the 2.0 s channel is under 1% of a common node's fill time, so
+		1.0 holds the development time-to-tier table within 2% at common and
+		rare nodes: a point of aura is a point of progress. A prime being fast
+		is a prime being a prime.
+	processSeconds -- the channel, through the existing cast machinery, so a
+		hit interrupts it and it is not done mid-fight.
+	processFloor -- processing is unavailable below this fraction of capacity,
+		so there is nothing to mash.
+	passiveFraction -- the fraction of today's cycling progress that still flows
+		without processing. 0 so the human feels the pure mechanic first: every
+		point of progress flows through a decision. If that reads as a chore
+		the number moves, not the design; the commissioned design's candidate
+		is 0.25.
+	floorTrickleFraction -- region-independent vessel refill, as a fraction of
+		capacity per second, so nobody is ever softlocked on bare ground: 2
+		aura/s at Lowgold, a Lance every nine seconds. Standing in a lobe is
+		the regen; this is the floor under it. ]]
+Config.Core = {
+	capacityMultiplier = 6,
+	processYield = 1.0,
+	processSeconds = 2.0,
+	processFloor = 0.25,
+	passiveFraction = 0,
+	floorTrickleFraction = 0.01,
 }
 
 --[[
