@@ -12,11 +12,40 @@
 	Which is how "PvP is mandatory" becomes an economic fact rather than a rule.
 ]]
 
+--[[ The vessel: raw, typed, unprocessed aura -- what abilities spend from,
+	what a discard empties, what processing consumes whole. Shared capacity
+	across all four keys, not four independent pools -- see vesselCapacity
+	and the design note at core-and-map.md (b) for why shared is the whole
+	point (an independent-per-type cap would never force a discard). ]]
+export type AuraPool = {
+	ash: number,
+	verdant: number,
+	lumen: number,
+	neutral: number,
+}
+
+--[[ The core: what has been PROCESSED, ever. Permanent identity, no cap, no
+	neutral key -- neutral is spendable and processable but flavourless, so
+	it pushes baseline cultivation on processing without becoming part of
+	what you have "become" (core-and-map.md (b), rulings). Never touched by
+	applyLoss: identity is not combat performance. ]]
+export type CoreComposition = {
+	ash: number,
+	verdant: number,
+	lumen: number,
+}
+
+export type Core = {
+	raw: AuraPool,
+	composition: CoreComposition,
+}
+
 export type State = {
 	stageIndex: number,
 	tier: number,
 	progress: number,
 	catalysts: number,
+	core: Core,
 }
 
 export type AddResult = {
@@ -25,7 +54,39 @@ export type AddResult = {
 	atCeiling: boolean,
 }
 
+export type ProcessResult = {
+	state: State,
+	tiersGained: number,
+	atCeiling: boolean,
+	processed: number,
+}
+
 local Progression = {}
+
+--[[ Deep. This is the one place the whole Core initiative names as its own
+	worst silent trap (core-and-map.md risk 2, design.md risk 2): a
+	by-reference copy of core.raw/core.composition would pass every existing
+	test that only checks the top-level state was not mutated, because
+	CultivationService.tick reassigns the returned state anyway -- right up
+	until applyLoss or a second accrual mutates what the FIRST state's core
+	still points at. Test coverage for this lives in progression.test as an
+	explicit identity assertion plus a mutate-after-clone check, not just a
+	value comparison. ]]
+local function cloneCore(core: Core): Core
+	return {
+		raw = {
+			ash = core.raw.ash,
+			verdant = core.raw.verdant,
+			lumen = core.raw.lumen,
+			neutral = core.raw.neutral,
+		},
+		composition = {
+			ash = core.composition.ash,
+			verdant = core.composition.verdant,
+			lumen = core.composition.lumen,
+		},
+	}
+end
 
 local function clone(state: State): State
 	return {
@@ -33,11 +94,19 @@ local function clone(state: State): State
 		tier = state.tier,
 		progress = state.progress,
 		catalysts = state.catalysts,
+		core = cloneCore(state.core),
+	}
+end
+
+local function emptyCore(): Core
+	return {
+		raw = { ash = 0, verdant = 0, lumen = 0, neutral = 0 },
+		composition = { ash = 0, verdant = 0, lumen = 0 },
 	}
 end
 
 function Progression.newState(): State
-	return { stageIndex = 1, tier = 1, progress = 0, catalysts = 0 }
+	return { stageIndex = 1, tier = 1, progress = 0, catalysts = 0, core = emptyCore() }
 end
 
 --[[ Rebuild a state table from untrusted stored data.
@@ -72,6 +141,46 @@ function Progression.sanitizeState(config: any, raw: any): State
 	local catalysts = tonumber(raw.catalysts)
 	if catalysts and catalysts == catalysts and catalysts > 0 then
 		state.catalysts = math.floor(catalysts)
+	end
+
+	--[[ Absorbed key by key into the zeros newState() already gave state.core,
+		never left nil -- a save with no core key at all (every save written
+		before this landed) must round-trip to a state this module can act on
+		without a special case anywhere else. ]]
+	local rawCore = raw.core
+	if type(rawCore) == "table" then
+		if type(rawCore.raw) == "table" then
+			for _, key in { "ash", "verdant", "lumen", "neutral" } do
+				local value = tonumber(rawCore.raw[key])
+				if value and value == value and value >= 0 then
+					state.core.raw[key] = value
+				end
+			end
+		end
+		if type(rawCore.composition) == "table" then
+			for _, key in { "ash", "verdant", "lumen" } do
+				local value = tonumber(rawCore.composition[key])
+				if value and value == value and value >= 0 then
+					state.core.composition[key] = value
+				end
+			end
+		end
+	end
+
+	-- A vessel above capacity (a hand-edited save, a capacity that shrank)
+	-- is scaled back down proportionally rather than clamped per-key, so the
+	-- MIX held is unchanged and only the total is corrected.
+	local capacity = Progression.vesselCapacity(config, state)
+	local total = state.core.raw.ash
+		+ state.core.raw.verdant
+		+ state.core.raw.lumen
+		+ state.core.raw.neutral
+	if total > capacity and total > 0 then
+		local scale = capacity / total
+		state.core.raw.ash *= scale
+		state.core.raw.verdant *= scale
+		state.core.raw.lumen *= scale
+		state.core.raw.neutral *= scale
 	end
 
 	return state
@@ -125,6 +234,130 @@ function Progression.addProgress(config: any, state: State, amount: number): Add
 	end
 
 	return { state = new, tiersGained = gained, atCeiling = Progression.isAtCeiling(config, new) }
+end
+
+--[[ Derived, never stored: capacityMultiplier x the same basePower x
+	auraMultiplier product Combat.auraCapacity computes, read independently
+	off the injected config rather than by requiring Combat -- src/shared
+	takes no internal requires, and this is the same Config fields Combat.
+	luau itself reads, not a second formula that could drift from the
+	first. Sized by time-to-fill, not by the ability pool (core-and-map.md
+	(b)): capacityMultiplier is deliberately larger than auraMultiplier
+	alone so a full vessel is a fight-length decision, not a four-second
+	one. ]]
+function Progression.vesselCapacity(config: any, state: State): number
+	local stage = Progression.getStage(config, state)
+	return stage.basePower * config.Combat.auraMultiplier * config.Core.capacityMultiplier
+end
+
+--[[ Fill the vessel with one typed aura, clamped to whatever headroom is
+	left under the SHARED cap -- not clamped per-type, because a shared cap
+	is the entire design: an independent-per-type cap would never force a
+	discard, since a player would simply stop cultivating the type they did
+	not want rather than ever having to choose. Standing in the Barrens on
+	the way to the Wellspring fills the vessel with ash whether or not that
+	was wanted, which is the point. ]]
+function Progression.accrueAura(
+	config: any,
+	state: State,
+	auraType: "ash" | "verdant" | "lumen" | "neutral",
+	amount: number
+): State
+	assert(amount >= 0, "accrual amount must be non-negative")
+	local new = clone(state)
+	local capacity = Progression.vesselCapacity(config, new)
+	local total = new.core.raw.ash
+		+ new.core.raw.verdant
+		+ new.core.raw.lumen
+		+ new.core.raw.neutral
+	local headroom = math.max(0, capacity - total)
+	new.core.raw[auraType] += math.min(amount, headroom)
+	return new
+end
+
+--[[ Consume the ENTIRE vessel -- there is no partial processing, which is
+	what makes "when do I process" the decision rather than "how much".
+	Typed raw amounts add to the permanent composition; neutral adds
+	nothing there, but its share of the total still counts toward the
+	progress this grants -- neutral is spendable and processable, just
+	flavourless. Routes through addProgress rather than writing state.
+	progress directly, so the tier-rollover rule lives in exactly one
+	place regardless of which verb is feeding it. ]]
+function Progression.process(config: any, state: State): ProcessResult
+	local emptied = clone(state)
+	local raw = emptied.core.raw
+	local total = raw.ash + raw.verdant + raw.lumen + raw.neutral
+
+	emptied.core.composition.ash += raw.ash
+	emptied.core.composition.verdant += raw.verdant
+	emptied.core.composition.lumen += raw.lumen
+
+	raw.ash = 0
+	raw.verdant = 0
+	raw.lumen = 0
+	raw.neutral = 0
+
+	local added = Progression.addProgress(config, emptied, total * config.Core.processYield)
+	return {
+		state = added.state,
+		tiersGained = added.tiersGained,
+		atCeiling = added.atCeiling,
+		processed = total,
+	}
+end
+
+--[[ Empty the vessel for nothing. The discard IS the decision this whole
+	mechanic is built around (core-and-map.md (b)) -- what is lost is
+	whatever the caller already knew it was walking away from; this
+	function only has to make the loss real. ]]
+function Progression.discard(state: State): State
+	local new = clone(state)
+	new.core.raw.ash = 0
+	new.core.raw.verdant = 0
+	new.core.raw.lumen = 0
+	new.core.raw.neutral = 0
+	return new
+end
+
+--[[ Spend from the vessel: neutral first, then proportionally across
+	whatever typed aura remains -- combat does not eat the identity a
+	player has gathered while there is flavourless aura still sitting in
+	the pool to spend instead. Refuses outright (returns the state
+	UNCHANGED, ok = false) rather than spending part of a cost the vessel
+	cannot fully cover; the caller decides what an insufficient pool means,
+	same discipline Combat.canUse already applies to its own gating. ]]
+function Progression.spendAura(state: State, amount: number): (State, boolean)
+	assert(amount >= 0, "spend amount must be non-negative")
+	local raw = state.core.raw
+	local total = raw.ash + raw.verdant + raw.lumen + raw.neutral
+	if amount > total then
+		return state, false
+	end
+
+	local new = clone(state)
+	local newRaw = new.core.raw
+	local remaining = amount
+
+	local fromNeutral = math.min(remaining, newRaw.neutral)
+	newRaw.neutral -= fromNeutral
+	remaining -= fromNeutral
+
+	if remaining > 0 then
+		local typedTotal = newRaw.ash + newRaw.verdant + newRaw.lumen
+		if typedTotal > 0 then
+			local ashSpend = remaining * (newRaw.ash / typedTotal)
+			local verdantSpend = remaining * (newRaw.verdant / typedTotal)
+			-- lumen absorbs whatever the other two's shares leave, rather
+			-- than computing its own share, so the three sum to exactly
+			-- `remaining` regardless of floating-point rounding.
+			local lumenSpend = remaining - ashSpend - verdantSpend
+			newRaw.ash = math.max(0, newRaw.ash - ashSpend)
+			newRaw.verdant = math.max(0, newRaw.verdant - verdantSpend)
+			newRaw.lumen = math.max(0, newRaw.lumen - lumenSpend)
+		end
+	end
+
+	return new, true
 end
 
 --[[ Drain the refinement bar. The ratchet lives here: a loss can cost tiers

@@ -28,8 +28,15 @@ end
 
 local LOWGOLD, TRUEGOLD = 5, #Config.Stages
 
+-- Built off newState() rather than a hand-written literal, so a future field
+-- added to State (core was exactly this trap: a bare 4-field literal here
+-- would have failed compile.test the moment State grew a fifth) needs no
+-- second fix here.
 local function stateAt(stageIndex: number, tier: number): Progression.State
-	return { stageIndex = stageIndex, tier = tier, progress = 0, catalysts = 0 }
+	local state = Progression.newState()
+	state.stageIndex = stageIndex
+	state.tier = tier
+	return state
 end
 
 local function powerAt(stageIndex: number, tier: number): number

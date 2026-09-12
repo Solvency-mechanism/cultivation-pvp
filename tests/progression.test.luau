@@ -29,13 +29,22 @@ end
 local LOWGOLD = 5
 local TRUEGOLD = #Config.Stages
 
+-- Built off newState() rather than a hand-written literal, so a future field
+-- added to State (core was exactly this trap: a bare literal here would have
+-- failed compile.test the moment State grew a fifth field) needs no second
+-- fix here.
 local function stateAt(
 	stageIndex: number,
 	tier: number,
 	progress: number,
 	catalysts: number
 ): Progression.State
-	return { stageIndex = stageIndex, tier = tier, progress = progress, catalysts = catalysts }
+	local state = Progression.newState()
+	state.stageIndex = stageIndex
+	state.tier = tier
+	state.progress = progress
+	state.catalysts = catalysts
+	return state
 end
 
 -- Baseline
@@ -194,6 +203,173 @@ do
 		Progression.addProgress(Config, restored, 10).state.progress > 120
 	)
 	check("loss is applicable to it", Progression.applyLoss(Config, restored, 50).progress >= 0)
+
+	--[[ The highest-severity trap named against this whole initiative: a save
+		written before core existed has no core key at all, and it must land
+		on zeros, never nil -- the closed-set-drift class that has bitten this
+		codebase before in other forms. junk/negative/overflow above all had
+		no core key either and already proved this implicitly (nothing there
+		crashed reading state.core.raw.ash downstream); these make it explicit
+		and check every key by name. ]]
+	local noCore = Progression.sanitizeState(Config, { stageIndex = LOWGOLD, tier = 1 })
+	for _, key in { "ash", "verdant", "lumen", "neutral" } do
+		eq(`no core key: vessel {key} lands on zero, not nil`, noCore.core.raw[key], 0)
+	end
+	for _, key in { "ash", "verdant", "lumen" } do
+		eq(`no core key: composition {key} lands on zero, not nil`, noCore.core.composition[key], 0)
+	end
+
+	-- Malformed core (wrong shape entirely) sanitizes the same way absent
+	-- core does -- type(rawCore.raw) ~= "table" skips it rather than erroring.
+	local junkCore =
+		Progression.sanitizeState(Config, { stageIndex = LOWGOLD, core = "not a table" })
+	eq("junk core falls back to zero", junkCore.core.raw.ash, 0)
+
+	-- A real save's core round-trips exactly, key by key.
+	local savedCore = Progression.sanitizeState(Config, {
+		stageIndex = LOWGOLD,
+		core = {
+			raw = { ash = 10, verdant = 20, lumen = 0, neutral = 5 },
+			composition = { ash = 100, verdant = 0, lumen = 50 },
+		},
+	})
+	eq("vessel ash round-trips", savedCore.core.raw.ash, 10)
+	eq("vessel verdant round-trips", savedCore.core.raw.verdant, 20)
+	eq("vessel neutral round-trips", savedCore.core.raw.neutral, 5)
+	eq("composition ash round-trips", savedCore.core.composition.ash, 100)
+	eq("composition lumen round-trips", savedCore.core.composition.lumen, 50)
+
+	-- A vessel saved above the current capacity (the cap shrank, or the save
+	-- was hand-edited) is scaled back down proportionally, so the MIX held
+	-- is unchanged and only the total is corrected to fit.
+	local capacity = Progression.vesselCapacity(Config, Progression.newState())
+	local overfull = Progression.sanitizeState(Config, {
+		stageIndex = 1,
+		core = {
+			raw = { ash = capacity * 2, verdant = capacity * 2, lumen = 0, neutral = 0 },
+			composition = { ash = 0, verdant = 0, lumen = 0 },
+		},
+	})
+	local overfullTotal = overfull.core.raw.ash + overfull.core.raw.verdant
+	near("an overfull vessel is scaled down to capacity", overfullTotal, capacity, 1e-6)
+	near(
+		"the scaled-down mix keeps its original proportions",
+		overfull.core.raw.ash / overfullTotal,
+		0.5,
+		1e-9
+	)
+end
+
+--[[ The deep-clone trap, named as the single most likely silent break in
+	this initiative: a shallow copy of core.raw/core.composition would pass
+	every test that only checks the returned state was not mutated, since
+	CultivationService.tick always reassigns anyway -- right up until a
+	SECOND operation on the original state finds its core already changed.
+	Identity assertion first (different tables, not the same reference by
+	~=), then an explicit mutate-after-the-fact check that would fail
+	outright on a by-reference copy, not just a value comparison. ]]
+do
+	local base = Progression.newState()
+	local accrued = Progression.accrueAura(Config, base, "ash", 10)
+
+	check("accrueAura returns a distinct core.raw table", accrued.core.raw ~= base.core.raw)
+	check(
+		"accrueAura returns a distinct core.composition table",
+		accrued.core.composition ~= base.core.composition
+	)
+
+	accrued.core.raw.ash = 99999
+	eq("mutating the new state's core leaves the original untouched", base.core.raw.ash, 0)
+
+	local processed = Progression.process(Config, accrued)
+	check(
+		"process also returns a distinct core.raw table",
+		processed.state.core.raw ~= accrued.core.raw
+	)
+end
+
+-- Accrual fills the shared vessel, clamped to capacity -- not per type. The
+-- second type only gets whatever headroom the first left behind.
+do
+	local state = Progression.newState()
+	local capacity = Progression.vesselCapacity(Config, state)
+
+	local filled = Progression.accrueAura(Config, state, "ash", capacity - 10)
+	filled = Progression.accrueAura(Config, filled, "verdant", 30)
+	local total = filled.core.raw.ash
+		+ filled.core.raw.verdant
+		+ filled.core.raw.lumen
+		+ filled.core.raw.neutral
+	near("accrual stops at the shared cap, not per type", total, capacity, 1e-9)
+	near(
+		"the type that arrived first keeps its full share",
+		filled.core.raw.ash,
+		capacity - 10,
+		1e-9
+	)
+	near("the second type only gets the remaining headroom", filled.core.raw.verdant, 10, 1e-9)
+end
+
+-- Processing consumes the WHOLE vessel: typed amounts become permanent
+-- composition (neutral does not), and the total -- including neutral --
+-- pushes progress.
+do
+	local state = Progression.newState()
+	state = Progression.accrueAura(Config, state, "ash", 40)
+	state = Progression.accrueAura(Config, state, "neutral", 10)
+
+	local result = Progression.process(Config, state)
+	eq("processing reports the full vessel processed", result.processed, 50)
+	eq("processing empties the vessel entirely", result.state.core.raw.ash, 0)
+	eq("processing empties neutral too", result.state.core.raw.neutral, 0)
+	eq("typed aura becomes permanent composition", result.state.core.composition.ash, 40)
+	eq("neutral adds nothing to composition", result.state.core.composition.neutral, nil)
+	near(
+		"the total, including neutral, pushed progress",
+		result.state.progress,
+		50 * Config.Core.processYield,
+		1e-6
+	)
+end
+
+-- Discard empties the vessel for nothing -- no composition change, no progress.
+do
+	local state = Progression.newState()
+	state = Progression.accrueAura(Config, state, "lumen", 25)
+	local discarded = Progression.discard(state)
+	eq("discard empties the vessel", discarded.core.raw.lumen, 0)
+	eq("discard grants no composition", discarded.core.composition.lumen, 0)
+	eq("discard grants no progress", discarded.progress, 0)
+end
+
+-- Spending draws neutral first, then proportionally across what remains --
+-- combat does not eat the identity a player has gathered while there is
+-- flavourless aura still sitting in the pool to spend instead.
+do
+	local state = Progression.newState()
+	state = Progression.accrueAura(Config, state, "neutral", 5)
+	state = Progression.accrueAura(Config, state, "ash", 10)
+	state = Progression.accrueAura(Config, state, "verdant", 10)
+
+	local afterSmallSpend, okSmall = Progression.spendAura(state, 3)
+	check("a spend within neutral succeeds", okSmall)
+	eq("neutral is drawn down first", afterSmallSpend.core.raw.neutral, 2)
+	eq("typed aura is untouched while neutral covers the cost", afterSmallSpend.core.raw.ash, 10)
+
+	local afterBigSpend, okBig = Progression.spendAura(state, 15)
+	check("a spend past neutral succeeds if the total covers it", okBig)
+	eq("neutral is exhausted first", afterBigSpend.core.raw.neutral, 0)
+	near("the remainder is drawn proportionally from ash", afterBigSpend.core.raw.ash, 5, 1e-9)
+	near(
+		"the remainder is drawn proportionally from verdant",
+		afterBigSpend.core.raw.verdant,
+		5,
+		1e-9
+	)
+
+	local unchanged, okRefused = Progression.spendAura(state, 9999)
+	check("a spend beyond the whole vessel is refused", not okRefused)
+	eq("a refused spend changes nothing", unchanged.core.raw.neutral, state.core.raw.neutral)
 end
 
 print(`\n  passed: {passed}   failed: {failed}`)
