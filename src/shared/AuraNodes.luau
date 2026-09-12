@@ -146,6 +146,14 @@ function AuraNodes.removeOccupant(node: Node, userId: string): boolean
 	return true
 end
 
+-- No real faction system exists yet, so every occupant is their own faction
+-- -- isContested/contestedBy's own `factionOf(id) or id` fallback -- which
+-- makes AuraNodes.drain's contest check already correct today (more than
+-- one distinct occupant is contested) with no change needed once teams do.
+local function noFactionSystem(): string?
+	return nil
+end
+
 --[[ The prime drain fight. `reserve` starts at the tier's `drainReserve`
 	(commons small, primes large -- roster's pricing) and is spent down by
 	whoever stands on the node, crediting each occupant's own contribution
@@ -165,7 +173,16 @@ function AuraNodes.drain(config: any, node: Node, dt: number)
 		return
 	end
 
-	local perOccupant = AuraNodes.cycleRate(config, node, node.region, true) * dt
+	local rate = AuraNodes.cycleRate(config, node, node.region, true)
+	-- Contested nodes drain slower -- a stretch goal per the human's own
+	-- ruling: with occupants draining occupantCount times faster, sharing
+	-- had no cost, and this turns "more of us drains it quicker" into a
+	-- stand-off instead.
+	if AuraNodes.isContested(node, noFactionSystem) then
+		rate *= config.Field.contestedDrainFactor
+	end
+
+	local perOccupant = rate * dt
 	node.reserve = math.max(0, node.reserve - perOccupant * node.occupantCount)
 
 	for userId in node.occupants do

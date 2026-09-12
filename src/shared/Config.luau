@@ -192,6 +192,13 @@ Config.Field = {
 	captureRadius = 14,
 	-- Server tick for awarding cycling progress.
 	cycleTickSeconds = 1,
+	-- Multiplies the prime drain's rate while AuraNodes.isContested is true
+	-- (more than one distinct player, until real factions exist). Sharing a
+	-- drain otherwise had no cost -- occupants drain occupantCount times
+	-- faster with none of them slower for it -- so this turns "more of us
+	-- clears it quicker" into a stand-off instead. First-pass, combat's
+	-- number pending roster's price.
+	contestedDrainFactor = 0.5,
 	-- Weighted tier roll. Prime is rare because it is a server-wide event.
 	spawnWeights = {
 		{ tier = "common", weight = 70 },

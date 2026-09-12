@@ -373,15 +373,34 @@ do
 	near("solo occupant credited their own contribution", solo.drainedBy.u1, 30, 1e-9)
 	check("not drained until reserve reaches zero", not solo.drained)
 
-	-- Two occupants drain twice as fast, and each is credited their OWN share,
-	-- not half of the total -- crediting contribution, not splitting a pot.
+	-- Two occupants drain twice as fast (at whatever the per-occupant rate
+	-- is), and each is credited their OWN share, not half of the total --
+	-- crediting contribution, not splitting a pot. Two DISTINCT occupants
+	-- are also contested under today's no-faction fallback (see the
+	-- contested block further down), so the expected numbers already carry
+	-- that factor -- this block is about occupant-count scaling and
+	-- per-occupant crediting, not about isolating an uncontested case that
+	-- cannot exist without a real faction system.
+	local duoRate = AuraNodes.cycleRate(Config, nil, "open", true)
+		* 3 -- common's cycleMultiplier, matching `node` below
+		* Config.Field.contestedDrainFactor
 	local duo = drainNode(100, "open", "common")
 	AuraNodes.addOccupant(Config, duo, "a", 0)
 	AuraNodes.addOccupant(Config, duo, "b", 0)
 	AuraNodes.drain(Config, duo, 5)
-	near("two occupants drain at double the rate", duo.reserve, 70, 1e-9)
-	near("first occupant credited their own rate, not half the total", duo.drainedBy.a, 15, 1e-9)
-	near("second occupant credited identically", duo.drainedBy.b, 15, 1e-9)
+	near(
+		"two occupants drain at double the per-occupant rate",
+		100 - duo.reserve,
+		duoRate * 2 * 5,
+		1e-9
+	)
+	near(
+		"first occupant credited their own rate, not half the total",
+		duo.drainedBy.a,
+		duoRate * 5,
+		1e-9
+	)
+	near("second occupant credited identically", duo.drainedBy.b, duoRate * 5, 1e-9)
 
 	-- Repeated calls accumulate in drainedBy rather than overwrite -- the
 	-- ledger is contribution OVER TIME, not a snapshot at any one instant.
@@ -389,7 +408,7 @@ do
 	near(
 		"a second drain call adds to the ledger rather than replacing it",
 		duo.drainedBy.a,
-		30,
+		duoRate * 10,
 		1e-9
 	)
 
@@ -427,6 +446,38 @@ do
 		1000 - prime.reserve,
 		AuraNodes.cycleRate(Config, prime, "wellspring", true),
 		1e-9
+	)
+
+	--[[ Contested nodes drain slower -- the human's own stretch ruling.
+		AuraNodes.isContested has no real faction system to read yet, so it
+		falls back to one faction per userId (contestedBy's own factionOf(id)
+		or id), which makes any two DISTINCT occupants contested today. Solo
+		drain above already established the uncontested rate at Config.
+		BaseCycleRate * common's cycleMultiplier(3) * open's multiplier(1.0)
+		= 3/s; contestedDrainFactor halves that to 1.5/s -- per occupant, not
+		as a flat penalty on the total, so each occupant's own credited share
+		is reduced identically to the reserve's own depletion. ]]
+	local contested = drainNode(1000, "open", "common")
+	AuraNodes.addOccupant(Config, contested, "a", 0)
+	AuraNodes.addOccupant(Config, contested, "b", 0)
+	AuraNodes.drain(Config, contested, 10)
+	local expectedContestedRate = AuraNodes.cycleRate(Config, contested, "open", true)
+		* Config.Field.contestedDrainFactor
+	near(
+		"contested reserve loss is the halved rate times both occupants",
+		1000 - contested.reserve,
+		expectedContestedRate * 2 * 10,
+		1e-9
+	)
+	near(
+		"each contested occupant is credited the reduced rate, not the solo one",
+		contested.drainedBy.a,
+		expectedContestedRate * 10,
+		1e-9
+	)
+	check(
+		"contested per-occupant credit is strictly less than the earlier solo rate",
+		contested.drainedBy.a < solo.drainedBy.u1
 	)
 end
 
