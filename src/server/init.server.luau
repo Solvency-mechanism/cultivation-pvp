@@ -14,6 +14,7 @@ local NodeService = require(script.NodeService)
 local NpcService = require(script.NpcService)
 local PersistenceService = require(script.PersistenceService)
 local PresenceService = require(script.PresenceService)
+local VolcanoService = require(script.VolcanoService)
 
 --[[ Fault-isolated startup.
 
@@ -62,6 +63,7 @@ CombatService.setKillHandler(function(killer: Player)
 end)
 
 startService("CombatService", CombatService.start)
+startService("VolcanoService", VolcanoService.start)
 
 --[[ Dummies are a testing instrument, not content, but they are wired exactly
 	like everything else on purpose: a dummy that went through its own start,
@@ -213,8 +215,11 @@ RunService.Heartbeat:Connect(function(delta: number)
 	accumulator = 0
 
 	local now = os.clock()
+	tickService("VolcanoService", now, function()
+		VolcanoService.step(now, elapsed)
+	end)
 	tickService("NodeService", now, function()
-		NodeService.step(now)
+		NodeService.step(now, elapsed)
 	end)
 	tickService("CultivationService", now, function()
 		CultivationService.tick(elapsed, now)

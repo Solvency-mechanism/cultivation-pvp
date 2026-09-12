@@ -268,6 +268,17 @@ end
 	Identity assertion first (different tables, not the same reference by
 	~=), then an explicit mutate-after-the-fact check that would fail
 	outright on a by-reference copy, not just a value comparison. ]]
+-- vesselTotal is the one sum Combat mirrors into actor.aura (A5) and the same
+-- sum accrueAura/spendAura already compute inline for their own clamping.
+do
+	local state = Progression.newState()
+	eq("a fresh vessel totals zero", Progression.vesselTotal(state), 0)
+
+	state = Progression.accrueAura(Config, state, "ash", 10)
+	state = Progression.accrueAura(Config, state, "neutral", 5)
+	eq("vesselTotal sums every typed key, including neutral", Progression.vesselTotal(state), 15)
+end
+
 do
 	local base = Progression.newState()
 	local accrued = Progression.accrueAura(Config, base, "ash", 10)
@@ -308,6 +319,22 @@ do
 		1e-9
 	)
 	near("the second type only gets the remaining headroom", filled.core.raw.verdant, 10, 1e-9)
+end
+
+-- auraTypeForRegion is the one place Config.RegionAura is ever read (per its
+-- own header comment in Config.luau); every region the game names today maps
+-- to one of the four aura types, and an unmapped region -- new ground the map
+-- team has not priced yet -- comes back nil rather than erroring.
+do
+	eq("barren accrues ash", Progression.auraTypeForRegion(Config, "barren"), "ash")
+	eq("rich accrues verdant", Progression.auraTypeForRegion(Config, "rich"), "verdant")
+	eq("wellspring accrues lumen", Progression.auraTypeForRegion(Config, "wellspring"), "lumen")
+	eq("open accrues neutral", Progression.auraTypeForRegion(Config, "open"), "neutral")
+	eq(
+		"an unmapped region accrues nothing, not an error",
+		Progression.auraTypeForRegion(Config, "no_such_region"),
+		nil
+	)
 end
 
 -- Processing consumes the WHOLE vessel: typed amounts become permanent

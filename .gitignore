@@ -18,3 +18,6 @@ wally.lock
 # luau-lsp generated definitions
 globalTypes.d.luau
 sourcemap.json
+
+# Generated isolated QA configuration
+/qa/Config.luau

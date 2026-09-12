@@ -8,6 +8,7 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
+local Players = game:GetService("Players")
 
 local AuraNodes = require(ReplicatedStorage.Shared.AuraNodes)
 local Config = require(ReplicatedStorage.Shared.Config)
@@ -575,8 +576,33 @@ function NodeService.setSpawnedHandler(handler: (AuraNodes.Node) -> ())
 	onSpawned = handler
 end
 
-function NodeService.step(now: number)
+function NodeService.step(now: number, dt: number?)
 	for _, node in field do
+		-- Reject stale occupancy before drain/reward: leaving, falling or dying
+		-- between ticks cannot earn a finishing share from a phantom body.
+		for userId in node.occupants do
+			local player = Players:GetPlayerByUserId(tonumber(userId) or 0)
+			local character = if player then player.Character else nil
+			local root = if character then character:FindFirstChild("HumanoidRootPart") else nil
+			local humanoid = if character then character:FindFirstChildOfClass("Humanoid") else nil
+			if
+				not root
+				or not root:IsA("BasePart")
+				or not humanoid
+				or humanoid.Health <= 0
+				or (root.Position - Vector3.new(
+						node.position.x,
+						node.position.y,
+						node.position.z
+					)).Magnitude
+					> Config.Field.captureRadius
+			then
+				AuraNodes.removeOccupant(node, userId)
+			end
+		end
+		if not AuraNodes.isExpired(node, now) then
+			AuraNodes.drain(Config, node, math.clamp(dt or 0, 0, 5))
+		end
 		if AuraNodes.isExpired(node, now) then
 			-- Seen exactly once: the cull below removes it in this same step.
 			recordField(
@@ -585,7 +611,7 @@ function NodeService.step(now: number)
 				node.tier,
 				node.drained
 			)
-			if onDrained then
+			if onDrained and node.drained then
 				onDrained(node)
 			end
 		end

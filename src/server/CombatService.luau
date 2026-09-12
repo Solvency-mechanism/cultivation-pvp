@@ -436,6 +436,10 @@ local function ensureActor(player: Player): Combat.Actor?
 
 	local existing = actors[player.UserId]
 	if existing and existing.stageIndex == stageIndex then
+		local state = CultivationService.getState(player)
+		if state then
+			existing.aura = Progression.vesselTotal(state)
+		end
 		return existing
 	end
 
@@ -443,6 +447,17 @@ local function ensureActor(player: Player): Combat.Actor?
 	-- change. Polling for it here keeps CultivationService from needing to know
 	-- this service exists at all.
 	local actor = Combat.newActor(Config, tostring(player.UserId), stageIndex)
+
+	-- actor.aura mirrors the real vessel from the moment the actor exists,
+	-- rather than starting full the way Combat.newActor's own default
+	-- assumes for a combatant with no persisted pool (a dummy or an NPC,
+	-- which never reach this branch). A rebuild on stage change would
+	-- otherwise hand the player a full pool for free on every breakthrough.
+	local cultivationState = CultivationService.getState(player)
+	if cultivationState then
+		actor.aura = Progression.vesselTotal(cultivationState)
+	end
+
 	actors[player.UserId] = actor
 	mirrorHumanoid(humanoidOf(player), actor)
 	publish(player)
@@ -1714,6 +1729,20 @@ local function onUseTechnique(
 	end
 	lastCastRefusalNotice[player.UserId] = nil
 
+	--[[ Combat.use already debited actor.aura locally (A5's mirror, not the
+		persisted resource) -- this commits that same amount against the real
+		vessel so combat and cultivation never disagree about what is left.
+		Both sides gate on the same mirrored number a moment apart in the same
+		single-threaded tick with nothing else able to spend between them, so
+		a refusal here should not happen in practice; either way actor.aura is
+		resynced from the true vessel immediately after, so the mirror cannot
+		hold a value the persisted pool no longer backs. ]]
+	CultivationService.spendAura(player, tech.auraCost)
+	local cultivationState = CultivationService.getState(player)
+	if cultivationState then
+		actor.aura = Progression.vesselTotal(cultivationState)
+	end
+
 	publish(player)
 
 	if tech.moveSpeed > 0 then
@@ -1941,15 +1970,93 @@ local function stepConstructs(now: number)
 	end
 end
 
-function CombatService.tick(deltaSeconds: number, now: number)
+-- deltaSeconds is unused now that Combat.regen is gone (A5) -- kept in the
+-- signature rather than dropped, since init.server calls this positionally
+-- alongside CultivationService.tick's own (elapsed, now).
+function CombatService.tick(_deltaSeconds: number, now: number)
 	for _, player in Players:GetPlayers() do
 		local actor = ensureActor(player)
 		if actor and actor.health > 0 then
-			Combat.regen(Config, actor, deltaSeconds)
+			-- Combat.regen is gone (A5): the vessel is the pool now, and
+			-- CultivationService.tick is what fills it (typed accrual, the
+			-- floor trickle). This mirrors the true current total into the
+			-- actor every combat tick, the same cadence regen used to run at,
+			-- so ground-standing fill and processing (A6) both show up here
+			-- without this file needing to know how the number got bigger.
+			local cultivationState = CultivationService.getState(player)
+			if cultivationState then
+				actor.aura = Progression.vesselTotal(cultivationState)
+			end
 			publish(player)
 		end
 	end
 	stepConstructs(now)
+end
+
+-- Expedition actions share combat's life/cast lock and damage chokepoint.
+function CombatService.canVolcanoAct(player: Player): boolean
+	local actor = ensureActor(player)
+	local humanoid = humanoidOf(player)
+	return actor ~= nil
+		and actor.health > 0
+		and humanoid ~= nil
+		and humanoid.Health > 0
+		and activeCasts[player.UserId] == nil
+		and os.clock() >= actor.gcdUntil
+end
+
+function CombatService.beginVolcanoAction(player: Player)
+	local actor = ensureActor(player)
+	if actor then
+		actor.gcdUntil = os.clock() + Config.Combat.globalCooldown
+	end
+end
+
+function CombatService.volcanoHeat(player: Player, fraction: number)
+	local root = rootOf(player)
+	local actor = ensureActor(player)
+	if root and actor then
+		local target = combatantFromInstance(root)
+		if target then
+			damageCombatant(
+				actor,
+				target,
+				Combat.maxHealth(Config, actor.stageIndex) * math.clamp(fraction, 0, 0.1),
+				os.clock()
+			)
+		end
+	end
+end
+
+function CombatService.volcanoVent(player: Player, origin: Vector3, direction: Vector3)
+	local actor = ensureActor(player)
+	local root = rootOf(player)
+	if not actor or not root or actor.health <= 0 then
+		return
+	end
+	local now = os.clock()
+	actor.gcdUntil = now + Config.Combat.globalCooldown
+	local params = OverlapParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { root.Parent :: Instance }
+	local rayParams = RaycastParams.new()
+	rayParams.FilterType = Enum.RaycastFilterType.Exclude
+	rayParams.FilterDescendantsInstances = { root.Parent :: Instance }
+	local seen: { [Model]: boolean } = {}
+	local raw = 20 * Config.Stages[actor.stageIndex].basePower / Config.Combat.referencePower
+	for _, part in Workspace:GetPartBoundsInRadius(origin, 18, params) do
+		local target = combatantFromInstance(part)
+		if target and target.model ~= root.Parent and not seen[target.model] then
+			seen[target.model] = true
+			local delta = target.root.Position - origin
+			if delta.Magnitude > 0.01 and delta.Unit:Dot(direction) >= 0.35 then
+				local hit = Workspace:Raycast(origin, delta, rayParams)
+				if not hit or hit.Instance:IsDescendantOf(target.model) then
+					damageCombatant(actor, target, raw, now)
+				end
+			end
+		end
+	end
 end
 
 function CombatService.start()

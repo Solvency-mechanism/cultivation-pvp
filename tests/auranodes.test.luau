@@ -504,6 +504,32 @@ do
 	check("create leaves drained false", not seeded.drained)
 end
 
+do
+	local rewardNode = AuraNodes.create(Config, "reward", "prime", ORIGIN, "barren", 0)
+	AuraNodes.addOccupant(Config, rewardNode, "holder", 0)
+	rewardNode.drainedBy.holder = Config.NodeTiers.prime.drainReserve * 0.5
+	check(
+		"expiry alone cannot grant a catalyst",
+		not AuraNodes.canClaimDrain(Config, rewardNode, "holder")
+	)
+	rewardNode.drained = true
+	check(
+		"present contributor can claim drain",
+		AuraNodes.canClaimDrain(Config, rewardNode, "holder")
+	)
+	AuraNodes.removeOccupant(rewardNode, "holder")
+	check(
+		"past contributor cannot tap and leave",
+		not AuraNodes.canClaimDrain(Config, rewardNode, "holder")
+	)
+	rewardNode.occupants.late = true
+	rewardNode.drainedBy.late = 1
+	check(
+		"last-second arrival cannot claim",
+		not AuraNodes.canClaimDrain(Config, rewardNode, "late")
+	)
+end
+
 print(`\n  passed: {passed}   failed: {failed}`)
 if failed > 0 then
 	for _, f in failures do

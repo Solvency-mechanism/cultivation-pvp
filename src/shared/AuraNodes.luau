@@ -199,6 +199,12 @@ end
 	Every occupant up to capacity draws the full rate -- the cap alone limits
 	the group, so a trio is not punished for being a trio. Static region
 	richness multiplies on top of the node's own tier. ]]
+function AuraNodes.canClaimDrain(config: any, node: Node, userId: string): boolean
+	return node.drained
+		and node.occupants[userId] == true
+		and (node.drainedBy[userId] or 0) >= config.NodeTiers[node.tier].drainReserve * 0.1
+end
+
 function AuraNodes.cycleRate(config: any, node: Node?, region: string, online: boolean): number
 	local rate = config.BaseCycleRate
 	if node then

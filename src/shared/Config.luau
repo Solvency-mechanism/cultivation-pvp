@@ -402,10 +402,9 @@ Config.Combat = {
 	processFloor -- processing is unavailable below this fraction of capacity,
 		so there is nothing to mash.
 	passiveFraction -- the fraction of today's cycling progress that still flows
-		without processing. 0 so the human feels the pure mechanic first: every
-		point of progress flows through a decision. If that reads as a chore
-		the number moves, not the design; the commissioned design's candidate
-		is 0.25.
+		without processing. The volcano slice keeps 0.25 so the rest of the
+		world continues to advance while fire conversions are being explored.
+		The remaining 0.75 fills the shared vessel.
 	floorTrickleFraction -- region-independent vessel refill, as a fraction of
 		capacity per second, so nobody is ever softlocked on bare ground: 2.4
 		aura/s at Lowgold, a Lance every seven or eight seconds. A floor exists
@@ -417,7 +416,7 @@ Config.Core = {
 	processYield = 1.0,
 	processSeconds = 2.0,
 	processFloor = 0.25,
-	passiveFraction = 0,
+	passiveFraction = 0.25,
 	floorTrickleFraction = 0.002,
 }
 

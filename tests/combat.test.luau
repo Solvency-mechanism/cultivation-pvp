@@ -379,25 +379,6 @@ local okDead, reasonDead = Combat.canUse(Config, deadActor, "lance", 0)
 check("the dead cannot act", not okDead)
 eq("dead reason", reasonDead, "dead")
 
---[[ Aura regen. The expectation is DERIVED from Config rather than written as
-	a literal: what this proves is that `Combat.regen` applies the configured
-	fraction of the pool per second, not that the fraction holds any particular
-	value. The development tuning profile legitimately raises it to 0.60 so that
-	cooldowns become the only constraint while testing, and a literal here turned
-	that into a test failure when nothing was broken. ]]
-local g = Combat.newActor(Config, "p7", LOWGOLD)
-local auraPool = Combat.auraCapacity(Config, LOWGOLD)
-g.aura = 0
-Combat.regen(Config, g, 1)
-near(
-	"regen is the configured fraction of the pool per second",
-	g.aura,
-	math.min(auraPool, auraPool * Config.Combat.auraRegenFraction),
-	1e-9
-)
-Combat.regen(Config, g, 9999)
-near("regen never exceeds the pool", g.aura, auraPool, 1e-9)
-
 -- Brackets
 local low = Combat.newActor(Config, "low", LOWGOLD)
 local high = Combat.newActor(Config, "high", 6)

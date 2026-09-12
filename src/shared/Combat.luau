@@ -343,11 +343,6 @@ function Combat.applyDamage(_config: any, target: Actor, raw: number, now: numbe
 	return { dealt = dealt, died = died }
 end
 
-function Combat.regen(config: any, actor: Actor, deltaSeconds: number)
-	local pool = Combat.auraCapacity(config, actor.stageIndex)
-	actor.aura = math.min(pool, actor.aura + pool * config.Combat.auraRegenFraction * deltaSeconds)
-end
-
 --[[ Refinement lost on death, for the caller to hand to Progression.applyLoss.
 	Returned rather than applied so the ratchet stays in one module. ]]
 function Combat.deathLoss(config: any, stageIndex: number): number

@@ -1,11 +1,14 @@
 {
-  "name": "starter-game",
+  "name": "volcano-qa",
   "tree": {
     "$className": "DataModel",
     "ReplicatedStorage": {
       "$className": "ReplicatedStorage",
       "Shared": {
-        "$path": "src/shared"
+        "$path": "src/shared",
+        "Config": {
+          "$path": "qa/Config.luau"
+        }
       },
       "Remotes": {
         "$className": "Folder",
@@ -56,6 +59,12 @@
       "$className": "ServerScriptService",
       "Server": {
         "$path": "src/server"
+      },
+      "VolcanoSmoke": {
+        "$path": "qa/VolcanoSmoke.server.luau"
+      },
+      "VolcanoRouteQA": {
+        "$path": "qa/VolcanoRouteQA.luau"
       }
     },
     "StarterPlayer": {
@@ -64,6 +73,9 @@
         "$className": "StarterPlayerScripts",
         "Client": {
           "$path": "src/client"
+        },
+        "VolcanoCamera": {
+          "$path": "qa/VolcanoCamera.client.luau"
         }
       }
     },

@@ -40,12 +40,20 @@ export type Core = {
 	composition: CoreComposition,
 }
 
+export type Expedition = {
+	solidFire: number,
+	discoveries: { [string]: boolean },
+	cinderStep: boolean,
+	dragonMet: boolean,
+}
+
 export type State = {
 	stageIndex: number,
 	tier: number,
 	progress: number,
 	catalysts: number,
 	core: Core,
+	expedition: Expedition,
 }
 
 export type AddResult = {
@@ -88,6 +96,15 @@ local function cloneCore(core: Core): Core
 	}
 end
 
+local function cloneExpedition(expedition: Expedition): Expedition
+	return {
+		solidFire = expedition.solidFire,
+		discoveries = table.clone(expedition.discoveries),
+		cinderStep = expedition.cinderStep,
+		dragonMet = expedition.dragonMet,
+	}
+end
+
 local function clone(state: State): State
 	return {
 		stageIndex = state.stageIndex,
@@ -95,6 +112,7 @@ local function clone(state: State): State
 		progress = state.progress,
 		catalysts = state.catalysts,
 		core = cloneCore(state.core),
+		expedition = cloneExpedition(state.expedition),
 	}
 end
 
@@ -105,8 +123,19 @@ local function emptyCore(): Core
 	}
 end
 
+local function emptyExpedition(): Expedition
+	return { solidFire = 0, discoveries = {}, cinderStep = false, dragonMet = false }
+end
+
 function Progression.newState(): State
-	return { stageIndex = 1, tier = 1, progress = 0, catalysts = 0, core = emptyCore() }
+	return {
+		stageIndex = 1,
+		tier = 1,
+		progress = 0,
+		catalysts = 0,
+		core = emptyCore(),
+		expedition = emptyExpedition(),
+	}
 end
 
 --[[ Rebuild a state table from untrusted stored data.
@@ -123,23 +152,23 @@ function Progression.sanitizeState(config: any, raw: any): State
 	end
 
 	local stageIndex = tonumber(raw.stageIndex)
-	if stageIndex and stageIndex == stageIndex then
+	if stageIndex and stageIndex == stageIndex and math.abs(stageIndex) < math.huge then
 		state.stageIndex = math.clamp(math.floor(stageIndex), 1, #config.Stages)
 	end
 
 	local tier = tonumber(raw.tier)
-	if tier and tier == tier then
+	if tier and tier == tier and math.abs(tier) < math.huge then
 		state.tier = math.clamp(math.floor(tier), 1, config.RefinementTiers)
 	end
 
 	local stage = config.Stages[state.stageIndex]
 	local progress = tonumber(raw.progress)
-	if progress and progress == progress and progress > 0 then
+	if progress and progress == progress and progress < math.huge and progress > 0 then
 		state.progress = math.min(progress, stage.perTierProgress)
 	end
 
 	local catalysts = tonumber(raw.catalysts)
-	if catalysts and catalysts == catalysts and catalysts > 0 then
+	if catalysts and catalysts == catalysts and catalysts < math.huge and catalysts > 0 then
 		state.catalysts = math.floor(catalysts)
 	end
 
@@ -152,7 +181,7 @@ function Progression.sanitizeState(config: any, raw: any): State
 		if type(rawCore.raw) == "table" then
 			for _, key in { "ash", "verdant", "lumen", "neutral" } do
 				local value = tonumber(rawCore.raw[key])
-				if value and value == value and value >= 0 then
+				if value and value == value and value < math.huge and value >= 0 then
 					state.core.raw[key] = value
 				end
 			end
@@ -160,8 +189,25 @@ function Progression.sanitizeState(config: any, raw: any): State
 		if type(rawCore.composition) == "table" then
 			for _, key in { "ash", "verdant", "lumen" } do
 				local value = tonumber(rawCore.composition[key])
-				if value and value == value and value >= 0 then
+				if value and value == value and value < math.huge and value >= 0 then
 					state.core.composition[key] = value
+				end
+			end
+		end
+	end
+
+	local expedition = raw.expedition
+	if type(expedition) == "table" then
+		local solidFire = tonumber(expedition.solidFire)
+		if solidFire and solidFire == solidFire and solidFire >= 0 and solidFire < math.huge then
+			state.expedition.solidFire = solidFire
+		end
+		state.expedition.cinderStep = expedition.cinderStep == true
+		state.expedition.dragonMet = expedition.dragonMet == true
+		if type(expedition.discoveries) == "table" then
+			for _, key in { "brazier", "refuge", "fissure", "offerPaid", "trial" } do
+				if expedition.discoveries[key] == true then
+					state.expedition.discoveries[key] = true
 				end
 			end
 		end
@@ -203,6 +249,7 @@ function Progression.toStore(state: State): { [string]: any }
 		tier = state.tier,
 		progress = state.progress,
 		catalysts = state.catalysts,
+		expedition = cloneExpedition(state.expedition),
 		core = {
 			raw = {
 				ash = state.core.raw.ash,
@@ -281,6 +328,28 @@ end
 function Progression.vesselCapacity(config: any, state: State): number
 	local stage = Progression.getStage(config, state)
 	return stage.basePower * config.Combat.auraMultiplier * config.Core.capacityMultiplier
+end
+
+--[[ The one place Config.RegionAura is ever read, per its own header
+	comment in Config.luau ("Read by exactly one pure function once the Core
+	lands"). A region absent from the table -- new ground the map team has
+	not priced yet -- accrues nothing, not an error: the same silent-absorb
+	behaviour the compile-test already allows for RegionNames without a
+	matching RegionAura line. ]]
+function Progression.auraTypeForRegion(
+	config: any,
+	region: string
+): ("ash" | "verdant" | "lumen" | "neutral")?
+	return config.RegionAura[region]
+end
+
+--[[ The vessel's current fill, summed across all four typed keys -- what
+	Combat mirrors into actor.aura (A5) and what spendAura/accrueAura already
+	compute inline themselves. Pulled out because A5 adds two more call sites
+	that need the exact same sum. ]]
+function Progression.vesselTotal(state: State): number
+	local raw = state.core.raw
+	return raw.ash + raw.verdant + raw.lumen + raw.neutral
 end
 
 --[[ Fill the vessel with one typed aura, clamped to whatever headroom is
@@ -364,7 +433,7 @@ function Progression.spendAura(state: State, amount: number): (State, boolean)
 	local raw = state.core.raw
 	local total = raw.ash + raw.verdant + raw.lumen + raw.neutral
 	if amount > total then
-		return state, false
+		return clone(state), false
 	end
 
 	local new = clone(state)

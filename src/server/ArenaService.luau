@@ -86,6 +86,8 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Workspace = game:GetService("Workspace")
 
 local Config = require(ReplicatedStorage.Shared.Config)
+local VolcanoWorld = require(script.Parent.VolcanoWorld)
+local Worldcraft = require(script.Parent.Worldcraft)
 
 local ArenaService = {}
 
@@ -1420,6 +1422,10 @@ end
 	player is standing on and the multiplier on their Ruler technique become the
 	same fact, and the terrain stops lying. ]]
 function ArenaService.regionAt(position: Vector3): string
+	local volcanoOffset = position - Vector3.new(251, 0, -145)
+	if volcanoOffset.X * volcanoOffset.X + volcanoOffset.Z * volcanoOffset.Z <= 96 * 96 then
+		return "barren"
+	end
 	for _, region in REGIONS do
 		for _, lobe in region.blobs do
 			local dx = position.X - lobe.center.X
@@ -1522,6 +1528,12 @@ export type Anchor = {
 	scatter around each, ties the field to the map. ]]
 function ArenaService.landmarkAnchors(): { Anchor }
 	local anchors: { Anchor } = {}
+	table.insert(anchors, {
+		name = "volcano_crown",
+		position = Vector3.new(251, 88, -145),
+		region = "barren",
+		radius = 7,
+	})
 	for _, region in REGIONS do
 		for index, lobe in region.blobs do
 			table.insert(anchors, {
@@ -1957,6 +1969,48 @@ function ArenaService.start()
 		buildCrossroads(decor)
 
 		decor.Parent = Workspace
+
+		-- Keep the arena footprint and its existing random sequence intact.
+		-- Remove peripheral decoration inside the new mountain, never landmarks
+		-- elsewhere; the volcanic builders use independent deterministic streams.
+		local volcanoCentre = Vector3.new(251, 0, -145)
+		for _, part in decor:GetDescendants() do
+			if part:IsA("BasePart") then
+				local offset = part.Position - volcanoCentre
+				if
+					offset.X * offset.X + offset.Z * offset.Z
+						< (84 + part.Size.Magnitude / 2) ^ 2
+					and (
+						part.Name:match("^Crag")
+						or part.Name:match("^BlightShard")
+						or part.Name:match("^EmberCrack")
+						or part.Name:match("^FallenArch")
+					)
+				then
+					part:Destroy()
+				end
+			end
+		end
+		local ground = Instance.new("Folder")
+		ground.Name = "ArenaWalkable"
+		ground.Parent = Workspace
+		local function volcanoRng(name: string): Random
+			local seed = 20260912
+			for index = 1, #name do
+				seed = (seed * 31 + string.byte(name, index)) % 2147483647
+			end
+			return Random.new(seed)
+		end
+		VolcanoWorld.build({ rngFor = volcanoRng, decor = decor, ground = ground }, volcanoCentre)
+		local approach = Worldcraft.volcanoApproach(volcanoCentre)
+		buildRoad(
+			"volcano",
+			Vector3.new(140, 0, -75),
+			Vector3.new(155, 0, -170),
+			approach,
+			18,
+			decor
+		)
 	end
 
 	-- Last, and guarded. Geometry is the job; a lighting property that turns out
