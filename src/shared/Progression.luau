@@ -186,6 +186,39 @@ function Progression.sanitizeState(config: any, raw: any): State
 	return state
 end
 
+--[[ The highest-severity item named against this whole initiative:
+	PersistenceService.save used to build its own literal by hand, and it
+	silently dropped any field this module grew that the literal did not
+	already know about -- no error, no test, no symptom, a player
+	cultivates a permanent identity for hours and it never saves. The fix
+	is structural, not a reminder: this is now the ONLY place a state is
+	serialised for storage, so PersistenceService has nothing left to
+	drift, having nothing left to enumerate itself. Kept deliberately flat
+	(no branches) so the closed-set source test in tests/wiring.test.luau
+	can find every field by a plain substring search across this whole
+	function body -- the same reason clone() above is flat too. ]]
+function Progression.toStore(state: State): { [string]: any }
+	return {
+		stageIndex = state.stageIndex,
+		tier = state.tier,
+		progress = state.progress,
+		catalysts = state.catalysts,
+		core = {
+			raw = {
+				ash = state.core.raw.ash,
+				verdant = state.core.raw.verdant,
+				lumen = state.core.raw.lumen,
+				neutral = state.core.raw.neutral,
+			},
+			composition = {
+				ash = state.core.composition.ash,
+				verdant = state.core.composition.verdant,
+				lumen = state.core.composition.lumen,
+			},
+		},
+	}
+end
+
 function Progression.getStage(config: any, state: State)
 	local stage = config.Stages[state.stageIndex]
 	assert(stage ~= nil, `invalid stageIndex {state.stageIndex}`)
