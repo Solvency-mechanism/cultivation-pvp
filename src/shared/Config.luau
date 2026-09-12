@@ -376,16 +376,18 @@ Config.Combat = {
 		the number moves, not the design; the commissioned design's candidate
 		is 0.25.
 	floorTrickleFraction -- region-independent vessel refill, as a fraction of
-		capacity per second, so nobody is ever softlocked on bare ground: 2
-		aura/s at Lowgold, a Lance every nine seconds. Standing in a lobe is
-		the regen; this is the floor under it. ]]
+		capacity per second, so nobody is ever softlocked on bare ground: 2.4
+		aura/s at Lowgold, a Lance every seven or eight seconds. A floor exists
+		so nobody is stuck, not so bare ground competes with a lobe -- at 0.01
+		against a 1200 vessel it was a Lance every 1.5 s on the plaza, which
+		blunts the one thing ground-as-regen is for. ]]
 Config.Core = {
 	capacityMultiplier = 6,
 	processYield = 1.0,
 	processSeconds = 2.0,
 	processFloor = 0.25,
 	passiveFraction = 0,
-	floorTrickleFraction = 0.01,
+	floorTrickleFraction = 0.002,
 }
 
 --[[
