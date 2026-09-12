@@ -25,9 +25,58 @@ local ArenaService = require(script.Parent.ArenaService)
 	so the derivation could not be checked against a session. Two lines,
 	greppable in the server log, size both the interval and the drains
 	caveat from the same ten minutes. Silent in release. ]]
-local function logField(message: string)
-	if Config.Profile == "development" then
-		print(`[field] {message}`)
+--[[ The print alone turned out to be unreadable after the fact: the Studio
+	play-server log file receives Lua output only during load, so a session's
+	[field] lines exist in the Output panel and nowhere else. The events are
+	therefore mirrored into a sink that survives the session -- attributes on
+	the AuraNodes folder, readable by property, by the Explorer, or by a
+	capture of either: a rolling FieldLog of the last few events and running
+	counters. Written only when an event happens (once per spawn or expiry),
+	so it costs nothing per tick. Development only, like the print. ]]
+local FIELD_LOG_LINES = 24
+local fieldLog: { string } = {}
+local fieldCounts = { Spawns = 0, PrimeSpawns = 0, Expired = 0, Drained = 0 }
+local fieldStartedAt: number? = nil
+
+local function recordField(
+	message: string,
+	kind: "spawned" | "expired",
+	tier: string,
+	drained: boolean
+)
+	if Config.Profile ~= "development" then
+		return
+	end
+	print(`[field] {message}`)
+
+	local now = os.clock()
+	if not fieldStartedAt then
+		fieldStartedAt = now
+	end
+	local elapsed = math.floor(now - (fieldStartedAt :: number))
+	table.insert(fieldLog, `{elapsed}s {message}`)
+	if #fieldLog > FIELD_LOG_LINES then
+		table.remove(fieldLog, 1)
+	end
+
+	if kind == "spawned" then
+		fieldCounts.Spawns += 1
+		if tier == "prime" then
+			fieldCounts.PrimeSpawns += 1
+		end
+	else
+		fieldCounts.Expired += 1
+		if drained then
+			fieldCounts.Drained += 1
+		end
+	end
+
+	local sink = Workspace:FindFirstChild("AuraNodes")
+	if sink then
+		sink:SetAttribute("FieldLog", table.concat(fieldLog, "\n"))
+		for name, count in fieldCounts do
+			sink:SetAttribute(name, count)
+		end
 	end
 end
 
@@ -530,7 +579,12 @@ function NodeService.step(now: number)
 	for _, node in field do
 		if AuraNodes.isExpired(node, now) then
 			-- Seen exactly once: the cull below removes it in this same step.
-			logField(`expired {node.tier} ({if node.drained then "drained" else "aged"})`)
+			recordField(
+				`expired {node.tier} ({if node.drained then "drained" else "aged"})`,
+				"expired",
+				node.tier,
+				node.drained
+			)
 			if onDrained then
 				onDrained(node)
 			end
@@ -550,7 +604,12 @@ function NodeService.step(now: number)
 		for _, node in field do
 			if not before[node.id] then
 				local p = node.position
-				logField(`spawned {node.tier} at {math.round(p.x)},{math.round(p.z)} {node.region}`)
+				recordField(
+					`spawned {node.tier} at {math.round(p.x)},{math.round(p.z)} {node.region}`,
+					"spawned",
+					node.tier,
+					false
+				)
 				if onSpawned then
 					onSpawned(node)
 				end
