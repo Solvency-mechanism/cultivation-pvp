@@ -1570,6 +1570,160 @@ function ArenaService.regions(): { { id: string, center: Vector3, radius: number
 	return out
 end
 
+-- ===================================================================
+-- Neutral patrol routes -- world data, kept with the world.
+-- ===================================================================
+
+--[[ The placement table `NpcService.start` reads. It lives here rather than in
+	Config because a route is geography, not tuning: every waypoint below was
+	computed against the lobes, the pillars, the gate legs, the crystals, the
+	deck and the plaza that this file builds, and it is checked against them
+	again at boot (see `patrols`). The shape is the one confirmed in npcs.md;
+	NpcService declares the same fields, and either side can point at its
+	declaration if the other drifts. `stage` is a stage NAME, resolved the way
+	`/dummy`'s argument is. `pingPong` is per route, because the routes below
+	need both traversal modes. ]]
+export type Patrol = {
+	name: string,
+	region: string,
+	stage: string,
+	walkSpeed: number,
+	pingPong: boolean,
+	route: { Vector3 },
+}
+
+--[[ Routes are authored as x,z; the floor supplies y at boot through
+	`groundYAt`, and the root is lifted the way the dummy row's is for the same
+	2x5x1 rig. Every position was computed, not eyeballed, and each carries a
+	1.6-stud body margin over the obstacle face:
+
+	- Pillars, gate legs, spire and crystals are deterministic here (`rng` is
+	  seeded and only ever used for heights), so they were placed exactly.
+	  NO ring around any Reach lobe clears its trunks -- the best full ring
+	  collides by 4.4 studs -- so the Reach route is one straight line through
+	  the grove threading between them, at 2.9 clearance.
+	- The Barrens' blight spires are placed with that rng at random angles, so
+	  they cannot be placed offline -- but `sqrt(U(0.05,1)) * (r - 10)` with
+	  width <= 11 bounds every one to within r - 4.5 of its lobe centre, so the
+	  outer band of each lobe is clear BY CONSTRUCTION. The Barrens route stays
+	  in that band for every lobe that reaches it; its closing chord would cut
+	  through the blight, which is why it ping-pongs.
+	- Node parts are CanCollide false, so a node on a route is not an obstacle.
+	- Nothing runs within 34 studs of the terrace centre, up the ramp, or across
+	  the plaza. NPCs retaliate once hit; a route past the deck would drag a
+	  fight onto the spawn. ]]
+local PATROL_ROOT_LIFT = 3
+
+type PatrolSpec = {
+	name: string,
+	region: string,
+	stage: string,
+	walkSpeed: number,
+	pingPong: boolean,
+	points: { { number } },
+}
+
+local PATROLS: { PatrolSpec } = {
+	{
+		--[[ A straight crossing of the Reach grove, north to south, 82 studs.
+			Both ends sit ~41 from the (-102,-59) lobe centre, inside its 44
+			floor. The line passes the lobe centre between the inner and outer
+			pillar rings and skirts the gate's left leg; it crosses behind the
+			gate the deck's own sightline points at. ]]
+		name = "Grove Walker",
+		region = "rich",
+		stage = "lowgold",
+		walkSpeed = 10,
+		pingPong = true,
+		points = { { -93.5, -18.8 }, { -114.0, -98.6 } },
+	},
+	{
+		--[[ The north rim of the near Barrens lobe (97,-56): five points at
+			radius 47.3 from bearing 51 to 140 degrees -- the longest arc of
+			that lobe that stays in the clear band of every Barrens lobe that
+			reaches it, 3.8 clear of the Barrens waymark at (61,-35), on basalt
+			end to end, 66 studs from the plaza centre. Chord sag stays above
+			the blight bound. PING-PONG ONLY: the chord from the last point back
+			to the first crosses the blight zone. ]]
+		name = "Ash Sentinel",
+		region = "barren",
+		stage = "foundation",
+		walkSpeed = 10,
+		pingPong = true,
+		points = {
+			{ 126.8, -19.2 },
+			{ 110.6, -10.7 },
+			{ 92.5, -8.9 },
+			{ 75.0, -14.1 },
+			{ 60.8, -25.6 },
+		},
+	},
+	{
+		--[[ An octagon at radius 30 around the Wellspring heart (0,172): outside
+			the 27-radius pool, inside the six crystals at 38 (2.9 clear), well
+			clear of the spire base and the beacon, every point inside the
+			(0,172) lobe's 44 floor. Every chord verified; it loops. ]]
+		name = "Pool Warden",
+		region = "wellspring",
+		stage = "highgold",
+		walkSpeed = 8,
+		pingPong = false,
+		points = {
+			{ 30.0, 172.0 },
+			{ 21.2, 193.2 },
+			{ 0.0, 202.0 },
+			{ -21.2, 193.2 },
+			{ -30.0, 172.0 },
+			{ -21.2, 150.8 },
+			{ 0.0, 142.0 },
+			{ 21.2, 150.8 },
+		},
+	},
+}
+
+--[[ The routes, lifted onto the floor, checked against the world they were
+	computed for. The data is not Lune-reachable (it is Vector3), so the check a
+	pure module would get from the suite happens here, once, at boot: a waypoint
+	whose `regionAt` disagrees with its declared region, or which sits inside the
+	terrace keep-out or the plaza, is a warning naming the route and the point.
+	Warn rather than skip, because the NPC still spawning where the author put it
+	is the thing that makes the mistake visible. ]]
+function ArenaService.patrols(): { Patrol }
+	local out: { Patrol } = {}
+	for _, spec in PATROLS do
+		local route: { Vector3 } = {}
+		for index, xz in spec.points do
+			local flat = Vector3.new(xz[1], 0, xz[2])
+			local groundY = ArenaService.groundYAt(flat) or FLOOR_TOP
+			local point = Vector3.new(flat.X, groundY + PATROL_ROOT_LIFT, flat.Z)
+			table.insert(route, point)
+
+			local region = ArenaService.regionAt(flat)
+			if region ~= spec.region then
+				warn(
+					`[arena] patrol {spec.name} point {index} is on {region} ground, declared {spec.region}`
+				)
+			end
+			local fromTerrace = (Vector3.new(flat.X, 0, flat.Z) - TERRACE_CENTER).Magnitude
+			if fromTerrace < TERRACE_KEEPOUT then
+				warn(`[arena] patrol {spec.name} point {index} is inside the terrace keep-out`)
+			end
+			if Vector3.new(flat.X, 0, flat.Z).Magnitude < PLAZA_RADIUS then
+				warn(`[arena] patrol {spec.name} point {index} is inside the plaza`)
+			end
+		end
+		table.insert(out, {
+			name = spec.name,
+			region = spec.region,
+			stage = spec.stage,
+			walkSpeed = spec.walkSpeed,
+			pingPong = spec.pingPong,
+			route = route,
+		})
+	end
+	return out
+end
+
 function ArenaService.start()
 	if not hasGround() then
 		buildGround()
