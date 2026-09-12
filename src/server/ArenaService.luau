@@ -1724,6 +1724,157 @@ function ArenaService.patrols(): { Patrol }
 	return out
 end
 
+-- ===================================================================
+-- The establishing shot, measured at boot.
+-- ===================================================================
+
+--[[ The header's table of what the first frame contains was measured once by
+	hand and would rot silently: any builder that grows, any relayout, any
+	re-seed moves the numbers and nothing says so. This measures the SAME
+	frame, from the same documented camera, against the world as actually
+	built -- part positions and sizes read back out of the decor, so seeded
+	heights and later reshuffles are included for free -- and it warns when
+	something lands where the header fought for sky.
+
+	Camera, from the header: the default follow camera sits about 13 studs
+	behind and 2 above the character, whose root stands ~3 above the pad, so
+	the eye is SPAWN_POINT + (0, 5, -13); pitched 8.7 degrees down with a
+	70-degree vertical FOV, the frame spans -43.7..+26.3 degrees above the
+	horizon and about +-51 across. Elevations below are above the HORIZON,
+	which is how the header quotes them.
+
+	Same idiom as patrols(): warn, never skip. World data is Vector3 and
+	cannot reach Lune, so the check a pure module would get from the suite
+	happens here, once, at the end of start(). The exemption list is the one
+	thing meant to leave the frame through the top -- the Wellspring beacon,
+	readable from anywhere by design. ]]
+local FRAME_EYE_OFFSET = Vector3.new(0, 5, -13)
+local FRAME_PITCH_DEG = -8.7
+local FRAME_HALF_VFOV_DEG = 35
+local FRAME_HALF_HFOV_DEG = 51
+-- The sky the header bought: nothing but the beacon may stand this high this
+-- close to dead ahead.
+local FRAME_CONE_HALF_AZ_DEG = 15
+local FRAME_CONE_EL_DEG = 18
+-- The header measured 16..22 degrees of open sky over the saddle.
+local FRAME_MIN_SKY_DEG = 14
+
+local FRAME_EXEMPT: { [string]: boolean } = { wellspringBeacon = true }
+
+type FrameProbe = { label: string, partName: string }
+
+-- Landmarks by the Name their builder gives them; top-centre of the part.
+local FRAME_PROBES: { FrameProbe } = {
+	{ label = "crossroads crown", partName = "CrossroadsCrown" },
+	{ label = "torii cap", partName = "ToriiCap" },
+	{ label = "watchtower brazier", partName = "WatchtowerBrazier" },
+	{ label = "Wellspring spire tip", partName = "WellspringTip" },
+	{ label = "Wellspring beacon", partName = "wellspringBeacon" },
+	{ label = "Reach beacon", partName = "richBeacon" },
+	{ label = "grove gate lintel", partName = "GroveGateLintel" },
+}
+
+local function frameAngles(eye: Vector3, point: Vector3): (number, number, number)
+	local d = point - eye
+	local horizontal = math.sqrt(d.X * d.X + d.Z * d.Z)
+	local az = math.deg(math.atan2(d.X, d.Z))
+	local el = math.deg(math.atan2(d.Y, horizontal))
+	return d.Magnitude, az, el
+end
+
+-- Luau interpolation takes expressions only, so degrees are formatted here.
+local function deg1(x: number): string
+	return string.format("%.1f", x)
+end
+
+local function degSigned(x: number): string
+	return string.format("%+.1f", x)
+end
+
+local function frameLine(label: string, dist: number, az: number, el: number): string
+	local side = if math.abs(az) < 0.5
+		then "dead ahead"
+		else `{deg1(math.abs(az))} deg {if az < 0 then "left" else "right"}`
+	return `[arena] frame: {label} -- {string.format("%.0f", dist)} studs, {side}, {degSigned(el)} deg`
+end
+
+function ArenaService.frameCheck()
+	local decor = Workspace:FindFirstChild(DECOR_NAME)
+	if not decor then
+		warn("[arena] frame: no decor to measure")
+		return
+	end
+	local eye = SPAWN_POINT + FRAME_EYE_OFFSET
+	local frameTop = FRAME_PITCH_DEG + FRAME_HALF_VFOV_DEG
+
+	-- Named landmarks.
+	local byName: { [string]: BasePart } = {}
+	for _, inst in decor:GetDescendants() do
+		if inst:IsA("BasePart") then
+			byName[inst.Name] = inst
+		end
+	end
+	for _, probe in FRAME_PROBES do
+		local part = byName[probe.partName]
+		if not part then
+			warn(`[arena] frame: no part named {probe.partName} to measure ({probe.label})`)
+			continue
+		end
+		local top = part.Position + Vector3.new(0, part.Size.Y / 2, 0)
+		local dist, az, el = frameAngles(eye, top)
+		print(frameLine(probe.label, dist, az, el))
+		if
+			not FRAME_EXEMPT[probe.partName]
+			and math.abs(az) <= FRAME_CONE_HALF_AZ_DEG
+			and el > FRAME_CONE_EL_DEG
+		then
+			warn(
+				`[arena] frame: {probe.label} intrudes on the centre cone `
+					.. `({degSigned(az)} az, {degSigned(el)} el) -- the header fought for that sky`
+			)
+		end
+	end
+
+	-- Region edges: the nearest boundary point of each region's first lobe,
+	-- along the line from the eye to its centre, at ground.
+	local flatEye = Vector3.new(eye.X, 0, eye.Z)
+	for _, region in REGIONS do
+		local lobe = region.blobs[1]
+		local toCentre = lobe.center - flatEye
+		if toCentre.Magnitude > lobe.radius then
+			local edge = lobe.center - toCentre.Unit * lobe.radius
+			local dist, az, el = frameAngles(eye, edge)
+			print(frameLine(`{region.id} edge`, dist, az, el))
+		end
+	end
+
+	-- The crag ring: the saddle (highest peak near dead ahead) and the edges.
+	local saddleEl, saddleAz, edgeEl = -90, 0, -90
+	for name, part in byName do
+		if string.match(name, "^Crag%d+C$") then
+			local top = part.Position + Vector3.new(0, part.Size.Y / 2, 0)
+			local _, az, el = frameAngles(eye, top)
+			if math.abs(az) <= FRAME_CONE_HALF_AZ_DEG and el > saddleEl then
+				saddleEl, saddleAz = el, az
+			elseif math.abs(az) >= 40 and math.abs(az) <= FRAME_HALF_HFOV_DEG and el > edgeEl then
+				edgeEl = el
+			end
+		end
+	end
+	if saddleEl > -90 then
+		local sky = frameTop - saddleEl
+		print(
+			`[arena] frame: crag saddle -- {degSigned(saddleEl)} deg at {degSigned(saddleAz)} az, `
+				.. `edges {degSigned(edgeEl)} deg, open sky {deg1(sky)} deg to the frame top`
+		)
+		if sky < FRAME_MIN_SKY_DEG then
+			warn(`[arena] frame: only {deg1(sky)} deg of sky over the saddle (header: 16..22)`)
+		end
+	else
+		warn("[arena] frame: no crag peak found near dead ahead -- is the ring built?")
+	end
+end
+
 function ArenaService.start()
 	if not hasGround() then
 		buildGround()
@@ -1814,6 +1965,14 @@ function ArenaService.start()
 	local ok, err = pcall(protectedAtmosphere)
 	if not ok then
 		warn(`[arena] atmosphere skipped: {err}`)
+	end
+
+	-- Measure the first frame against the world just built. A measurement
+	-- must never take the arena down, so it is protected the same way.
+	local protectedFrame = ArenaService.frameCheck :: () -> any
+	local frameOk, frameErr = pcall(protectedFrame)
+	if not frameOk then
+		warn(`[arena] frame check skipped: {frameErr}`)
 	end
 
 	local multipliers = Config.StaticRegionMultipliers :: { [string]: number }
