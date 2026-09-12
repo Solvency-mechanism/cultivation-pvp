@@ -1736,20 +1736,25 @@ end
 	heights and later reshuffles are included for free -- and it warns when
 	something lands where the header fought for sky.
 
-	Camera, from the header: the default follow camera sits about 13 studs
-	behind and 2 above the character, whose root stands ~3 above the pad, so
-	the eye is SPAWN_POINT + (0, 5, -13); pitched 8.7 degrees down with a
-	70-degree vertical FOV, the frame spans -43.7..+26.3 degrees above the
-	horizon and about +-51 across. Elevations below are above the HORIZON,
-	which is how the header quotes them.
+	Camera, MEASURED by worldcraft in a real session rather than taken from
+	the header's estimate: the default follow camera at spawn sits 8.2 studs
+	above the pad and ~6.5 behind the character -- eye (x, 30.7, z) for a pad
+	at 22.5, so SPAWN_POINT + (0, 8.2, -6.5) -- pitched 15.0 degrees down with
+	a 70-degree vertical FOV, so the frame spans -50..+20 degrees above the
+	horizon and about +-51 across. The header said 13 back, 2 up, 8.7 down;
+	against that, the horizon sits ~6 degrees higher in the real frame. x/z
+	drift a few studs with where on the pad the character lands, and the
+	first-frame camera may depend on the last-used zoom, so one re-measure
+	against a real client is still owed. Elevations below are above the
+	HORIZON, which is how the header quotes them.
 
 	Same idiom as patrols(): warn, never skip. World data is Vector3 and
 	cannot reach Lune, so the check a pure module would get from the suite
 	happens here, once, at the end of start(). The exemption list is the one
 	thing meant to leave the frame through the top -- the Wellspring beacon,
 	readable from anywhere by design. ]]
-local FRAME_EYE_OFFSET = Vector3.new(0, 5, -13)
-local FRAME_PITCH_DEG = -8.7
+local FRAME_EYE_OFFSET = Vector3.new(0, 8.2, -6.5)
+local FRAME_PITCH_DEG = -15.0
 local FRAME_HALF_VFOV_DEG = 35
 local FRAME_HALF_HFOV_DEG = 51
 -- The sky the header bought: nothing but the beacon may stand this high this
