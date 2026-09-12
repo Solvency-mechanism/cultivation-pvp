@@ -5,6 +5,75 @@ All names in this project are placeholders, including the title.
 Versions are dated and describe what was **observed working**, not what was
 written. Anything unverified is listed as unverified.
 
+## bracket-and-npc build — 2026-09-12, early (deploy HEAD: the commit carrying this entry, on `13b1e2a`)
+
+Built for two friends at different stages to be able to fight at all. Still
+`Config.Profile = "development"`. **Not for players** beyond the playtest.
+
+### Observed by the human on a live client (first gameplay feedback this project has had)
+
+- **Neutral NPCs.** Three named patrols exist at boot with no command — Grove
+  Walker on the Reach, Ash Sentinel on the Barrens rim, Pool Warden circling
+  the Wellspring. *"They shoot back and they are properly neutral, not
+  hostile"*: they do not react to a player walking into them and they fire
+  back once hit. Excluded from kill banners and the leaderboard.
+- **They teleported.** The server moved them continuously; an anchored part's
+  rewritten CFrame replicates without client interpolation, so the human saw
+  steps where every server-side check saw a glide. Fixed by driving the root
+  through physics (`AlignPosition`/`AlignOrientation`), which also makes them
+  face where they walk (`2ab6b86`). *Not yet seen by the human at the time of
+  writing — they confirm it on the fresh session before publishing; if this
+  line is not amended, they had not.*
+- **"Slowly."** Patrol speed 6 on all routes, the human's number.
+- **Frostbolt on a real client** — see the amended entry above.
+
+### In the build; the human saw some of it
+
+- **Cross-bracket combat, opened for testing with a notice instead of a
+  refusal** — *and the human confirmed both lines on dummies: "punching down and
+  punching up warnings working properly."* Then asked for it quieter; it is. `Config.Combat.crossBracket` is `"notice"` in development and
+  `"refuse"` in release; the bracket design is unchanged where it ships. A hit
+  across brackets now lands and says so — *"You are punching up. They have more
+  health and hit harder — this is not a fair fight. (Placeholder copy.)"* and
+  its counterpart — once per opponent. Before this, twenty-one of twenty-six
+  techniques failed a cross-bracket hit **silently**; only the lock path had a
+  message. The human's own cross-bracket Frostbolt landed under this flag.
+- **The target frame lied under it** — it kept the "different bracket" refusal
+  line from when out-of-bracket meant refused. The human noticed: *"likely
+  stale helper text."* Fixed (`13b1e2a`): one reader for the line, the reticle,
+  the reach pip and the sweep; an NPC target gets no bracket line at all.
+- **The first PvE kill was silent.** No bracket line (NPCs have no bracket) and
+  no kill banner (NPCs are excluded) composed into nothing at all. An NPC's
+  death now acknowledges itself in its own register (`214d6c5`, `13b1e2a`):
+  a neutral-toned line, never the PvP banner. The plate reads
+  *NEUTRAL — will not start it.*
+- **Four family techniques**, data-only on server paths that already work:
+  ash `scorch` and `wildfire`, verdant `thornlash` and `ironroot`. Every
+  technique now carries `unlockRequirement = { kind = "always" }` — the gating
+  contract, unread by anything yet.
+
+### Not in this build, on purpose
+
+The eight lock/effect techniques of the three families (they wait on a
+status-effect ticker; a lock never lands before the thing that makes it real).
+The remnant drop. The field-saturation retune. **The player-frame /
+target-frame pair** the human asked for from first principles — *"two separate
+panels but they are really the same panel modified based on the current
+target"* — is the register this HUD was briefed on and never landed; it is an
+hour-plus of relayout and rides the next deploy rather than going in unseen.
+
+### Found and fixed on the way
+
+- **A finished server module landed unwired — the second time.** `NpcService`
+  was complete and never required by `init.server`; no NPC could exist. Wired,
+  and `tests/wiring.test` now fails on any server module with a `start` that
+  `init.server` never wires.
+- **The Studio play-server log file does not capture runtime Lua output.**
+  Established when eight minutes of `[field]` logging produced nothing while a
+  rare node was visibly in the world. Boot-time output is trustworthy; every
+  after-boot warn in the codebase never reached a file. Recorded as a property
+  of the tool.
+
 ## frostbolt build — 2026-09-11, night (commit `e96bfa3`)
 
 The first channelled, lock-and-cast technique, built as the generic skeleton
@@ -37,7 +106,14 @@ the server log, HUD on the first frame, no errors from our scripts.
   under the reticle with no camera input.
 - **The HUD came back.** See "found and fixed" below.
 
-### Verified by reading, not yet by a screen
+### Verified by reading at the time; since seen by a human
+
+*Amended 2026-09-12: on a live client the human reported "the targeted frostbolt
+that I did on a test dummy out of my tier was successful" — lock acquired,
+channel completed, bolt resolved, on their screen. The cast is **observed**. The
+slow, the chip and the mid-channel snap remain reported only by reading.*
+
+As written at `e96bfa3`:
 
 The whole Frostbolt cast — 3-second bar, no refusal, trailed bolt curving to a
 moving target, **SLOWED ×0.5** on its plate with the patrol visibly dragging,
