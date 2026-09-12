@@ -28,8 +28,15 @@ end
 
 local LOWGOLD, TRUEGOLD = 5, #Config.Stages
 
+-- Built off newState() rather than a hand-written literal, so a future field
+-- added to State (core was exactly this trap: a bare 4-field literal here
+-- would have failed compile.test the moment State grew a fifth) needs no
+-- second fix here.
 local function stateAt(stageIndex: number, tier: number): Progression.State
-	return { stageIndex = stageIndex, tier = tier, progress = 0, catalysts = 0 }
+	local state = Progression.newState()
+	state.stageIndex = stageIndex
+	state.tier = tier
+	return state
 end
 
 local function powerAt(stageIndex: number, tier: number): number
@@ -625,6 +632,48 @@ do
 	check("process yield is positive", core.processYield > 0)
 	check("passive fraction is a fraction", core.passiveFraction >= 0 and core.passiveFraction <= 1)
 	check("the floor trickle is non-negative", core.floorTrickleFraction >= 0)
+end
+
+--[[ Drain reserve pricing, checked against the drain formula rather than the
+	prose that describes it: AuraNodes.drain spends reserve at cycleRate per
+	occupant, and cycleRate is BaseCycleRate x tier x region. A node whose
+	reserve hits zero ends, so the reserve decides how long a node is a place.
+	Two things must always hold: every catalyst-bearing tier is solo-drainable
+	inside its own lifetime on the WORST ground (or a lone player at a Barrens
+	prime can never finish a fight nobody came to), and a common on the best
+	ground still lasts long enough to be cultivation rather than a tap. ]]
+do
+	local worst, best = math.huge, 0
+	for _, multiplier in Config.StaticRegionMultipliers do
+		worst = math.min(worst, multiplier)
+		best = math.max(best, multiplier)
+	end
+	local function soloSeconds(tier, region: number): number
+		return tier.drainReserve / (Config.BaseCycleRate * tier.cycleMultiplier * region)
+	end
+	for id, tier in Config.NodeTiers do
+		check(`{id} holds a reserve`, tier.drainReserve > 0)
+		if tier.catalystChance > 0 then
+			check(
+				`a lone player can drain a {id} on the worst ground inside its lifetime`,
+				soloSeconds(tier, worst) < tier.lifetime,
+				`{soloSeconds(tier, worst)}s against {tier.lifetime}s`
+			)
+		end
+	end
+	check(
+		"a common on the best ground is still minutes of cultivation",
+		soloSeconds(Config.NodeTiers.common, best) >= 120
+	)
+	check(
+		"a prime on the best ground is still a fight, not a tap",
+		soloSeconds(Config.NodeTiers.prime, best) >= 30
+	)
+	check(
+		"reserve grows with tier",
+		Config.NodeTiers.common.drainReserve < Config.NodeTiers.rare.drainReserve
+			and Config.NodeTiers.rare.drainReserve < Config.NodeTiers.prime.drainReserve
+	)
 end
 
 local UNLOCK_KINDS: { [string]: boolean } =

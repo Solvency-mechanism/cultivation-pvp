@@ -131,6 +131,13 @@ InterfaceSpec.KindColor = {
 	-- entry exists now so the slot bar does not fall back to grey the day it
 	-- does, which is the same failure `ImpactSpec.Cast.byKind` is flagged for.
 	strider = { r = 96, g = 220, b = 226 } :: Rgb,
+	--[[ Processing: the Core's verb, a synthetic cast through the same three
+		events every channel uses (frostbolt-ruling.md, Processing). Not a
+		technique and never in the picker, so it has no kind of its own to
+		borrow a colour from. Warm and unsaturated, near the neutral aura --
+		the bar says "busy, becoming" without claiming any one aura, because
+		what is being processed is the vessel's whole mix. ]]
+	process = { r = 226, g = 204, b = 170 } :: Rgb,
 }
 
 --[[ The ladder read as colour, for nameplates and the target frame.
@@ -249,6 +256,26 @@ InterfaceSpec.Guidance = {
 	textSize = 12,
 	-- Space between the guidance line and the top of the cluster.
 	gap = 10,
+}
+
+--[[ The node you are standing in, read as a bar.
+
+	Every node is finite (human ruling): commons drain and end, not only
+	primes, and a spot that evaporates with no indication reads as the game
+	taking something away rather than a resource the player spent. So while
+	you cycle, the node's reserve draws as a thin bar directly above your own
+	vitals -- the thing being spent, right above the vessel it is spent into,
+	draining as the vessel fills, in the node's tier colour, without a label.
+	The same shape the vessel has, read the same way.
+
+	It lives in the gap between the guidance line and the cluster, and must
+	fit there: a bar taller than the gap would be a new row, and a new row
+	that is not in `stackHeight()` is the silent overflow the design names.
+	Asserted. Hidden the moment you step out, so the gap is a gap again. ]]
+InterfaceSpec.NodeBar = {
+	height = 4,
+	-- Between the bar's bottom edge and the top of the vitals.
+	margin = 3,
 }
 
 --[[ The full height of the bottom stack at scale 1: vitals, cast bar, action
@@ -754,6 +781,144 @@ function InterfaceSpec.noticeKind(kind: string)
 	return InterfaceSpec.NoticeKind[kind] or InterfaceSpec.NoticeKind["local"]
 end
 
+--[[ The vessel and the core, read as colour.
+
+	The Core replaces the blue aura bar with a resource that remembers what you
+	cultivated (core-and-map.md b). Two quantities want drawing: the VESSEL --
+	what you are holding, typed, spendable -- and the CORE -- what you have
+	processed, ever, permanent. Both are proportions of a handful of aura types,
+	and the whole point of drawing them is that a player reads the mix at a
+	glance: "mostly ash with some lumen" before "seven hundred of twelve hundred".
+
+	One fill, not four. The vessel bar's fill is a single frame whose width is
+	the total held over capacity, carrying a hard-stop gradient that divides it
+	in the proportions held -- so there is never a sum of four widths to keep
+	honest, and the shape the eye already reads (a bar that fills and drains)
+	is unchanged; only its colour gained meaning. The core chip is the same
+	gradient rotated onto a disc. `vesselStops` is the one function that turns
+	amounts into stops, pure so Lune can hold it to its invariants: the stops
+	start at 0 and end at 1, strictly increase (a gradient with two keypoints at
+	one time is undefined), and divide the run in the proportions given, in the
+	order given, dropping only a share too thin to draw.
+
+	Colours are the aura's own, from `Config.AuraTypes[key].color` as integers;
+	this module never names an aura, so the four stay roster's. ]]
+InterfaceSpec.Vessel = {
+	-- The order the segments are drawn in, left to right. Committed types
+	-- first, neutral last: what you are becoming before what you are merely
+	-- holding.
+	order = { "ash", "verdant", "lumen" },
+	-- Neutral is spendable and never enters the core, so it draws on the
+	-- vessel and not on the chip.
+	vesselOrder = { "ash", "verdant", "lumen", "neutral" },
+	-- The gap between one segment's last stop and the next segment's first,
+	-- as a fraction of the run. A hard edge, and still strictly increasing.
+	stopGap = 0.002,
+	-- A share thinner than this is not drawn: it would be under a pixel, and
+	-- its stops would collide with its neighbours'.
+	minShare = 0.004,
+	-- The core chip: a disc the header row's height less this inset, and the
+	-- gap between it and the stage name.
+	chipInset = 2,
+	chipGap = 6,
+	-- The chip's bands run top to bottom; the vessel's run left to right.
+	chipRotation = 90,
+}
+
+export type VesselStop = { at: number, color: Rgb }
+
+function InterfaceSpec.vesselStops(
+	held: { [string]: number },
+	order: { string },
+	colors: { [string]: Rgb }
+): { VesselStop }
+	local spec = InterfaceSpec.Vessel
+	local total = 0
+	for _, key in order do
+		local amount = held[key]
+		if typeof(amount) == "number" and amount > 0 then
+			total += amount
+		end
+	end
+	if total <= 0 then
+		return {}
+	end
+
+	local stops: { VesselStop } = {}
+	local at = 0
+	for _, key in order do
+		local amount = held[key]
+		local share = if typeof(amount) == "number" and amount > 0 then amount / total else 0
+		if share < spec.minShare then
+			continue
+		end
+		local color = colors[key]
+		if not color then
+			continue
+		end
+		local from = if #stops == 0 then 0 else at + spec.stopGap
+		local to = math.min(at + share, 1)
+		table.insert(stops, { at = from, color = color })
+		table.insert(stops, { at = to, color = color })
+		at = to
+	end
+	if #stops > 0 then
+		-- Rounding and a dropped sliver can leave the last stop short of 1;
+		-- the last colour runs to the end regardless.
+		stops[#stops].at = 1
+	end
+	return stops
+end
+
+--[[ The aura with the largest share, or nil for nothing held. The chip's
+	headline. ]]
+function InterfaceSpec.dominantAura(held: { [string]: number }, order: { string }): string?
+	local best: string? = nil
+	local bestAmount = 0
+	for _, key in order do
+		local amount = held[key]
+		if typeof(amount) == "number" and amount > bestAmount then
+			best = key
+			bestAmount = amount
+		end
+	end
+	return best
+end
+
+--[[ The drain, in a Sense row.
+
+	A node now ends two ways (frostbolt-ruling.md, THE PRIME DRAIN): AGED, when
+	its lifetime runs out, or DRAINED, when bodies standing on it have taken
+	its reserve -- and only the second is the fight. Lifetime and drain are
+	two different clocks, so they do not share a readout: the Sense rows never
+	showed the lifetime and still do not; they now show the drain, as a meter
+	that FILLS with the drained fraction, so a prime under three bodies
+	visibly races its own timer.
+
+	A meter in text because the rows are text -- one monospaced line per node,
+	and a column is what a line can carry. Plain ASCII cells, because a block
+	glyph that Roboto Mono lacks falls back to another face at another width
+	and breaks the column. Any drain at all lights the first cell: a node whose
+	reserve has moved is a node somebody has been on, and that fact alone is
+	worth a mark. ]]
+InterfaceSpec.Drain = {
+	cells = 4,
+	filled = "#",
+	empty = ".",
+}
+
+function InterfaceSpec.drainMeter(reserve: number, maxReserve: number): string
+	local spec = InterfaceSpec.Drain
+	local drained = 1 - InterfaceSpec.fraction(reserve, maxReserve)
+	if maxReserve <= 0 then
+		drained = 0
+	end
+	local lit = if drained <= 0
+		then 0
+		else math.clamp(math.ceil(drained * spec.cells), 1, spec.cells)
+	return string.rep(spec.filled, lit) .. string.rep(spec.empty, spec.cells - lit)
+end
+
 --[[ Fraction of a bar, guarded. Every bar in the HUD goes through this rather
 	than dividing inline, because a zero maximum arrives routinely -- a client
 	renders before the server has published anything at all. ]]
@@ -805,6 +970,23 @@ end
 
 function InterfaceSpec.kindColor(kind: string): Rgb
 	return InterfaceSpec.KindColor[kind] or InterfaceSpec.Palette.ready
+end
+
+--[[ What a cast bar prints. A technique prints its name; a synthetic cast --
+	one whose techId is deliberately not a Config.Techniques key -- prints the
+	word for what it is, and an unknown id prints itself rather than nothing,
+	so a bar is never blank. Every bar that names a cast (your own, the
+	target frame's, the plate's) goes through here so the three cannot
+	disagree about the word. ]]
+InterfaceSpec.SyntheticCast = {
+	process = "PROCESSING",
+}
+
+function InterfaceSpec.castLabel(techId: string, tech: { name: string }?): string
+	if tech then
+		return string.upper(tech.name)
+	end
+	return InterfaceSpec.SyntheticCast[techId] or string.upper(techId)
 end
 
 --[[ The width the action bar needs for a given slot count, so the caller does

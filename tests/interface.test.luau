@@ -367,6 +367,124 @@ do
 	check("the resting half is dimmed, not hidden", InterfaceSpec.Target.restTransparency < 1)
 end
 
+--[[ The vessel's stops. One fill with a hard-stop gradient draws the mix; the
+	function that turns amounts into stops has invariants a gradient depends
+	on -- start at 0, end at 1, strictly increasing -- and a meaning a player
+	depends on: the proportions held, in the order given. ]]
+do
+	local V = InterfaceSpec.Vessel
+	local COLORS = {
+		ash = { r = 1, g = 0, b = 0 },
+		verdant = { r = 0, g = 1, b = 0 },
+		lumen = { r = 0, g = 0, b = 1 },
+		neutral = { r = 1, g = 1, b = 1 },
+	}
+	local function stopsOf(held)
+		return InterfaceSpec.vesselStops(held, V.vesselOrder, COLORS)
+	end
+	local function increasing(stops)
+		for i = 2, #stops do
+			if stops[i].at <= stops[i - 1].at then
+				return false
+			end
+		end
+		return true
+	end
+
+	eq("an empty vessel has no stops", #stopsOf({}), 0)
+	eq("a vessel of zeros has no stops", #stopsOf({ ash = 0, lumen = 0 }), 0)
+
+	local one = stopsOf({ lumen = 300 })
+	eq("one aura is one segment, two stops", #one, 2)
+	eq("one aura starts at 0", one[1].at, 0)
+	eq("one aura ends at 1", one[2].at, 1)
+	eq("one aura is its own colour", one[1].color, COLORS.lumen)
+
+	local half = stopsOf({ ash = 100, lumen = 100 })
+	eq("two auras are four stops", #half, 4)
+	check("stops strictly increase", increasing(half))
+	check("an even split divides at the middle", math.abs(half[2].at - 0.5) < 1e-6)
+	check("the second segment starts a hair after the first ends", half[3].at > half[2].at)
+	eq("segments draw in the vessel's order, ash before lumen", half[1].color, COLORS.ash)
+	eq("the last stop is 1", half[4].at, 1)
+
+	local all = stopsOf({ ash = 25, verdant = 25, lumen = 25, neutral = 25 })
+	eq("four auras are eight stops", #all, 8)
+	check("four segments strictly increase", increasing(all))
+	eq("neutral draws last", all[8].color, COLORS.neutral)
+
+	local sliver = stopsOf({ ash = 1000, verdant = 1 })
+	eq("a share too thin to draw is dropped", #sliver, 2)
+	eq("and the drawn segment still runs to the end", sliver[2].at, 1)
+
+	local unknown = stopsOf({ ash = 10, mystery = 10 })
+	eq("an aura outside the order is not drawn", #unknown, 2)
+
+	local chip = InterfaceSpec.vesselStops({ ash = 10, neutral = 90 }, V.order, COLORS)
+	eq("the chip never draws neutral", #chip, 2)
+	eq("so a neutral-heavy vessel still makes an ash chip", chip[1].color, COLORS.ash)
+
+	eq("nothing held has no dominant aura", InterfaceSpec.dominantAura({}, V.order), nil)
+	eq(
+		"the largest share is dominant",
+		InterfaceSpec.dominantAura({ ash = 3, lumen = 7 }, V.order),
+		"lumen"
+	)
+	eq(
+		"neutral is never the chip's headline",
+		InterfaceSpec.dominantAura({ neutral = 500, ash = 1 }, V.order),
+		"ash"
+	)
+
+	-- The chip lives in the header row so there is no new row to forget: its
+	-- height is bounded by the header's, and stackHeight() is untouched.
+	local header = InterfaceSpec.Vitals.headerTextSize + 4
+	check("the core chip fits inside the header row", header - V.chipInset * 2 > 0)
+	check("the core chip is not a new row", header - V.chipInset * 2 <= header)
+end
+
+--[[ Processing is a synthetic cast through the real cast events, and never
+	a technique. The bars must have a colour and a word for it, and the word
+	must be the same on all three bars. ]]
+check("processing has a cast colour of its own", InterfaceSpec.KindColor.process ~= nil)
+eq("a technique prints its name", InterfaceSpec.castLabel("lance", { name = "Lance" }), "LANCE")
+eq("processing prints what it is", InterfaceSpec.castLabel("process", nil), "PROCESSING")
+eq(
+	"an unknown id prints itself rather than nothing",
+	InterfaceSpec.castLabel("mystery", nil),
+	"MYSTERY"
+)
+
+--[[ The drain meter fills with the drained fraction, and any drain at all
+	lights a cell -- a node whose reserve has moved is a node somebody has
+	been on. An unpublished reserve reads as untouched, never as drained. ]]
+do
+	local D = InterfaceSpec.Drain
+	eq(
+		"a full node is an empty meter",
+		InterfaceSpec.drainMeter(2600, 2600),
+		string.rep(D.empty, D.cells)
+	)
+	eq(
+		"a drained node is a full meter",
+		InterfaceSpec.drainMeter(0, 2600),
+		string.rep(D.filled, D.cells)
+	)
+	eq("half drained is half lit", InterfaceSpec.drainMeter(1300, 2600), "##..")
+	eq("any drain lights the first cell", InterfaceSpec.drainMeter(2590, 2600), "#...")
+	eq("an unpublished reserve reads as untouched", InterfaceSpec.drainMeter(0, 0), "....")
+	check("the meter is a fixed width", #InterfaceSpec.drainMeter(700, 1200) == D.cells)
+end
+
+--[[ The node bar lives in the guidance gap and must fit there: taller and it
+	is a new row, and a new row absent from stackHeight() is the silent
+	overflow the design names. ]]
+check(
+	"the node bar fits inside the guidance gap",
+	InterfaceSpec.NodeBar.height + InterfaceSpec.NodeBar.margin < InterfaceSpec.Guidance.gap
+)
+check("the node bar is a bar, not a line", InterfaceSpec.NodeBar.height >= 3)
+
 -- Cooldown countdowns, in the shape an icon prints them.
 eq("a sub-second cooldown shows a decimal", InterfaceSpec.countdown(0.8), "0.8")
 eq("a long cooldown rounds up to whole seconds", InterfaceSpec.countdown(15.2), "16")

@@ -91,6 +91,13 @@ local KEYBIND = color(PALETTE.keybind)
 local LOCK = color(PALETTE.lock)
 local SLOW = color(PALETTE.slow)
 local NEUTRAL = color(PALETTE.neutral)
+--[[ The four aura colours are roster's, in Config.AuraTypes, as integers.
+	Kept as Rgb here because the stops function is pure and returns them
+	unconverted; the gradient builder converts at the edge. ]]
+local AURA_COLORS: { [string]: InterfaceSpec.Rgb } = {}
+for key, auraType in Config.AuraTypes :: { [string]: any } do
+	AURA_COLORS[key] = auraType.color
+end
 local BLACK = Color3.new(0, 0, 0)
 
 local NOTICE_COLOR: { [string]: Color3 } = {
@@ -259,12 +266,61 @@ local vitalsUi: {
 	healthFill: Frame,
 	healthValue: TextLabel,
 	auraFill: Frame,
+	auraGradient: UIGradient,
 	auraValue: TextLabel,
+	coreChip: Frame,
+	coreGradient: UIGradient,
+	coreRing: UIStroke,
 	slowChip: TextLabel,
+	nodeBar: Frame,
+	nodeFill: Frame,
 }
 do
+	--[[ The node you are standing in: its reserve, draining, directly above
+		your vitals in the guidance gap. The thing you are spending, above the
+		vessel you spend it into. Tier-coloured, unlabelled, gone when you
+		step out. See InterfaceSpec.NodeBar. ]]
+	local nodeBarHeight = px(InterfaceSpec.NodeBar.height)
+	local nodeBar = Instance.new("Frame")
+	nodeBar.Name = "NodeBar"
+	nodeBar.AnchorPoint = Vector2.new(0, 1)
+	nodeBar.Position = UDim2.fromOffset(0, -px(InterfaceSpec.NodeBar.margin))
+	nodeBar.Size = UDim2.new(1, 0, 0, nodeBarHeight)
+	nodeBar.BackgroundTransparency = 1
+	nodeBar.Visible = false
+	nodeBar.Parent = vitals
+	local _nodeBack, nodeFill = bar(nodeBar, nodeBarHeight, CEILING)
+	--[[ The core chip: what you have processed, ever, as a disc of colour
+		bands in the proportions of your composition. Permanent and static --
+		it does not move during a fight, which is what tells identity apart
+		from resource on a HUD where everything else drains and refills. In
+		the header row, left of the stage name, because the header is the row
+		that says who you are; and IN the header row rather than under it, so
+		no new row exists for `stackHeight()` to forget. Hollow until the first
+		process: you are nobody yet, and the ring says so. ]]
+	local chipSize = headerHeight - px(InterfaceSpec.Vessel.chipInset) * 2
+	local coreChip = Instance.new("Frame")
+	coreChip.Name = "CoreChip"
+	coreChip.Size = UDim2.fromOffset(chipSize, chipSize)
+	coreChip.Position = UDim2.fromOffset(0, px(InterfaceSpec.Vessel.chipInset))
+	coreChip.BackgroundColor3 = Color3.new(1, 1, 1)
+	coreChip.BackgroundTransparency = 1
+	coreChip.BorderSizePixel = 0
+	coreChip.Parent = vitals
+	local chipCorner = Instance.new("UICorner")
+	chipCorner.CornerRadius = UDim.new(1, 0)
+	chipCorner.Parent = coreChip
+	local coreGradient = Instance.new("UIGradient")
+	coreGradient.Rotation = InterfaceSpec.Vessel.chipRotation
+	coreGradient.Enabled = false
+	coreGradient.Parent = coreChip
+	local coreRing = outline(coreChip, TEXT_FAINT, 1)
+
+	local stageLeft = chipSize + px(InterfaceSpec.Vessel.chipGap)
 	local stageLabel = caption(vitals, text(VITALS.headerTextSize), CEILING, true)
-	stageLabel.Size = UDim2.new(0.6, 0, 0, headerHeight)
+	stageLabel.Size = UDim2.new(0.6, -stageLeft, 0, headerHeight)
+	stageLabel.Position = UDim2.fromOffset(stageLeft, 0)
+	stageLabel.RichText = true
 	stageLabel.Text = "--"
 
 	local powerLabel = caption(vitals, text(VITALS.labelTextSize), TEXT_FAINT, false)
@@ -292,25 +348,18 @@ do
 	auraRow.Parent = vitals
 	local _auraBack, auraFill = bar(auraRow, auraHeight, AURA)
 
-	--[[ The resource is named, and health is not.
-
-		Moving the numbers to the ends of the bars dropped the word the old HUD
-		carried -- it read `aura 174 / 200`, this read `174 / 200` -- and that was a
-		real loss rather than a tidy-up. A red bar that empties when you are hit
-		needs no label in any game anyone has played. "Aura" is a word from this
-		game's own fiction, on an unlabelled blue bar, with the cost on every slot a
-		bare number in the same blue: colour was carrying the entire meaning of a
-		term nobody arrives knowing.
-
-		So the bar is labelled and the slot cost is not. Once the bar says AURA in
-		this blue, the blue number on a technique is joined to it by colour, which is
-		the association the palette was built to make -- and a unit printed four
-		times across the action bar would cost more room than it buys. ]]
-	local auraLabel = caption(auraRow, text(VITALS.valueTextSize) - 1, TEXT_DIM, true)
-	auraLabel.Size = UDim2.new(1, -px(12), 1, 0)
-	auraLabel.Position = UDim2.fromOffset(px(6), 0)
-	auraLabel.ZIndex = 3
-	auraLabel.Text = "AURA"
+	--[[ The vessel. The bar was labelled AURA because a blue bar with a word
+		from this game's own fiction needed the word. It no longer does: the
+		fill is a single frame carrying a hard-stop gradient that divides it by
+		aura colour in the proportions held, so the bar says what it holds by
+		being those colours, and the core chip beside the stage name is its
+		legend. Until the server publishes a typed vessel the bar is the one
+		blue it always was. A UIGradient multiplies its parent's colour, so
+		the fill goes white the moment the gradient is on and back to blue
+		when it is off. ]]
+	local auraGradient = Instance.new("UIGradient")
+	auraGradient.Enabled = false
+	auraGradient.Parent = auraFill
 
 	local auraValue = caption(auraRow, text(VITALS.valueTextSize) - 1, TEXT_DIM, true)
 	auraValue.Size = UDim2.new(1, -px(6), 1, 0)
@@ -337,8 +386,14 @@ do
 		healthFill = healthFill,
 		healthValue = healthValue,
 		auraFill = auraFill,
+		auraGradient = auraGradient,
 		auraValue = auraValue,
+		coreChip = coreChip,
+		coreGradient = coreGradient,
+		coreRing = coreRing,
 		slowChip = slowChip,
+		nodeBar = nodeBar,
+		nodeFill = nodeFill,
 	}
 end
 
@@ -881,7 +936,7 @@ do
 	senseColumns.Size = UDim2.new(1, -px(16), 0, px(SENSE.columnHeight))
 	senseColumns.Position = UDim2.fromOffset(px(8), px(18))
 	senseColumns.Font = Enum.Font.RobotoMono
-	senseColumns.Text = string.format("%s %-6s %4s  %s", " ", "aura", "away", "held")
+	senseColumns.Text = string.format("%s %-6s %4s  %s  %s", " ", "aura", "away", "held", "drain")
 
 	local senseRows: { TextLabel } = {}
 	for index = 1, SENSE.rows do
@@ -1057,6 +1112,31 @@ end
 -- State refresh.
 -- ===================================================================
 
+--[[ Stops to a sequence, at the edge where Roblox types begin. ]]
+local function sequenceOf(stops: { InterfaceSpec.VesselStop }): ColorSequence
+	local keypoints = {}
+	for _, stop in stops do
+		table.insert(keypoints, ColorSequenceKeypoint.new(stop.at, color(stop.color)))
+	end
+	return ColorSequence.new(keypoints)
+end
+
+--[[ A typed record off the player's attributes, or nil if the server has not
+	published that prefix at all -- which is how the client tells "an empty
+	vessel" from "no vessel yet". ]]
+local function auraRecord(prefix: string, order: { string }): { [string]: number }?
+	local record = {}
+	local any = false
+	for _, key in order do
+		local amount = player:GetAttribute(prefix .. key)
+		if typeof(amount) == "number" then
+			record[key] = amount
+			any = true
+		end
+	end
+	return if any then record else nil
+end
+
 local function refreshCultivation()
 	local stage = player:GetAttribute("Stage") or "--"
 	local tier = player:GetAttribute("Tier") or 0
@@ -1067,7 +1147,21 @@ local function refreshCultivation()
 	local atCeiling = player:GetAttribute("AtCeiling") == true
 	local stageIndex = player:GetAttribute("StageIndex")
 
-	vitalsUi.stageLabel.Text = `{stage}  ·  {tier}`
+	--[[ The headline: stage, tier, and -- once there is a core -- its dominant
+		aura in that aura's colour. The chip shows the mix; the word says what
+		it mostly is, for the reader who has time to read. Neutral never
+		heads a core, by design. ]]
+	local core = auraRecord("Core_", InterfaceSpec.Vessel.order)
+	local dominant = if core
+		then InterfaceSpec.dominantAura(core, InterfaceSpec.Vessel.order)
+		else nil
+	local headline = `{stage}  ·  {tier}`
+	if dominant then
+		local rgb = AURA_COLORS[dominant]
+		local auraName = (Config.AuraTypes :: { [string]: any })[dominant].name
+		headline ..= `  <font color="rgb({rgb.r},{rgb.g},{rgb.b})">·  {string.lower(auraName)}</font>`
+	end
+	vitalsUi.stageLabel.Text = headline
 	if typeof(stageIndex) == "number" then
 		vitalsUi.stageLabel.TextColor3 = color(InterfaceSpec.stageColor(stageIndex))
 	end
@@ -1094,6 +1188,47 @@ local function refreshVitals()
 	local maxHealth = player:GetAttribute("MaxHealth") or 0
 	local aura = player:GetAttribute("Aura") or 0
 	local auraCapacity = player:GetAttribute("MaxAura") or 0
+
+	--[[ The vessel, once published, is the pool: its typed amounts sum to what
+		the blue bar showed, and its capacity is the vessel's. Until then the
+		plain pool draws as it always did, so the bar is never empty for want
+		of a newer attribute. ]]
+	local vessel = auraRecord("Vessel_", InterfaceSpec.Vessel.vesselOrder)
+	local vesselCapacity = player:GetAttribute("VesselCapacity")
+	if vessel and typeof(vesselCapacity) == "number" then
+		aura = 0
+		for _, amount in vessel do
+			aura += amount
+		end
+		auraCapacity = vesselCapacity
+	end
+	local stops = if vessel
+		then InterfaceSpec.vesselStops(vessel, InterfaceSpec.Vessel.vesselOrder, AURA_COLORS)
+		else {}
+	if #stops > 0 then
+		vitalsUi.auraGradient.Color = sequenceOf(stops)
+		vitalsUi.auraGradient.Enabled = true
+		vitalsUi.auraFill.BackgroundColor3 = Color3.new(1, 1, 1)
+	else
+		vitalsUi.auraGradient.Enabled = false
+		vitalsUi.auraFill.BackgroundColor3 = AURA
+	end
+
+	-- The core chip: filled by composition, hollow until there is one.
+	local core = auraRecord("Core_", InterfaceSpec.Vessel.order)
+	local coreStops = if core
+		then InterfaceSpec.vesselStops(core, InterfaceSpec.Vessel.order, AURA_COLORS)
+		else {}
+	if #coreStops > 0 then
+		vitalsUi.coreGradient.Color = sequenceOf(coreStops)
+		vitalsUi.coreGradient.Enabled = true
+		vitalsUi.coreChip.BackgroundTransparency = 0
+		vitalsUi.coreRing.Transparency = 1
+	else
+		vitalsUi.coreGradient.Enabled = false
+		vitalsUi.coreChip.BackgroundTransparency = 1
+		vitalsUi.coreRing.Transparency = 0
+	end
 
 	local healthFraction = InterfaceSpec.fraction(health, maxHealth)
 	vitalsUi.healthFill.Size = UDim2.fromScale(healthFraction, 1)
@@ -1866,8 +2001,8 @@ local function refreshTarget()
 	targetUi.relation.Visible = not drawingCast and targetUi.relation.Text ~= ""
 
 	if cast and drawingCast then
-		local tech = Config.Techniques[cast.techId]
-		targetUi.castName.Text = if tech then string.upper(tech.name) else string.upper(cast.techId)
+		targetUi.castName.Text =
+			InterfaceSpec.castLabel(cast.techId, Config.Techniques[cast.techId])
 		if Nameplates.isSnapped(cast) then
 			-- Broken, not finished: the whole bar in the danger hue for a beat,
 			-- and no timer, because there is no time left to count.
@@ -1914,9 +2049,8 @@ local function refreshOwnCast()
 		return
 	end
 
-	local tech = Config.Techniques[cast.techId]
 	castUi.frame.Visible = true
-	castUi.name.Text = if tech then string.upper(tech.name) else string.upper(cast.techId)
+	castUi.name.Text = InterfaceSpec.castLabel(cast.techId, Config.Techniques[cast.techId])
 	if Nameplates.isSnapped(cast) then
 		castUi.fill.Size = UDim2.fromScale(1, 1)
 		castUi.fill.BackgroundColor3 = DANGER
@@ -1970,7 +2104,32 @@ local function arrowTo(x: number, z: number): string
 	return ARROWS[index + 1]
 end
 
+--[[ The node bar follows the nearest node inside the capture radius -- the
+	one the server is cycling you on -- and hides otherwise. Reserve is read
+	off the same payload the Sense rows use, so the row and the bar cannot
+	disagree about how much is left. ]]
+local function refreshNodeBar(nodes: { any })
+	local inside: any = nil
+	local nearest = math.huge
+	for _, entry in nodes do
+		local distance = tonumber(entry.distance)
+		if distance and distance <= Config.Field.captureRadius and distance < nearest then
+			nearest = distance
+			inside = entry
+		end
+	end
+	if not inside or typeof(inside.maxReserve) ~= "number" or inside.maxReserve <= 0 then
+		vitalsUi.nodeBar.Visible = false
+		return
+	end
+	local reserve = if typeof(inside.reserve) == "number" then inside.reserve else 0
+	vitalsUi.nodeBar.Visible = true
+	vitalsUi.nodeFill.Size = UDim2.fromScale(InterfaceSpec.fraction(reserve, inside.maxReserve), 1)
+	vitalsUi.nodeFill.BackgroundColor3 = TIER_COLOR[inside.tier] or TEXT_DIM
+end
+
 local function refreshSense(nodes: { any })
+	refreshNodeBar(nodes)
 	for index, row in senseUi.rows do
 		local entry = nodes[index]
 		if not entry then
@@ -1978,13 +2137,18 @@ local function refreshSense(nodes: { any })
 			continue
 		end
 		row.TextColor3 = TIER_COLOR[entry.tier] or TEXT_DIM
+		-- Reserve is ALWAYS in the payload once the driver lands; until then a
+		-- missing pair reads as an untouched node rather than a broken row.
+		local reserve = if typeof(entry.reserve) == "number" then entry.reserve else 0
+		local maxReserve = if typeof(entry.maxReserve) == "number" then entry.maxReserve else 0
 		row.Text = string.format(
-			"%s %-6s %4d  %d/%d",
+			"%s %-6s %4d  %d/%d  %s",
 			arrowTo(entry.x, entry.z),
 			entry.tier,
 			math.floor(entry.distance),
 			entry.occupants,
-			entry.capacity
+			entry.capacity,
+			InterfaceSpec.drainMeter(reserve, maxReserve)
 		)
 	end
 
@@ -2043,8 +2207,26 @@ local CULTIVATION_ATTRIBUTES = {
 	"Power",
 	"SenseRange",
 	"AtCeiling",
+	-- The headline carries the core's dominant aura.
+	"Core_ash",
+	"Core_verdant",
+	"Core_lumen",
 }
-local VITAL_ATTRIBUTES = { "Health", "MaxHealth", "Aura", "MaxAura", "SlowMultiplier" }
+local VITAL_ATTRIBUTES = {
+	"Health",
+	"MaxHealth",
+	"Aura",
+	"MaxAura",
+	"SlowMultiplier",
+	"Vessel_ash",
+	"Vessel_verdant",
+	"Vessel_lumen",
+	"Vessel_neutral",
+	"VesselCapacity",
+	"Core_ash",
+	"Core_verdant",
+	"Core_lumen",
+}
 
 --[[ A breakthrough rebuilds the server's actor with genuinely empty cooldowns,
 	but the local prediction table knew nothing about it -- so a slot could sit

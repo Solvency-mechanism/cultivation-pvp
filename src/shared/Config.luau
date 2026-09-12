@@ -24,6 +24,7 @@ export type NodeTier = {
 	lifetime: number,
 	catalystChance: number,
 	telegraph: "local" | "regional" | "server",
+	drainReserve: number,
 }
 
 local Config = {}
@@ -130,8 +131,28 @@ Config.Stages = {
 	},
 } :: { Stage }
 
--- Capacity is the anti-zerg valve: a ten-player clan gains nothing from
--- bringing ten bodies to a node that only feeds three.
+--[[ Capacity is the anti-zerg valve: a ten-player clan gains nothing from
+	bringing ten bodies to a node that only feeds three.
+
+	drainReserve is the aura a node holds, in the same unit accrual hands out:
+	AuraNodes.drain spends it at cycleRate per occupant, and a node whose
+	reserve reaches zero is DRAINED -- it ends, and its catalyst goes to those
+	who held it. So the reserve decides how long a node is a place, and the
+	region multiplier decides it with a 5.2x spread between a Wellspring
+	(2.6x) and the Barrens (0.5x): that spread is the biome identity, not a
+	bug to flatten. Priced in Lowgold vessels (1200) so it reads against the
+	Core; time-to-drain is stage-independent because cycleRate is.
+
+	  common  1200  one vessel. Solo: open 400 s, rich 222 s, wellspring 154 s,
+	                barren ages out first (800 s > 600) -- exactly as today. A
+	                common is a place you cultivate for minutes, made finite.
+	  rare    1600  a vessel and a third, at 2.7x the rate: rich 111 s,
+	                wellspring 77 s, open 200 s, barren 400 s (inside 420).
+	  prime   2600  two vessels, fought for. Solo: wellspring 50 s, rich 72 s,
+	                open 130 s, barren 260 s (inside 300, barely -- a Barrens
+	                prime wants a group, which is what ash means). A second
+	                player halves every one of those; a trio thirds it.
+	An unattended node drains nothing and ages out on lifetime, as before. ]]
 Config.NodeTiers = {
 	common = {
 		id = "common",
@@ -140,6 +161,7 @@ Config.NodeTiers = {
 		lifetime = 600,
 		catalystChance = 0,
 		telegraph = "local",
+		drainReserve = 1200,
 	},
 	rare = {
 		id = "rare",
@@ -148,6 +170,7 @@ Config.NodeTiers = {
 		lifetime = 420,
 		catalystChance = 0.15,
 		telegraph = "regional",
+		drainReserve = 1600,
 	},
 	prime = {
 		id = "prime",
@@ -156,6 +179,7 @@ Config.NodeTiers = {
 		lifetime = 300,
 		catalystChance = 1.0,
 		telegraph = "server",
+		drainReserve = 2600,
 	},
 } :: { [string]: NodeTier }
 
@@ -168,6 +192,13 @@ Config.Field = {
 	captureRadius = 14,
 	-- Server tick for awarding cycling progress.
 	cycleTickSeconds = 1,
+	-- Multiplies the prime drain's rate while AuraNodes.isContested is true
+	-- (more than one distinct player, until real factions exist). Sharing a
+	-- drain otherwise had no cost -- occupants drain occupantCount times
+	-- faster with none of them slower for it -- so this turns "more of us
+	-- clears it quicker" into a stand-off instead. First-pass, combat's
+	-- number pending roster's price.
+	contestedDrainFactor = 0.5,
 	-- Weighted tier roll. Prime is rare because it is a server-wide event.
 	spawnWeights = {
 		{ tier = "common", weight = 70 },
