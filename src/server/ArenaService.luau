@@ -91,6 +91,7 @@ local VolcanoProps = require(script.Parent.VolcanoProps)
 local VolcanoSurfaceDetail = require(script.Parent.VolcanoSurfaceDetail)
 local VolcanoDragonDetail = require(script.Parent.VolcanoDragonDetail)
 local Worldcraft = require(script.Parent.Worldcraft)
+local PorcelainCascadeWorld = require(script.Parent.PorcelainCascadeWorld)
 
 local ArenaService = {}
 
@@ -185,10 +186,10 @@ local REGIONS: { Region } = {
 		id = "wellspring",
 		bearing = math.pi / 2,
 		blobs = { blob(0, 138, 36), blob(0, 172, 44), blob(0, 203, 32) },
-		floor = Color3.fromRGB(150, 231, 240),
-		material = Enum.Material.Glacier,
-		rim = Color3.fromRGB(120, 245, 255),
-		rimGlows = true,
+		floor = Color3.fromRGB(222, 218, 195),
+		material = Enum.Material.Limestone,
+		rim = Color3.fromRGB(205, 200, 176),
+		rimGlows = false,
 		glow = Color3.fromRGB(150, 250, 255),
 	},
 	{
@@ -361,7 +362,10 @@ local function buildRegionFloor(region: Region, decor: Folder, regionFolder: Fol
 			2,
 			lobe.center + Vector3.new(0, RIM_TOP - 1, 0),
 			region.rim,
-			if region.rimGlows then Enum.Material.Neon else Enum.Material.Basalt
+			if region.rimGlows
+				then Enum.Material.Neon
+				elseif region.id == "wellspring" then Enum.Material.Limestone
+				else Enum.Material.Basalt
 		)
 		rim.Name = `{region.id}Rim{index}`
 		rim.Transparency = if region.rimGlows then 0.15 else 0
@@ -1674,24 +1678,22 @@ local PATROLS: { PatrolSpec } = {
 		},
 	},
 	{
-		--[[ An octagon at radius 30 around the Wellspring heart (0,172): outside
-			the 27-radius pool, inside the six crystals at 38 (2.9 clear), well
-			clear of the spire base and the beacon, every point inside the
-			(0,172) lobe's 44 floor. Every chord verified; it loops. ]]
+		-- The shallow lower basin is flat: this broad, shallow loop never crosses
+		-- a terrace wall. Other patrol paths and NPC stats remain unchanged.
 		name = "Pool Warden",
 		region = "wellspring",
 		stage = "highgold",
 		walkSpeed = 6,
 		pingPong = false,
 		points = {
-			{ 30.0, 172.0 },
-			{ 21.2, 193.2 },
-			{ 0.0, 202.0 },
-			{ -21.2, 193.2 },
-			{ -30.0, 172.0 },
-			{ -21.2, 150.8 },
-			{ 0.0, 142.0 },
-			{ 21.2, 150.8 },
+			{ 6, 130 },
+			{ 3.4, 131.4 },
+			{ -3, 132 },
+			{ -9.4, 131.4 },
+			{ -12, 130 },
+			{ -9.4, 128.6 },
+			{ -3, 128 },
+			{ 3.4, 128.6 },
 		},
 	},
 }
@@ -1788,8 +1790,8 @@ local FRAME_PROBES: { FrameProbe } = {
 	{ label = "crossroads crown", partName = "CrossroadsCrown" },
 	{ label = "torii cap", partName = "ToriiCap" },
 	{ label = "watchtower brazier", partName = "WatchtowerBrazier" },
-	{ label = "Wellspring spire tip", partName = "WellspringTip" },
-	{ label = "Wellspring beacon", partName = "wellspringBeacon" },
+	{ label = "Wellspring source crest", partName = "WellspringTip" },
+	{ label = "Wellspring source", partName = "wellspringBeacon" },
 	{ label = "Reach beacon", partName = "richBeacon" },
 	{ label = "grove gate lintel", partName = "GroveGateLintel" },
 }
@@ -1922,10 +1924,50 @@ function ArenaService.start()
 		for _, region in REGIONS do
 			buildRegionFloor(region, decor, regionFolder)
 		end
-		buildWellspring(REGIONS[1], decor)
+		-- Preserve the legacy builder's six global RNG draws before replacing its
+		-- owned art. Grove/blight and every later seeded landmark stay identical.
+		local legacyWellspring = Instance.new("Folder")
+		buildWellspring(REGIONS[1], legacyWellspring)
+		legacyWellspring:Destroy()
+		local ground = Instance.new("Folder")
+		ground.Name = "ArenaWalkable"
+		ground.Parent = Workspace
+		local function cascadeRng(name: string): Random
+			local seed = 20260913
+			for index = 1, #name do
+				seed = (seed * 31 + string.byte(name, index)) % 2147483647
+			end
+			return Random.new(seed)
+		end
+		-- Only wholly local crags may be removed: intersecting a broad horizon
+		-- block is not permission to change the landscape outside Wellspring.
+		for _, part in decor:GetChildren() do
+			if part:IsA("BasePart") and part.Name:match("^Crag%d+[ABC]$") then
+				local radius = part.Size.Magnitude / 2
+				local inside = false
+				for _, lobe in REGIONS[1].blobs do
+					local offset = part.Position - lobe.center
+					if Vector3.new(offset.X, 0, offset.Z).Magnitude + radius < lobe.radius then
+						inside = true
+						break
+					end
+				end
+				if
+					inside
+					and math.abs(part.Position.X) < 42 + radius
+					and part.Position.Z > 115 - radius
+					and part.Position.Z < 232 + radius
+				then
+					part:Destroy()
+				end
+			end
+		end
+		PorcelainCascadeWorld.build(
+			{ decor = decor, ground = ground, rngFor = cascadeRng },
+			Vector3.new(0, 0, 172)
+		)
 		buildGrove(REGIONS[2], decor)
 		buildBlight(REGIONS[3], decor)
-		buildBeacon(REGIONS[1], 460, decor)
 		buildBeacon(REGIONS[2], 240, decor)
 
 		--[[ Roads bow away from their bearing, each into a different open
@@ -1945,6 +1987,37 @@ function ArenaService.start()
 				17,
 				decor
 			)
+		end
+
+		-- Keep the complete road build and its RNG sequence. North-road fire
+		-- monuments become low waymarkers; none remain inside the water biome.
+		for _, part in decor:GetChildren() do
+			if part:IsA("BasePart") then
+				local post = part.Name:match("^RoadLamp_wellspring_") ~= nil
+				local flame = part.Name:match("^RoadFlame_wellspring_") ~= nil
+				if post or flame then
+					local inside = false
+					for _, lobe in REGIONS[1].blobs do
+						local offset = part.Position - lobe.center
+						if offset.X * offset.X + offset.Z * offset.Z < lobe.radius ^ 2 then
+							inside = true
+							break
+						end
+					end
+					if inside then
+						part:Destroy()
+					elseif post then
+						part.Size = Vector3.new(1.2, 3, 1.2)
+						part.Position = Vector3.new(part.Position.X, 1.5, part.Position.Z)
+						part.Material = Enum.Material.Limestone
+						part.Color = REGIONS[1].rim
+					else
+						part.Size = Vector3.new(0.7, 0.7, 0.7)
+						part.Position = Vector3.new(part.Position.X, 3.35, part.Position.Z)
+						part.Color = Color3.fromRGB(174, 220, 204)
+					end
+				end
+			end
 		end
 
 		for _, region in REGIONS do
@@ -1994,9 +2067,6 @@ function ArenaService.start()
 				end
 			end
 		end
-		local ground = Instance.new("Folder")
-		ground.Name = "ArenaWalkable"
-		ground.Parent = Workspace
 		local function volcanoRng(name: string): Random
 			local seed = 20260912
 			for index = 1, #name do

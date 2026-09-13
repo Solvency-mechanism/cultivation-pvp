@@ -1,0 +1,47 @@
+Final QA5 actual Studio runtime evidence. No human or physical-device acceptance claim.
+Source log: 0.738.0.7381393_20260913T020119Z_Studio_D889A_last.log
+QA5 SHA256 FD8AF9A53E462B407D62736B62448C9843C10A193ABF298752F766EB3B0DC42B
+Runtime and photo quality was Studio Automatic; prior process Level10 did not persist.
+
+2026-09-13T02:02:45.590Z,86.590790,9af4,6,Info [FLog::CreatorOutput] [Cascade spatial] {"failures":[],"passed":126,"evidence":"Engine spatial queries; not walking acceptance"}
+2026-09-13T02:02:57.977Z,98.977455,9af4,6,Info [FLog::CreatorOutput] [Cascade warden] {"maxY":5,"seconds":12,"unsupported":0,"minY":4.999999523162842,"samples":24,"displacement":11.925381660461426}
+2026-09-13T02:03:45.353Z,146.353668,513c,6,Info [FLog::CreatorOutput] [Cascade cultivation] {"before":{"capacity":1200,"total":509,"lumen":293,"available":true},"seconds":8,"after":{"capacity":1200,"total":843,"lumen":608,"available":true},"lumenDelta":315,"evidence":"Published integer vessel attributes; no grant or duplicate service tick"}
+2026-09-13T02:03:45.353Z,146.353668,513c,6,Info [FLog::CreatorOutput] [Cascade waypoint] {"seconds":0,"name":"westCheckpoint1","reached":true}
+2026-09-13T02:03:45.353Z,146.353668,513c,6,Info [FLog::CreatorOutput] [Cascade waypoint] {"seconds":1.8625001274049283,"name":"westCheckpoint2","reached":true}
+2026-09-13T02:03:45.353Z,146.353668,513c,6,Info [FLog::CreatorOutput] [Cascade waypoint] {"seconds":0.5208333656191826,"name":"PoolStanding1Bank","reached":true}
+2026-09-13T02:03:45.353Z,146.353668,513c,6,Info [FLog::CreatorOutput] [Cascade waypoint] {"seconds":1.6500001084059477,"name":"PoolStanding1","reached":true}
+2026-09-13T02:03:45.353Z,146.353668,513c,6,Info [FLog::CreatorOutput] [Cascade waypoint] {"seconds":1.7250001076608897,"name":"PoolStanding1Bank","reached":true}
+2026-09-13T02:03:45.354Z,146.354553,513c,6,Info [FLog::CreatorOutput] [Cascade waypoint] {"seconds":0.8958333879709244,"name":"westCheckpoint3","reached":true}
+2026-09-13T02:03:45.354Z,146.354553,513c,6,Info [FLog::CreatorOutput] [Cascade waypoint] {"seconds":0.5833333693444729,"name":"PoolStanding2Bank","reached":true}
+2026-09-13T02:03:45.355Z,146.355545,513c,6,Info [FLog::CreatorOutput] [Cascade waypoint] {"seconds":2.6250001452863218,"name":"PoolStanding2","reached":true}
+2026-09-13T02:03:45.355Z,146.355545,513c,6,Info [FLog::CreatorOutput] [Cascade waypoint] {"seconds":2.595833482220769,"name":"PoolStanding2Bank","reached":true}
+2026-09-13T02:03:45.355Z,146.355545,513c,6,Info [FLog::CreatorOutput] [Cascade waypoint] {"seconds":0.8875000448897481,"name":"westCheckpoint4","reached":true}
+2026-09-13T02:03:45.355Z,146.355545,513c,6,Info [FLog::CreatorOutput] [Cascade waypoint] {"seconds":0.5500000272877514,"name":"PoolStanding3Bank","reached":true}
+2026-09-13T02:03:45.355Z,146.355545,513c,6,Info [FLog::CreatorOutput] [Cascade waypoint] {"seconds":2.0166667718440296,"name":"PoolStanding3","reached":true}
+2026-09-13T02:03:45.355Z,146.355545,513c,6,Info [FLog::CreatorOutput] [Cascade waypoint] {"seconds":1.9666667692363263,"name":"PoolStanding3Bank","reached":true}
+2026-09-13T02:03:45.355Z,146.355545,513c,6,Info [FLog::CreatorOutput] [Cascade waypoint] {"seconds":0.9041667161509395,"name":"westCheckpoint5","reached":true}
+2026-09-13T02:03:45.355Z,146.355545,513c,6,Info [FLog::CreatorOutput] [Cascade waypoint] {"seconds":0.41666668839752676,"name":"PoolStanding4Bank","reached":true}
+2026-09-13T02:03:45.355Z,146.355545,513c,6,Info [FLog::CreatorOutput] [Cascade waypoint] {"seconds":2.6583334719762208,"name":"PoolStanding4","reached":true}
+2026-09-13T02:03:45.355Z,146.355545,513c,6,Info [FLog::CreatorOutput] [Cascade waypoint] {"seconds":2.6041668094694616,"name":"PoolStanding4Bank","reached":true}
+2026-09-13T02:03:45.355Z,146.355545,513c,6,Info [FLog::CreatorOutput] [Cascade waypoint] {"seconds":1.0000000586733223,"name":"westCheckpoint6","reached":true}
+2026-09-13T02:03:45.355Z,146.355545,513c,6,Info [FLog::CreatorOutput] [Cascade waypoint] {"seconds":0.19583334401249886,"name":"PoolStanding5Bank","reached":true}
+2026-09-13T02:03:45.356Z,146.356537,513c,6,Info [FLog::CreatorOutput] [Cascade waypoint] {"seconds":1.779166767373681,"name":"PoolStanding5","reached":true}
+2026-09-13T02:03:45.356Z,146.356537,513c,6,Info [FLog::CreatorOutput] [Cascade waypoint] {"seconds":1.716666754335165,"name":"PoolStanding5Bank","reached":true}
+2026-09-13T02:03:45.356Z,146.356537,513c,6,Info [FLog::CreatorOutput] [Cascade waypoint] {"seconds":1.0791667215526105,"name":"PoolStanding6Bank","reached":true}
+2026-09-13T02:03:45.356Z,146.356537,513c,6,Info [FLog::CreatorOutput] [Cascade waypoint] {"seconds":2.0375000964850189,"name":"PoolStanding6","reached":true}
+2026-09-13T02:03:45.356Z,146.356537,513c,6,Info [FLog::CreatorOutput] [Cascade waypoint] {"seconds":1.9666667710989714,"name":"PoolStanding6Bank","reached":true}
+2026-09-13T02:03:45.356Z,146.356537,513c,6,Info [FLog::CreatorOutput] [Cascade waypoint] {"seconds":0.3083333522081375,"name":"westCheckpoint7","reached":true}
+2026-09-13T02:03:45.356Z,146.356537,513c,6,Info [FLog::CreatorOutput] [Cascade waypoint] {"seconds":0.9833333883434534,"name":"PoolStanding7Bank","reached":true}
+2026-09-13T02:03:45.356Z,146.356537,513c,6,Info [FLog::CreatorOutput] [Cascade waypoint] {"seconds":1.3041667342185975,"name":"PoolStanding7","reached":true}
+2026-09-13T02:03:45.356Z,146.356537,513c,6,Info [FLog::CreatorOutput] [Cascade waypoint] {"seconds":1.2083334121853114,"name":"PoolStanding7Bank","reached":true}
+2026-09-13T02:03:45.357Z,146.357529,513c,6,Info [FLog::CreatorOutput] [Cascade waypoint] {"seconds":0.43333336152136328,"name":"westCheckpoint8","reached":true}
+2026-09-13T02:03:45.357Z,146.357529,513c,6,Info [FLog::CreatorOutput] [Cascade waypoint] {"seconds":1.1041667349636555,"name":"westCheckpoint9","reached":true}
+2026-09-13T02:03:45.357Z,146.357529,513c,6,Info [FLog::CreatorOutput] [Cascade waypoint] {"seconds":1.1041667200624943,"name":"eastCheckpoint8","reached":true}
+2026-09-13T02:03:45.357Z,146.357529,513c,6,Info [FLog::CreatorOutput] [Cascade waypoint] {"seconds":1.262500075623393,"name":"eastCheckpoint7","reached":true}
+2026-09-13T02:03:45.358Z,146.358521,513c,6,Info [FLog::CreatorOutput] [Cascade waypoint] {"seconds":1.4375000819563866,"name":"eastCheckpoint6","reached":true}
+2026-09-13T02:03:45.358Z,146.358521,513c,6,Info [FLog::CreatorOutput] [Cascade waypoint] {"seconds":1.3000000696629286,"name":"eastCheckpoint5","reached":true}
+2026-09-13T02:03:45.358Z,146.358521,513c,6,Info [FLog::CreatorOutput] [Cascade waypoint] {"seconds":1.2708333972841502,"name":"eastCheckpoint4","reached":true}
+2026-09-13T02:03:45.358Z,146.358521,513c,6,Info [FLog::CreatorOutput] [Cascade waypoint] {"seconds":1.3625000789761544,"name":"eastCheckpoint3","reached":true}
+2026-09-13T02:03:45.358Z,146.358521,513c,6,Info [FLog::CreatorOutput] [Cascade waypoint] {"seconds":1.1666667349636555,"name":"eastCheckpoint2","reached":true}
+2026-09-13T02:03:45.358Z,146.358521,513c,6,Info [FLog::CreatorOutput] [Cascade waypoint] {"seconds":1.8666667938232422,"name":"eastCheckpoint1","reached":true}
+2026-09-13T02:03:45.358Z,146.358521,513c,6,Info [FLog::CreatorOutput] [Cascade walk] {"ok":true,"setupRelocations":1,"finalRegion":"wellspring","cultivation":{"before":{"capacity":1200,"total":509,"lumen":293,"available":true},"seconds":8,"after":{"capacity":1200,"total":843,"lumen":608,"available":true},"lumenDelta":315,"evidence":"Published integer vessel attributes; no grant or duplicate service tick"},"passed":38,"walkSpeed":16,"failed":0,"evidence":"Real Humanoid.MoveTo controller contact; not human traversal"}

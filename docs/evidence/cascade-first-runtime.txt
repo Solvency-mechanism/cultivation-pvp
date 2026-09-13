@@ -1,0 +1,22 @@
+First candidate Studio evidence only; final second candidate needs its own checks.
+Source log: 0.738.0.7381393_20260913T013452Z_Studio_08EC9_last.log
+
+2026-09-13T01:46:46.470Z,714.470276,9de0,6,Info [FLog::CreatorOutput] [Cascade spatial] {"failures":[],"passed":126,"evidence":"Engine spatial queries; not walking acceptance"}
+2026-09-13T01:47:17.114Z,745.114502,9de0,6,Info [FLog::CreatorOutput] [Cascade waypoint] {"seconds":0,"name":"westCheckpoint1","reached":true}
+2026-09-13T01:47:17.114Z,745.114502,9de0,6,Info [FLog::CreatorOutput] [Cascade waypoint] {"seconds":1.8583334237337113,"name":"westCheckpoint2","reached":true}
+2026-09-13T01:47:17.114Z,745.114502,9de0,6,Info [FLog::CreatorOutput] [Cascade waypoint] {"seconds":1.2083333972841502,"name":"westCheckpoint3","reached":true}
+2026-09-13T01:47:17.114Z,745.114502,9de0,6,Info [FLog::CreatorOutput] [Cascade waypoint] {"seconds":1.362500075250864,"name":"westCheckpoint4","reached":true}
+2026-09-13T01:47:17.114Z,745.114502,9de0,6,Info [FLog::CreatorOutput] [Cascade waypoint] {"seconds":1.2666667457669974,"name":"westCheckpoint5","reached":true}
+2026-09-13T01:47:17.114Z,745.114502,9de0,6,Info [FLog::CreatorOutput] [Cascade waypoint] {"seconds":1.3666667379438878,"name":"westCheckpoint6","reached":true}
+2026-09-13T01:47:17.115Z,745.115479,9de0,6,Info [FLog::CreatorOutput] [Cascade waypoint] {"seconds":1.4291667453944684,"name":"westCheckpoint7","reached":true}
+2026-09-13T01:47:17.115Z,745.115479,9de0,6,Info [FLog::CreatorOutput] [Cascade waypoint] {"seconds":1.3375000767409802,"name":"westCheckpoint8","reached":true}
+2026-09-13T01:47:17.115Z,745.115479,9de0,6,Info [FLog::CreatorOutput] [Cascade waypoint] {"seconds":1.1208333987742663,"name":"westCheckpoint9","reached":true}
+2026-09-13T01:47:17.115Z,745.115479,9de0,6,Info [FLog::CreatorOutput] [Cascade waypoint] {"seconds":1.1416667252779008,"name":"eastCheckpoint8","reached":true}
+2026-09-13T01:47:17.115Z,745.115479,9de0,6,Info [FLog::CreatorOutput] [Cascade waypoint] {"seconds":1.2958334013819695,"name":"eastCheckpoint7","reached":true}
+2026-09-13T01:47:17.115Z,745.115479,9de0,6,Info [FLog::CreatorOutput] [Cascade waypoint] {"seconds":1.4666667468845845,"name":"eastCheckpoint6","reached":true}
+2026-09-13T01:47:17.115Z,745.115479,9de0,6,Info [FLog::CreatorOutput] [Cascade waypoint] {"seconds":1.333333408460021,"name":"eastCheckpoint5","reached":true}
+2026-09-13T01:47:17.115Z,745.115479,9de0,6,Info [FLog::CreatorOutput] [Cascade waypoint] {"seconds":1.3375000823289157,"name":"eastCheckpoint4","reached":true}
+2026-09-13T01:47:17.115Z,745.115479,9de0,6,Info [FLog::CreatorOutput] [Cascade waypoint] {"seconds":1.4166667386889458,"name":"eastCheckpoint3","reached":true}
+2026-09-13T01:47:17.115Z,745.115479,9de0,6,Info [FLog::CreatorOutput] [Cascade waypoint] {"seconds":1.2208333928138018,"name":"eastCheckpoint2","reached":true}
+2026-09-13T01:47:17.116Z,745.116516,9de0,6,Info [FLog::CreatorOutput] [Cascade waypoint] {"seconds":1.9458334185183049,"name":"eastCheckpoint1","reached":true}
+2026-09-13T01:47:17.116Z,745.116516,9de0,6,Info [FLog::CreatorOutput] [Cascade walk] {"ok":true,"setupRelocations":1,"lumenDelta":0,"finalRegion":"wellspring","passed":17,"walkSpeed":16,"cultivationObserved":false,"failed":0,"evidence":"Real Humanoid.MoveTo controller contact; not human traversal"}

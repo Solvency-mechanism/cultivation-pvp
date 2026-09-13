@@ -1,0 +1,8 @@
+QA9 single approach sample: fixed StudioLevel10, stable1094x490, FOV65.
+Source log: 0.738.0.7381393_20260913T023842Z_Studio_8E495_last.log
+Separate from MVP1094x492 sample; no controlled improvement or sustained60FPS claim.
+
+2026-09-13T02:44:53.628Z,371.628723,8d04,6,Info [FLog::CreatorOutput] CASCADE_FIDELITY_FIXED_QUALITY Enum.QualityLevel.Level10 1094, 490
+2026-09-13T02:46:49.646Z,487.646271,8d04,6,Info [FLog::CreatorOutput] [Cascade performance] {"cpuMeanMs":4.944764611233647,"gpuMeanMs":13.88005005234542,"viewport":[1094,490],"frames":2811,"meanFps":57.97792586459001,"p95Ms":26.525499299168588,"statsSamples":48,"fov":65,"viewportStable":true,"over33Fraction":0.008537886872998934,"p50Ms":16.694199293851854,"evidence":"Single 48s Studio sample, not 60FPS certification or physical-device acceptance","p99Ms":32.259199768304828}
+2026-09-13T02:46:49.647Z,487.647278,8d04,6,Info [FLog::CreatorOutput] [Cascade performance complete] true; camera restored and callback disconnected;
+2026-09-13T02:48:13.409Z,571.409058,8bc8,6,Info [FLog::CreatorOutput] CASCADE_FIDELITY_RESTORED_QUALITY Enum.QualityLevel.Automatic

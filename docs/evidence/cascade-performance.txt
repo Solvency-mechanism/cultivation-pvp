@@ -1,0 +1,11 @@
+Cascade approach diagnostic; single fixed-quality Studio sample, not 60 FPS certification.
+Source log: 0.738.0.7381393_20260913T020119Z_Studio_D889A_last.log
+First sample at 02:06:03 UTC is DISCARDED from controlled results because viewportStable=false.
+Second sample at 02:07:33 UTC has stable1094x492 viewport, FOV65, explicit StudioLevel10, single Studio PID19608 confirmed by operator.
+
+2026-09-13T02:04:36.648Z,197.648560,a278,6,Info [FLog::CreatorOutput] CASCADE_FIXED_QUALITY Enum.QualityLevel.Level10
+2026-09-13T02:06:03.349Z,284.349243,513c,6,Info [FLog::CreatorOutput] [Cascade performance] {"cpuMeanMs":4.576518748460027,"gpuMeanMs":12.141258407306547,"viewport":[1094,365.3333435058594],"frames":2888,"meanFps":59.59680497012996,"p95Ms":19.094500690698625,"statsSamples":48,"fov":65,"viewportStable":false,"over33Fraction":0.0017313019390581718,"p50Ms":16.651200130581857,"evidence":"Single 48s Studio sample, not 60FPS certification or physical-device acceptance","p99Ms":25.643400847911836}
+2026-09-13T02:06:03.349Z,284.349243,513c,6,Info [FLog::CreatorOutput] [Cascade performance complete] true; camera restored and callback disconnected;
+2026-09-13T02:07:33.762Z,374.762817,7848,6,Info [FLog::CreatorOutput] [Cascade performance] {"cpuMeanMs":4.343504158896394,"gpuMeanMs":13.651352948121107,"viewport":[1094,492],"frames":2895,"meanFps":59.667522568771,"p95Ms":23.82740005850792,"statsSamples":48,"fov":65,"viewportStable":true,"over33Fraction":0.0024179620034542315,"p50Ms":16.659799963235856,"evidence":"Single 48s Studio sample, not 60FPS certification or physical-device acceptance","p99Ms":28.750600293278695}
+2026-09-13T02:07:33.763Z,374.763824,7848,6,Info [FLog::CreatorOutput] [Cascade performance complete] true; camera restored and callback disconnected;
+2026-09-13T02:08:32.177Z,433.177338,7ce0,6,Info [FLog::CreatorOutput] CASCADE_RESTORED_QUALITY Enum.QualityLevel.Automatic

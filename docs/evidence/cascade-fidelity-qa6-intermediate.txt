@@ -1,0 +1,8 @@
+INTERMEDIATE QA6: gameplay probes passed, rendered art rejected. Not final fidelity acceptance.
+Source log: 0.738.0.7381393_20260913T022016Z_Studio_3E62B_last.log
+Engine Ball shape did not render authored anisotropic forms; geometric bounds alone missed this.
+
+2026-09-13T02:21:52.487Z,96.487770,9940,6,Info [FLog::CreatorOutput] [Cascade spatial] {"failures":[],"passed":126,"evidence":"Engine spatial queries; not walking acceptance"}
+2026-09-13T02:22:04.831Z,108.831154,50dc,6,Info [FLog::CreatorOutput] [Cascade warden] {"maxY":5,"seconds":12,"unsupported":0,"minY":4.999999523162842,"samples":24,"displacement":11.448820114135743}
+2026-09-13T02:22:51.833Z,155.833481,9940,6,Info [FLog::CreatorOutput] [Cascade cultivation] {"before":{"capacity":1200,"total":407,"lumen":101,"available":true},"seconds":8,"after":{"capacity":1200,"total":437,"lumen":114,"available":true},"lumenDelta":13,"evidence":"Published integer vessel attributes; no grant or duplicate service tick"}
+2026-09-13T02:22:51.841Z,155.841507,9940,6,Info [FLog::CreatorOutput] [Cascade walk] {"ok":true,"setupRelocations":1,"finalRegion":"wellspring","cultivation":{"before":{"capacity":1200,"total":407,"lumen":101,"available":true},"seconds":8,"after":{"capacity":1200,"total":437,"lumen":114,"available":true},"lumenDelta":13,"evidence":"Published integer vessel attributes; no grant or duplicate service tick"},"passed":38,"walkSpeed":16,"failed":0,"evidence":"Real Humanoid.MoveTo controller contact; not human traversal"}

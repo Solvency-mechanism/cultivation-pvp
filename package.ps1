@@ -33,7 +33,7 @@ if (-not $SkipGate) {
     if ($LASTEXITCODE -ne 0) { throw "stylua found unformatted files" }
 
     Write-Output "--- tests"
-    foreach ($suite in @("compile", "wiring", "progression", "auranodes", "combat", "interface", "volcano", "volcano-integration", "volcano-world")) {
+    foreach ($suite in @("compile", "wiring", "progression", "auranodes", "combat", "interface", "volcano", "volcano-integration", "volcano-world", "cascade-world", "cascade-node-visual")) {
         lune run "tests/$suite.test"
         if ($LASTEXITCODE -ne 0) { throw "$suite suite failed" }
     }

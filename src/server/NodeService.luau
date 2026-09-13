@@ -12,6 +12,7 @@ local Players = game:GetService("Players")
 
 local AuraNodes = require(ReplicatedStorage.Shared.AuraNodes)
 local Config = require(ReplicatedStorage.Shared.Config)
+local CascadeNodeVisual = require(ReplicatedStorage.Shared.CascadeNodeVisual)
 --[[ Placement asks the arena where the ground is, which region a point is in,
 	and where nodes may not go. One-way: ArenaService requires only Config, so
 	this is not a cycle. ]]
@@ -120,6 +121,10 @@ type TierVisual = {
 	rate: number,
 	light: number,
 	shaft: number,
+	ringTransparency: number?,
+	ringBedTransparency: number?,
+	ringEyeTransparency: number?,
+	perimeter: boolean?,
 }
 
 --[[ Hues match the client's sense-panel rows: the colour of a line in the HUD
@@ -395,8 +400,17 @@ end
 	carries the old lift forward and the silhouette is unchanged. ]]
 local NODE_LIFT = 4
 
+local function isCascadeNode(node: AuraNodes.Node): boolean
+	local decor = Workspace:FindFirstChild("ArenaDecor")
+	local cascade = if decor then decor:FindFirstChild("PorcelainCascade") else nil
+	-- Nearby original Wellspring ground shares this scene's sightlines. Compact
+	-- every node in the region while the authored biome exists, not just pools.
+	return CascadeNodeVisual.isScoped(node.region, cascade ~= nil)
+end
 local function buildPart(node: AuraNodes.Node): BasePart
-	local spec = TIER_VISUAL[node.tier] or TIER_VISUAL.common
+	local compact = isCascadeNode(node)
+	local spec: TierVisual =
+		CascadeNodeVisual.select(TIER_VISUAL[node.tier] or TIER_VISUAL.common, node.tier, compact)
 
 	--[[ EVERY ground-contacting piece is built relative to this, not to world
 		zero. The ring bed, the ring, the eye, the shard feet, the Prime shaft
@@ -423,6 +437,7 @@ local function buildPart(node: AuraNodes.Node): BasePart
 	part:SetAttribute("Tier", node.tier)
 	part:SetAttribute("Region", node.region)
 	part:SetAttribute("ExpiresAt", node.expiresAt)
+	part:SetAttribute("VisualStyle", if compact then "cascade_compact" else "field")
 	makeVisual(part, ensureFolder())
 
 	local shell = newBall(spec.core * 1.5, centre, spec.color, 0.3)
@@ -448,21 +463,48 @@ local function buildPart(node: AuraNodes.Node): BasePart
 	ringBed.Name = "RingBed"
 	ringBed.Color = NODE_DARK
 	ringBed.Material = Enum.Material.Slate
+	ringBed.Transparency = spec.ringBedTransparency or 0
 	makeVisual(ringBed, part)
 
 	local ring = newDisc(reach, 0.6, Vector3.new(centre.X, groundY + 0.3, centre.Z))
 	ring.Name = "Ring"
 	ring.Color = spec.color
-	ring.Material = Enum.Material.Neon
-	ring.Transparency = 0.35
+	ring.Material = if compact then Enum.Material.SmoothPlastic else Enum.Material.Neon
+	ring.Transparency = spec.ringTransparency or 0.35
 	makeVisual(ring, part)
 
 	local eye = newDisc(reach * 0.55, 0.6, Vector3.new(centre.X, groundY + 0.36, centre.Z))
 	eye.Name = "RingEye"
 	eye.Color = NODE_DARK
 	eye.Material = Enum.Material.Slate
-	eye.Transparency = 0.25
+	eye.Transparency = spec.ringEyeTransparency or 0.25
 	makeVisual(eye, part)
+	if spec.perimeter then
+		-- Vertices lie on the actual capture circle. Fine, static chords expose
+		-- that boundary while leaving the pool floor and water visible inside.
+		for index = 1, 32 do
+			local a = (index - 1) * math.pi * 2 / 32
+			local b = index * math.pi * 2 / 32
+			local start = Vector3.new(
+				centre.X + math.cos(a) * reach,
+				groundY + 0.64,
+				centre.Z + math.sin(a) * reach
+			)
+			local finish = Vector3.new(
+				centre.X + math.cos(b) * reach,
+				groundY + 0.64,
+				centre.Z + math.sin(b) * reach
+			)
+			local edge = Instance.new("Part")
+			edge.Name = "CascadeCaptureBoundary"
+			edge.Size = Vector3.new(0.1, 0.06, (finish - start).Magnitude)
+			edge.CFrame = CFrame.lookAt((start + finish) / 2, finish)
+			edge.Color = spec.color
+			edge.Material = Enum.Material.SmoothPlastic
+			edge.Transparency = 0.25
+			makeVisual(edge, part)
+		end
+	end
 
 	-- Tier silhouette: shards standing on the ring, tipped in neon above rare.
 	for index = 1, spec.shards do

@@ -1,0 +1,8 @@
+INTERMEDIATE QA7: gameplay probes passed, composition not accepted.
+Source log: 0.738.0.7381393_20260913T022649Z_Studio_A380F_last.log
+Sphere mesh rendering corrected, but repeated separated forms exposed rectangular foundations; awaiting composition revision.
+
+2026-09-13T02:28:36.875Z,107.875008,37bc,6,Info [FLog::CreatorOutput] [Cascade spatial] {"failures":[],"passed":126,"evidence":"Engine spatial queries; not walking acceptance"}
+2026-09-13T02:28:49.372Z,120.372925,37bc,6,Info [FLog::CreatorOutput] [Cascade warden] {"maxY":5,"seconds":12,"unsupported":0,"minY":4.999999523162842,"samples":24,"displacement":7.879340171813965}
+2026-09-13T02:29:36.434Z,167.434418,9d98,6,Info [FLog::CreatorOutput] [Cascade cultivation] {"before":{"capacity":1200,"total":605,"lumen":277,"available":true},"seconds":8,"after":{"capacity":1200,"total":641,"lumen":293,"available":true},"lumenDelta":16,"evidence":"Published integer vessel attributes; no grant or duplicate service tick"}
+2026-09-13T02:29:36.438Z,167.438446,9d98,6,Info [FLog::CreatorOutput] [Cascade walk] {"ok":true,"setupRelocations":1,"finalRegion":"wellspring","cultivation":{"before":{"capacity":1200,"total":605,"lumen":277,"available":true},"seconds":8,"after":{"capacity":1200,"total":641,"lumen":293,"available":true},"lumenDelta":16,"evidence":"Published integer vessel attributes; no grant or duplicate service tick"},"passed":38,"walkSpeed":16,"failed":0,"evidence":"Real Humanoid.MoveTo controller contact; not human traversal"}
