@@ -2348,12 +2348,12 @@ local function cycleSlot(slot: string)
 end
 
 -- ===================================================================
--- The loadout picker. Development profile only.
+-- The loadout picker. Tester profiles only.
 -- ===================================================================
 
 --[[ The whole pool, visible and swappable, behind a toggle.
 
-	Gated on `Config.Profile` exactly as the tuning numbers are: the ask was
+	Gated on the tester profiles exactly as the tuning numbers are: the ask was
 	"just for testing purposes for right now", and that is a lifetime this
 	project already has a place for. It cannot ship by accident, and setting the
 	profile to release removes it with no deletion and nothing to remember.
@@ -2372,7 +2372,7 @@ end
 	it the natural way to try to dodge a cooldown -- so that last check gets *more*
 	load-bearing here, not less. ]]
 local PICKER = InterfaceSpec.Picker
-local pickerEnabled = Config.Profile == "development"
+local pickerEnabled = Config.isTesterProfile(Config.Profile)
 
 type ChipWidget = {
 	button: TextButton,

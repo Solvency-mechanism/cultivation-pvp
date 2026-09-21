@@ -1,0 +1,26 @@
+Final QA6 isolated Studio service lab. Temporary controlled state/target setup; actual service paths and real Cinder RemoteEvent. Local serialization only; no multiplayer or backend persistence acceptance.
+Source log:
+C:/Users/sterl/AppData/Local/Roblox/logs/0.738.0.7381393_20260913T035031Z_Studio_5E209_last.log
+2026-09-13T03:52:16.011Z,105.011185,6248,6,Info [FLog::CreatorOutput] [Treasure QA check] PASS near discovery grants via real service
+2026-09-13T03:52:16.012Z,105.012184,6248,6,Info [FLog::CreatorOutput] [Treasure QA check] PASS duplicate discovery does not grant again
+2026-09-13T03:52:16.013Z,105.013184,6248,6,Info [FLog::CreatorOutput] [Treasure QA check] PASS far discovery rejected
+2026-09-13T03:52:16.013Z,105.013184,6248,6,Info [FLog::CreatorOutput] [Treasure QA check] PASS wall discovery rejected
+2026-09-13T03:52:16.284Z,105.284332,8d4c,6,Info [FLog::CreatorOutput] [Treasure QA check] PASS slot3 equip applies movement modifier
+2026-09-13T03:52:16.284Z,105.284332,8d4c,6,Info [FLog::CreatorOutput] [Treasure QA check] PASS sparse slot3 survives local store roundtrip
+2026-09-13T03:52:16.556Z,105.556572,0d0c,6,Info [FLog::CreatorOutput] [Treasure QA check] PASS moving equipped item stays unique
+2026-09-13T03:52:16.816Z,105.816208,6248,6,Info [FLog::CreatorOutput] [Treasure QA check] PASS fourth slot rejected
+2026-09-13T03:52:17.071Z,106.071571,6248,6,Info [FLog::CreatorOutput] [Treasure QA check] PASS unknown/unowned rejected
+2026-09-13T03:52:17.356Z,106.356415,6248,6,Info [FLog::CreatorOutput] [Treasure QA check] PASS unequip restores movement modifier
+2026-09-13T03:52:17.618Z,106.618919,6248,6,Info [FLog::CreatorOutput] [Treasure QA check] PASS breath atomically spends30 actual fire
+2026-09-13T03:52:17.620Z,106.620926,6248,6,Info [FLog::CreatorOutput] [Treasure QA check] PASS directed breath damages real registered target
+2026-09-13T03:52:17.620Z,106.620926,6248,6,Info [FLog::CreatorOutput] [Treasure QA check] PASS accepted breath publishes cooldown
+2026-09-13T03:52:17.877Z,106.877098,6248,6,Info [FLog::CreatorOutput] [Treasure QA check] PASS cooldown rejects repeat spend
+2026-09-13T03:52:18.130Z,107.130089,0d0c,6,Info [FLog::CreatorOutput] [Treasure QA check] PASS combat lock rejects swaps
+2026-09-13T03:52:28.622Z,117.622879,6248,6,Info [FLog::CreatorOutput] [Treasure QA check] PASS insufficient fire does not start cooldown
+2026-09-13T03:52:39.728Z,128.728058,6248,6,Info [FLog::CreatorOutput] [Treasure QA check] PASS stationary actual cultivation ticks fully charge Heart
+2026-09-13T03:52:40.348Z,129.348618,8d4c,6,Info [FLog::CreatorOutput] [Treasure Heart heal] {"before":280,"humanoidBefore":320.80877685546877,"after":360,"humanoidAfter":364.0900573730469,"chargeAfter":0,"delta":80,"maxHealth":400}
+2026-09-13T03:52:40.348Z,129.348618,8d4c,6,Info [FLog::CreatorOutput] [Treasure QA check] PASS real Cinder Step action succeeded
+2026-09-13T03:52:40.349Z,129.349625,8d4c,6,Info [FLog::CreatorOutput] [Treasure QA check] PASS successful dash consumes charge and heals authoritative health exactly20%
+2026-09-13T03:52:43.551Z,132.551407,0d0c,6,Info [FLog::CreatorOutput] [Treasure QA check] PASS Heart recharges through ordinary ticks
+2026-09-13T03:52:44.786Z,133.786469,0d0c,6,Info [FLog::CreatorOutput] [Treasure QA check] PASS movement resets charge
+2026-09-13T03:52:44.789Z,133.789581,0d0c,6,Info [FLog::CreatorOutput] [Treasure QA] {"multiplayerHealing":"Not exercised by one-player lab; same-team and hostility require separate player coverage","ok":true,"evidence":"Isolated Studio service lab with temporary player-state seeding; local serialization only, not backend save acceptance","passed":21,"failed":0}

@@ -140,6 +140,13 @@ Studio is code of unknown vintage wearing the right filename -- neither its size
 nor its timestamp tells you which commit is inside it -- and this has already
 nearly shipped a build with an entire subsystem silently absent.
 
+The checked-in deployment profile is **`beta`**: an invited, restricted tester
+candidate. It retains accelerated tester tuning and the loadout picker, and saves
+only to `Cultivation_beta_20260920`; it neither reads nor writes the historical
+development-playtest store or the eventual `Cultivation_v1` release store. Keep
+the Roblox experience private/restricted for this profile. `release` remains the
+public-balance profile and must not be selected until beta evidence warrants it.
+
 Press **B** at the refinement ceiling to break through. Progress saves on leave,
 on shutdown and every 90 seconds — but DataStores are unavailable in an
 unpublished place, where the server warns once and runs in memory.

@@ -42,6 +42,8 @@
         "VolcanoAction": {
           "$className": "RemoteEvent"
         },
+        "TreasureAction": { "$className": "RemoteEvent" },
+        "TreasureFeedback": { "$className": "RemoteEvent" },
         "VolcanoFeedback": {
           "$className": "RemoteEvent"
         }

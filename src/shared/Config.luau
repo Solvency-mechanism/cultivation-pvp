@@ -1274,17 +1274,23 @@ Config.DefaultLoadout = {
 	So it is a profile now: one flag, obvious at a glance which way it is set,
 	announced at boot, and stamped into the release receipt.
 
-	TO SHIP TO PLAYERS: set `Config.Profile = "release"`. That is the whole
-	procedure -- nothing below needs deleting, and nothing above ever changed.
+	TO SHIP TO INVITED BETA TESTERS: set `Config.Profile = "beta"`. TO SHIP TO
+	THE PUBLIC: set `Config.Profile = "release"`. Neither procedure needs
+	deleting overrides, and nothing above ever changes.
 
 	`development` exists to make TESTING fast, not to be balanced. It is not a
 	balance ruling and no number in it should be read as one.
 
-	THE TWO PROFILES ARE FOR DIFFERENT JOBS AND YOU MUST NOT MIX THEM UP:
+	THE THREE PROFILES ARE FOR DIFFERENT JOBS AND YOU MUST NOT MIX THEM UP:
 
 	  development -- THROUGHPUT. Exercise every technique, reach a catalyst,
 	                 reach a breakthrough, watch a cast bar, without waiting on
 	                 a bar to refill. Use it to find out WHETHER SOMETHING WORKS.
+
+	  beta        -- RESTRICTED TESTING. Uses the same deliberate throughput
+	                 overrides as development, but writes only to its own beta
+	                 store. Use it for invited tester sessions, never public
+	                 balance measurement.
 
 	  release     -- MEASUREMENT. Use it for any number you intend to act on.
 
@@ -1299,13 +1305,23 @@ Config.DefaultLoadout = {
 	Under `development` that whole distinction vanishes, and with it the reason
 	different loadouts have different time-to-kill.
 
-	So: flip to `release` for the measurement run, take the numbers, flip back.
+	So: use `release` for the measurement run, take the numbers, then return to
+	`beta` only for the next restricted tester session.
 	And record which profile any number was taken under -- a figure with no
 	profile attached is worse than no figure, because somebody will act on it.
 ]]
-Config.Profile = "development" :: "development" | "release"
+export type Profile = "development" | "beta" | "release"
 
-if Config.Profile == "development" then
+Config.Profile = "beta" :: Profile
+
+--[[ One named boundary for throughput-only affordances. Both the override
+	block below and the client picker use it, so a future test profile cannot
+	accidentally receive one without the other. ]]
+function Config.isTesterProfile(profile: string): boolean
+	return profile == "development" or profile == "beta"
+end
+
+if Config.isTesterProfile(Config.Profile) then
 	--[[ Refinement, re-aimed against MEASURED rates rather than guessed ones.
 
 		These were deliberately held at Remi's session values while cycling
@@ -1369,14 +1385,20 @@ if Config.Profile == "development" then
 	Config.Techniques.lance.windup = 0.28 -- release 0.15
 	Config.Techniques.volley.windup = 0.50 -- release 0.35
 
-	--[[ A separate store, so a 26x-accelerated curve never writes into the
-		release save. Kept at the playtest name rather than renamed to something
+	--[[ Separate stores, so a 26x-accelerated curve never writes into the
+		release save. Development is kept at the playtest name rather than renamed to something
 		tidier for one specific reason: THIS STORE HOLDS THE ONLY EVIDENCE THAT
 		PERSISTENCE HAS EVER WORKED. Remi's session wrote to it -- the first
 		time the DataStore path has executed at all -- and if any of that group
 		rejoins with their tier intact, that is the confirmation we never got.
-		Renaming would orphan it for a tidier name, which is a bad trade. ]]
-	Config.Persistence.storeName = "Cultivation_playtest_20260910" -- release "Cultivation_v1"
+		Renaming it would orphan that evidence. Beta starts a new, explicitly
+		isolated cohort: those accelerated saves must neither alter this evidence
+		nor become production progress. ]]
+	if Config.Profile == "beta" then
+		Config.Persistence.storeName = "Cultivation_beta_20260920"
+	else
+		Config.Persistence.storeName = "Cultivation_playtest_20260910"
+	end
 end
 
 return Config

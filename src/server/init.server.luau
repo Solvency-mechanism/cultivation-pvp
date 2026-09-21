@@ -15,6 +15,7 @@ local NpcService = require(script.NpcService)
 local PersistenceService = require(script.PersistenceService)
 local PresenceService = require(script.PresenceService)
 local VolcanoService = require(script.VolcanoService)
+local TreasureService = require(script.TreasureService)
 
 --[[ Fault-isolated startup.
 
@@ -64,6 +65,11 @@ end)
 
 startService("CombatService", CombatService.start)
 startService("VolcanoService", VolcanoService.start)
+CultivationService.setTreasureCultivateHandler(TreasureService.onCultivate)
+CombatService.setTreasureDashHandler(TreasureService.onDash)
+CombatService.setTreasureDamageHandler(TreasureService.resetCharge)
+VolcanoService.setTreasureHandlers(TreasureService.onDash, TreasureService.onVent)
+startService("TreasureService", TreasureService.start)
 
 --[[ Dummies are a testing instrument, not content, but they are wired exactly
 	like everything else on purpose: a dummy that went through its own start,
@@ -215,6 +221,9 @@ RunService.Heartbeat:Connect(function(delta: number)
 	accumulator = 0
 
 	local now = os.clock()
+	tickService("TreasureService", now, function()
+		TreasureService.step(now, elapsed)
+	end)
 	tickService("VolcanoService", now, function()
 		VolcanoService.step(now, elapsed)
 	end)
@@ -254,12 +263,11 @@ end)
 	profile changes most visibly (350 in development against a release 9000), so
 	it distinguishes one from the other at a glance.
 
-	The profile itself is announced through `warn` rather than `print` when it is
-	anything but release. A development profile is a correct and useful thing to
-	be running -- right up until it is running in front of players, at which
-	point it is the most expensive mistake available, because every number in it
-	is deliberately wrong for balance. Output-window yellow is cheap insurance
-	against the one build nobody meant to ship. ]]
+	The profile itself is announced through `warn` unless it is release. Beta is
+	a correct and useful profile for invited testers, but its values are still
+	not public-balance evidence. Development remains a local throughput profile.
+	Output-window yellow is cheap insurance against the one build nobody meant
+	to ship. ]]
 local lowgold = Config.Stages[5]
 print(
 	`[cultivation] online -- {#Config.Stages} stages, cap at {Config.Stages[#Config.Stages].name}`
@@ -268,6 +276,10 @@ print(`[cultivation] build check -- {lowgold.name} tier = {lowgold.perTierProgre
 
 if Config.Profile == "release" then
 	print("[cultivation] profile: release")
+elseif Config.Profile == "beta" then
+	warn(
+		"[cultivation] PROFILE: BETA -- accelerated tester tuning; isolated beta DataStore. Restricted testers only."
+	)
 else
 	warn(
 		`[cultivation] PROFILE: {string.upper(Config.Profile)} -- tuning is deliberately wrong for balance. NOT FOR PLAYERS.`

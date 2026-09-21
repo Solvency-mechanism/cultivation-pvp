@@ -18,6 +18,7 @@ local Workspace = game:GetService("Workspace")
 local Combat = require(ReplicatedStorage.Shared.Combat)
 local Config = require(ReplicatedStorage.Shared.Config)
 local Progression = require(ReplicatedStorage.Shared.Progression)
+local Treasures = require(ReplicatedStorage.Shared.Treasures)
 local ArenaService = require(script.Parent.ArenaService)
 local AwarenessService = require(script.Parent.AwarenessService)
 local CultivationService = require(script.Parent.CultivationService)
@@ -101,6 +102,22 @@ type ActiveCast = {
 	startedAt: number,
 }
 local activeCasts: { [number]: ActiveCast } = {}
+local treasureLockUntil: { [number]: number } = {}
+local treasureDashHandler: ((Player) -> ())? = nil
+local treasureDamageHandler: ((Player) -> ())? = nil
+function CombatService.setTreasureDashHandler(handler: (Player) -> ())
+	treasureDashHandler = handler
+end
+function CombatService.setTreasureDamageHandler(handler: (Player) -> ())
+	treasureDamageHandler = handler
+end
+local function lockTreasures(player: Player, untilTime: number)
+	treasureLockUntil[player.UserId] = math.max(treasureLockUntil[player.UserId] or 0, untilTime)
+end
+local function treasureModifiers(player: Player)
+	local state = CultivationService.getState(player)
+	return Treasures.modifiers(if state then state.treasures else nil)
+end
 
 local techniqueFiredRemote: RemoteEvent? = nil
 local castStartedRemote: RemoteEvent? = nil
@@ -419,7 +436,11 @@ local function mirrorMoveSpeed(humanoid: Humanoid?, actor: Combat.Actor, now: nu
 		return
 	end
 	local override = Combat.moveSpeedOf(actor, now)
-	humanoid.WalkSpeed = if override > 0 then override else Config.Combat.baseWalkSpeed
+	local ownerId = tonumber(actor.id) or -1
+	local owner = if actors[ownerId] == actor then Players:GetPlayerByUserId(ownerId) else nil
+	local bonus = if owner then treasureModifiers(owner).speed else 0
+	humanoid.WalkSpeed = (if override > 0 then override else Config.Combat.baseWalkSpeed)
+		* (1 + bonus)
 end
 
 local function ensureActor(player: Player): Combat.Actor?
@@ -801,9 +822,25 @@ local function damageCombatant(source: Combat.Actor, target: Combatant, raw: num
 		end
 	end
 
+	local ownerId = tonumber(source.id) or -1
+	local owner = if actors[ownerId] == source then Players:GetPlayerByUserId(ownerId) else nil
+	-- Environmental self-damage does not grow with a strength treasure.
+	if owner and source ~= target.actor then
+		raw *= 1 + treasureModifiers(owner).strength
+	end
 	local result = Combat.applyDamage(Config, target.actor, raw, now)
 	if result.dealt <= 0 then
 		return
+	end
+
+	if owner then
+		lockTreasures(owner, now + 10)
+	end
+	if target.player then
+		lockTreasures(target.player, now + 10)
+		if treasureDamageHandler then
+			treasureDamageHandler(target.player)
+		end
 	end
 
 	--[[ THE interrupt check, and the only one -- per the frostbolt ruling,
@@ -1369,6 +1406,7 @@ local function spawnConstruct(
 )
 	local tech = Config.Techniques[techId]
 	local radius = Config.Combat.ranges.forger
+	lockTreasures(owner, now + tech.buffDuration) -- actual resolve time, including scheduler delay
 	constructCounter += 1
 
 	local part = Instance.new("Part")
@@ -1550,6 +1588,9 @@ local function resolveEffect(caster: Player, actor: Combat.Actor, techId: string
 		if root then
 			broadcastVfx(caster.UserId, techId, root.Position, nil, true)
 		end
+		if techId == "swiftstep" and root and treasureDashHandler then
+			treasureDashHandler(caster)
+		end
 	elseif tech.kind == "forger" then
 		local root = rootOf(caster)
 		if root then
@@ -1728,6 +1769,17 @@ local function onUseTechnique(
 		return
 	end
 	lastCastRefusalNotice[player.UserId] = nil
+	-- Protect live channels/projectiles/constructs as well as casts that miss.
+	-- Equipment cannot change while delayed attacks still read the loadout.
+	lockTreasures(
+		player,
+		now
+			+ math.max(
+				10,
+				math.max(tech.castTime, tech.windup)
+					+ math.max(tech.buffDuration, PROJECTILE_MAX_LIFETIME)
+			)
+	)
 
 	--[[ Combat.use already debited actor.aura locally (A5's mirror, not the
 		persisted resource) -- this commits that same amount against the real
@@ -1916,6 +1968,7 @@ function CombatService.onPlayerAdded(player: Player)
 end
 
 function CombatService.onPlayerRemoving(player: Player)
+	treasureLockUntil[player.UserId] = nil
 	actors[player.UserId] = nil
 	loadouts[player.UserId] = nil
 	dying[player.UserId] = nil
@@ -1987,6 +2040,7 @@ function CombatService.tick(_deltaSeconds: number, now: number)
 			if cultivationState then
 				actor.aura = Progression.vesselTotal(cultivationState)
 			end
+			mirrorMoveSpeed(humanoidOf(player), actor, now)
 			publish(player)
 		end
 	end
@@ -2008,7 +2062,9 @@ end
 function CombatService.beginVolcanoAction(player: Player)
 	local actor = ensureActor(player)
 	if actor then
-		actor.gcdUntil = os.clock() + Config.Combat.globalCooldown
+		local now = os.clock()
+		actor.gcdUntil = now + Config.Combat.globalCooldown
+		lockTreasures(player, now + 10)
 	end
 end
 
@@ -2035,6 +2091,7 @@ function CombatService.volcanoVent(player: Player, origin: Vector3, direction: V
 		return
 	end
 	local now = os.clock()
+	lockTreasures(player, now + 10)
 	actor.gcdUntil = now + Config.Combat.globalCooldown
 	local params = OverlapParams.new()
 	params.FilterType = Enum.RaycastFilterType.Exclude
@@ -2057,6 +2114,97 @@ function CombatService.volcanoVent(player: Player, origin: Vector3, direction: V
 			end
 		end
 	end
+end
+
+-- Relic service pays costs and owns cooldowns; combat owns targets and outcomes.
+function CombatService.treasureCanSwap(player: Player): boolean
+	return CombatService.canVolcanoAct(player)
+		and os.clock() >= (treasureLockUntil[player.UserId] or 0)
+end
+
+function CombatService.treasureBreath(player: Player, direction: Vector3): boolean
+	if not CombatService.canVolcanoAct(player) then
+		return false
+	end
+	local magnitude = direction.Magnitude
+	if magnitude ~= magnitude or magnitude < 0.01 or magnitude == math.huge then
+		return false
+	end
+	local actor = ensureActor(player)
+	local root = rootOf(player)
+	if not actor or not root then
+		return false
+	end
+	local now = os.clock()
+	direction = direction.Unit
+	lockTreasures(player, now + 10)
+	actor.gcdUntil = now + Config.Combat.globalCooldown
+	local params = OverlapParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = { root.Parent :: Instance }
+	local rays = RaycastParams.new()
+	rays.FilterType = Enum.RaycastFilterType.Exclude
+	rays.FilterDescendantsInstances = { root.Parent :: Instance }
+	local seen: { [Model]: boolean } = {}
+	local origin = root.Position
+	local raw = 35 * Config.Stages[actor.stageIndex].basePower / Config.Combat.referencePower
+	for _, part in Workspace:GetPartBoundsInRadius(origin, 30, params) do
+		local target = combatantFromInstance(part)
+		if target and target.model ~= root.Parent and not seen[target.model] then
+			seen[target.model] = true
+			local delta = target.root.Position - origin
+			if
+				delta.Magnitude > 0.01
+				and delta.Magnitude <= 30
+				and delta.Unit:Dot(direction) >= 0.9
+			then
+				local hit = Workspace:Raycast(origin, delta, rays)
+				if not hit or hit.Instance:IsDescendantOf(target.model) then
+					damageCombatant(actor, target, raw, now)
+				end
+			end
+		end
+	end
+	return true
+end
+
+function CombatService.treasureHeal(player: Player): number
+	local source = ensureActor(player)
+	local root = rootOf(player)
+	if not source or source.health <= 0 or not root then
+		return 0
+	end
+	local healed = 0
+	local rays = RaycastParams.new()
+	rays.FilterType = Enum.RaycastFilterType.Exclude
+	rays.FilterDescendantsInstances = { root.Parent :: Instance }
+	for _, ally in Players:GetPlayers() do
+		if
+			ally == player
+			or (not player.Neutral and not ally.Neutral and ally.Team == player.Team)
+		then
+			local actor, allyRoot = ensureActor(ally), rootOf(ally)
+			local humanoid = humanoidOf(ally)
+			if actor and actor.health > 0 and allyRoot and humanoid and humanoid.Health > 0 then
+				local delta = allyRoot.Position - root.Position
+				if delta.Magnitude <= 12 then
+					local hit = if delta.Magnitude > 0.01
+						then Workspace:Raycast(root.Position, delta, rays)
+						else nil
+					if not hit or hit.Instance:IsDescendantOf(allyRoot.Parent :: Instance) then
+						local maxHealth = Combat.maxHealth(Config, actor.stageIndex)
+						local amount = math.min(maxHealth * 0.2, maxHealth - actor.health)
+						actor.health += amount
+						healed += amount
+						mirrorHumanoid(humanoid, actor)
+						publish(ally)
+					end
+				end
+			end
+		end
+	end
+	lockTreasures(player, os.clock() + 10)
+	return healed
 end
 
 function CombatService.start()

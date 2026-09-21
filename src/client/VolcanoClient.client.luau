@@ -7,6 +7,21 @@ local UserInputService = game:GetService("UserInputService")
 local Workspace = game:GetService("Workspace")
 local Volcano = require(ReplicatedStorage.Shared.Volcano)
 local player = Players.LocalPlayer
+local HttpService = game:GetService("HttpService")
+local emberlungEquipped = false
+local function refreshTreasurePower()
+	local raw = player:GetAttribute("TreasuresEquipped")
+	local ok, value = pcall(function()
+		return HttpService:JSONDecode(if typeof(raw) == "string" then raw else "[]")
+	end)
+	emberlungEquipped = ok and type(value) == "table" and table.find(value, "emberlung") ~= nil
+end
+local treasureConnection =
+	player:GetAttributeChangedSignal("TreasuresEquipped"):Connect(refreshTreasurePower)
+script.Destroying:Connect(function()
+	treasureConnection:Disconnect()
+end)
+refreshTreasurePower()
 local remotes = ReplicatedStorage:WaitForChild("Remotes")
 local action = remotes:WaitForChild("VolcanoAction") :: RemoteEvent
 local feedback = remotes:WaitForChild("VolcanoFeedback") :: RemoteEvent
@@ -236,12 +251,21 @@ RunService.Heartbeat:Connect(function(dt)
 	vent.Position = UDim2.new(1, -16, 0.48, if collapsed then 70 else 140)
 	cinder.Position = UDim2.new(1, -126, 0.48, if collapsed then 70 else 140)
 	local unlocked = player:GetAttribute("CinderStep") == true
-	vent.Visible = near or (player:GetAttribute("Vessel_ash") or 0) >= 20
+	vent.Visible = near or emberlungEquipped or (player:GetAttribute("Vessel_ash") or 0) >= 20
 	cinder.Visible = unlocked
 	local serverNow = Workspace:GetServerTimeNow()
-	local ventWait = math.max(0, (player:GetAttribute("VentReadyAt") or 0) - serverNow)
+	local ventWait = math.max(
+		0,
+		(
+			player:GetAttribute(if emberlungEquipped then "TreasurePowerReadyAt" else "VentReadyAt")
+			or 0
+		) - serverNow
+	)
 	local cinderWait = math.max(0, (player:GetAttribute("CinderReadyAt") or 0) - serverNow)
-	vent.Text = if ventWait > 0 then `Vent · {math.ceil(ventWait)}s` else "V · Vent (20)"
+	local ventName = if emberlungEquipped then "Breath" else "Vent"
+	vent.Text = if ventWait > 0
+		then `{ventName} · {math.ceil(ventWait)}s`
+		else (if emberlungEquipped then "V · Breath (30)" else "V · Vent (20)")
 	cinder.Text = if cinderWait > 0 then `Step · {math.ceil(cinderWait)}s` else "Q · Step (25)"
 	vent.BackgroundTransparency = if ventWait > 0 then 0.55 else 0
 	cinder.BackgroundTransparency = if cinderWait > 0 then 0.55 else 0

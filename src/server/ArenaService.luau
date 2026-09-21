@@ -92,6 +92,7 @@ local VolcanoSurfaceDetail = require(script.Parent.VolcanoSurfaceDetail)
 local VolcanoDragonDetail = require(script.Parent.VolcanoDragonDetail)
 local Worldcraft = require(script.Parent.Worldcraft)
 local PorcelainCascadeWorld = require(script.Parent.PorcelainCascadeWorld)
+local TreasureWorld = require(script.Parent.TreasureWorld)
 
 local ArenaService = {}
 
@@ -2081,6 +2082,7 @@ function ArenaService.start()
 		VolcanoSurfaceDetail.build(volcano.root)
 		VolcanoProps.build(volcano.root, volcano.ground)
 		VolcanoDragonDetail.build(volcano.root)
+		TreasureWorld.build(decor, volcano.frame)
 		local approach = Worldcraft.volcanoApproach(volcanoCentre)
 		buildRoad(
 			"volcano",

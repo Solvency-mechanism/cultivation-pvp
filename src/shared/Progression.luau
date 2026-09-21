@@ -47,7 +47,10 @@ export type Expedition = {
 	dragonMet: boolean,
 }
 
+export type TreasureCollection = { owned: { [string]: boolean }, equipped: { string } }
+
 export type State = {
+	treasures: TreasureCollection?,
 	stageIndex: number,
 	tier: number,
 	progress: number,
@@ -105,6 +108,31 @@ local function cloneExpedition(expedition: Expedition): Expedition
 	}
 end
 
+local function cloneTreasures(raw: any): TreasureCollection
+	local result: TreasureCollection = { owned = {}, equipped = { "", "", "" } }
+	if type(raw) ~= "table" then
+		return result
+	end
+	if type(raw.owned) == "table" then
+		for _, id in { "emberlung", "cascade_heart", "wind_chime", "iron_seed", "stillwater_pearl" } do
+			if raw.owned[id] == true then
+				result.owned[id] = true
+			end
+		end
+	end
+	local seen = {}
+	if type(raw.equipped) == "table" then
+		for slot = 1, 3 do
+			local id = raw.equipped[slot]
+			if type(id) == "string" and result.owned[id] and not seen[id] then
+				result.equipped[slot] = id
+				seen[id] = true
+			end
+		end
+	end
+	return result
+end
+
 local function clone(state: State): State
 	return {
 		stageIndex = state.stageIndex,
@@ -113,6 +141,7 @@ local function clone(state: State): State
 		catalysts = state.catalysts,
 		core = cloneCore(state.core),
 		expedition = cloneExpedition(state.expedition),
+		treasures = cloneTreasures(state.treasures),
 	}
 end
 
@@ -135,6 +164,7 @@ function Progression.newState(): State
 		catalysts = 0,
 		core = emptyCore(),
 		expedition = emptyExpedition(),
+		treasures = cloneTreasures(nil),
 	}
 end
 
@@ -196,6 +226,7 @@ function Progression.sanitizeState(config: any, raw: any): State
 		end
 	end
 
+	state.treasures = cloneTreasures(raw.treasures)
 	local expedition = raw.expedition
 	if type(expedition) == "table" then
 		local solidFire = tonumber(expedition.solidFire)
@@ -250,6 +281,7 @@ function Progression.toStore(state: State): { [string]: any }
 		progress = state.progress,
 		catalysts = state.catalysts,
 		expedition = cloneExpedition(state.expedition),
+		treasures = cloneTreasures(state.treasures),
 		core = {
 			raw = {
 				ash = state.core.raw.ash,

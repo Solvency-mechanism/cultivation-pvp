@@ -34,7 +34,7 @@ local ArenaService = require(script.Parent.ArenaService)
 	the AuraNodes folder, readable by property, by the Explorer, or by a
 	capture of either: a rolling FieldLog of the last few events and running
 	counters. Written only when an event happens (once per spawn or expiry),
-	so it costs nothing per tick. Development only, like the print. ]]
+	so it costs nothing per tick. Tester profiles only, like the print. ]]
 local FIELD_LOG_LINES = 24
 local fieldLog: { string } = {}
 local fieldCounts = { Spawns = 0, PrimeSpawns = 0, Expired = 0, Drained = 0 }
@@ -46,7 +46,7 @@ local function recordField(
 	tier: string,
 	drained: boolean
 )
-	if Config.Profile ~= "development" then
+	if not Config.isTesterProfile(Config.Profile) then
 		return
 	end
 	print(`[field] {message}`)

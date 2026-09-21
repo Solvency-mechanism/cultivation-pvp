@@ -19,6 +19,11 @@ local ArenaService = require(script.Parent.ArenaService)
 local NodeService = require(script.Parent.NodeService)
 
 local CultivationService = {}
+local Treasures = require(ReplicatedStorage.Shared.Treasures)
+local treasureCultivateHandler: ((Player, number) -> ())? = nil
+function CultivationService.setTreasureCultivateHandler(handler: (Player, number) -> ())
+	treasureCultivateHandler = handler
+end
 
 local states: { [number]: Progression.State } = {}
 local volcanoSources: { BasePart }? = nil
@@ -320,7 +325,9 @@ function CultivationService.tick(deltaSeconds: number, now: number)
 				region = "barren"
 			end
 		end
-		local totalAmount = rate * deltaSeconds
+		local totalAmount = rate
+			* deltaSeconds
+			* (1 + Treasures.modifiers(state.treasures).cultivation)
 		local passiveAmount = totalAmount * Config.Core.passiveFraction
 		local auraAmount = totalAmount - passiveAmount
 
@@ -358,6 +365,9 @@ function CultivationService.tick(deltaSeconds: number, now: number)
 
 		local result = Progression.addProgress(Config, state, passiveAmount)
 		states[player.UserId] = result.state
+		if treasureCultivateHandler then
+			treasureCultivateHandler(player, deltaSeconds)
+		end
 
 		if result.tiersGained > 0 or result.atCeiling then
 			publish(player)

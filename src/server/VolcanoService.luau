@@ -11,6 +11,12 @@ local CultivationService = require(script.Parent.CultivationService)
 local CombatService = require(script.Parent.CombatService)
 
 local VolcanoService = {}
+local treasureDashHandler: ((Player) -> ())? = nil
+local treasureVentHandler: ((Player, any) -> boolean)? = nil
+function VolcanoService.setTreasureHandlers(dash: (Player) -> (), vent: (Player, any) -> boolean)
+	treasureDashHandler = dash
+	treasureVentHandler = vent
+end
 local feedback: RemoteEvent? = nil
 local lastRequest: { [Player]: number } = {}
 local cooldowns: { [Player]: { [string]: number } } = {}
@@ -102,6 +108,14 @@ local function flare(position: Vector3, size: Vector3)
 end
 
 local function act(player: Player, action: string, station: BasePart?, direction: any)
+	if
+		action == "vent"
+		and not station
+		and treasureVentHandler
+		and treasureVentHandler(player, direction)
+	then
+		return
+	end
 	local now = Workspace:GetServerTimeNow()
 	if now - (lastRequest[player] or -math.huge) < 0.3 then
 		return
@@ -225,6 +239,9 @@ local function act(player: Player, action: string, station: BasePart?, direction
 		if action == "cinder" then
 			CombatService.beginVolcanoAction(player)
 			root.CFrame += forward * distance
+			if treasureDashHandler then
+				treasureDashHandler(player)
+			end
 		else
 			CombatService.volcanoVent(player, root.Position, forward)
 			for _, brazier in braziers do

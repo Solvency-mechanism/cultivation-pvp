@@ -34,8 +34,10 @@ Write-Host ""; Line
 # so, and building anything else has to be asked for.
 $branch = (git rev-parse --abbrev-ref HEAD 2>$null)
 if (-not $branch) { Write-Host "  NOT A GIT REPO -- cannot say what this is." -ForegroundColor Red; Read-Host "  Enter"; exit 1 }
+$profileLine = Select-String -Path "src/shared/Config.luau" -Pattern '^Config\.Profile\s*=\s*"([a-z]+)"' | Select-Object -First 1
+$prof = if ($profileLine) { $profileLine.Matches[0].Groups[1].Value } else { "unknown" }
 
-if ($branch -ne "main") {
+if ($branch -ne "main" -and $prof -ne "beta") {
     Write-Host "  ================================================================" -ForegroundColor Yellow
     Write-Host "  YOU ARE ON BRANCH '$branch', NOT main." -ForegroundColor Yellow
     Write-Host "  ================================================================" -ForegroundColor Yellow
@@ -53,6 +55,14 @@ if ($branch -ne "main") {
         Write-Host "  Stopped. Nothing built, nothing opened." -ForegroundColor Yellow
         Read-Host "  Enter"; exit 1
     }
+} elseif ($branch -ne "main") {
+    Write-Host "  ================================================================" -ForegroundColor Yellow
+    Write-Host "  BETA CANDIDATE ON BRANCH '$branch'" -ForegroundColor Yellow
+    Write-Host "  ================================================================" -ForegroundColor Yellow
+    Write-Host "  Beta uses an isolated save store and may build without the generic" -ForegroundColor Yellow
+    Write-Host "  work-slice prompt. The later PUBLISHABLE verdict still requires a" -ForegroundColor Yellow
+    Write-Host "  clean tree and HEAD contained by this branch's matching origin ref." -ForegroundColor Yellow
+    Write-Host ""
 }
 
 $sha     = (git rev-parse --short HEAD 2>$null)
@@ -60,11 +70,15 @@ $full    = (git rev-parse HEAD 2>$null)
 $subject = (git log -1 --pretty=%s 2>$null)
 $dirty   = (git status --porcelain 2>$null)
 
-# Is this commit on the remote? If not, the build is not recoverable by anyone else.
-git rev-parse --verify --quiet "origin/combat-vision" *> $null
+# Is this commit on this branch's matching origin ref? A clean build that lives
+# only locally is not recoverable by anyone else, and a different branch says
+# nothing about whether this candidate was pushed.
+$remoteBranch = "origin/$branch"
+git rev-parse --verify --quiet "refs/remotes/$remoteBranch" *> $null
+$remoteExists = ($LASTEXITCODE -eq 0)
 $pushed = $false
-if ($LASTEXITCODE -eq 0) {
-    git merge-base --is-ancestor $full (git rev-parse origin/combat-vision) *> $null
+if ($remoteExists) {
+    git merge-base --is-ancestor $full (git rev-parse $remoteBranch) *> $null
     $pushed = ($LASTEXITCODE -eq 0)
 }
 
@@ -94,15 +108,17 @@ if ($LASTEXITCODE -ne 0 -or -not (Test-Path $place)) {
     Read-Host "  Enter"; exit 1
 }
 
-$profileLine = Select-String -Path "src/shared/Config.luau" -Pattern '^Config\.Profile\s*=\s*"([a-z]+)"' | Select-Object -First 1
-$prof = if ($profileLine) { $profileLine.Matches[0].Groups[1].Value } else { "unknown" }
 $hash = (Get-FileHash $place -Algorithm SHA256).Hash
 $size = (Get-Item $place).Length
 
 # --- the verdict ------------------------------------------------------------
 $blockers = @()
 if ($dirty)   { $blockers += "working tree has uncommitted changes -- this build matches NO commit" }
-if (-not $pushed) { $blockers += "commit $sha is not on origin/combat-vision -- nobody else could rebuild it" }
+if (-not $remoteExists) {
+    $blockers += "matching remote ref $remoteBranch does not exist -- nobody else could rebuild this branch"
+} elseif (-not $pushed) {
+    $blockers += "commit $sha is not contained by $remoteBranch -- nobody else could rebuild this candidate"
+}
 
 Line
 if ($blockers.Count -eq 0) {
@@ -115,17 +131,25 @@ if ($blockers.Count -eq 0) {
 }
 Line
 Write-Host "    branch   $branch" -NoNewline
-if ($branch -eq "main") { Write-Host "   (the game as it stands)" -ForegroundColor Green } else { Write-Host "   (A WORK BRANCH -- not the whole game)" -ForegroundColor Yellow }
+if ($branch -eq "main") { Write-Host "   (the game as it stands)" -ForegroundColor Green }
+elseif ($prof -eq "beta") { Write-Host "   (BETA CANDIDATE -- final clean+matching-origin verdict decides deployability)" -ForegroundColor Yellow }
+else { Write-Host "   (A WORK BRANCH -- not the whole game)" -ForegroundColor Yellow }
 Write-Host "    commit   $sha  $subject"
 Write-Host "    profile  $prof" -NoNewline
-if ($prof -eq "development") { Write-Host "   (test tuning -- NOT what players get)" -ForegroundColor Yellow } else { Write-Host "" }
+if ($prof -eq "beta") { Write-Host "   (restricted tester candidate -- isolated beta saves)" -ForegroundColor Yellow }
+elseif ($prof -eq "development") { Write-Host "   (local test tuning -- NOT for testers or public players)" -ForegroundColor Yellow }
+else { Write-Host "" }
 Write-Host "    sha256   $($hash.Substring(0,32))"
 Write-Host "    size     $size bytes, built just now from HEAD"
 Write-Host "    studio   none was running; this file was untouched by Studio"
 Line
 Write-Host ""
 Write-Host "  To play:    press F5"
-Write-Host "  To publish: File > Publish to Roblox  (update Xianxia Combat Simulator)"
+if ($prof -eq "beta") {
+    Write-Host "  To publish: File > Publish to Roblox  (restricted Xianxia Combat Simulator beta only)"
+} else {
+    Write-Host "  To publish: File > Publish to Roblox  (update Xianxia Combat Simulator)"
+}
 Write-Host ""
 Write-Host "  1-5 cast   5 movement   Shift+n swap   L picker   T lock   B breakthrough"
 Write-Host "  /dummy stationary lowgold   /dummy caster ahead   /dummy clear"

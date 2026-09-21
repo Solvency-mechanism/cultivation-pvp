@@ -70,7 +70,11 @@ if ($dirty) {
     Write-Output "  !! WORKING TREE IS DIRTY -- this build contains uncommitted changes."
     Write-Output "  !! Whatever you publish will not correspond to any commit."
 }
-if ($profile -ne "release") {
+if ($profile -eq "beta") {
+    Write-Output ""
+    Write-Output "  !! BETA CANDIDATE: accelerated tester tuning and an isolated beta DataStore."
+    Write-Output "  !! Publish only to the restricted tester experience; do not make it public."
+} elseif ($profile -ne "release") {
     Write-Output ""
     Write-Output "  !! PROFILE: $($profile.ToUpper()) -- tuning is deliberately wrong for balance."
     Write-Output "  !! NOT FOR PLAYERS. Set Config.Profile = `"release`" to ship."

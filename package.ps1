@@ -1,5 +1,5 @@
 <#
-    Package a release build.
+    Package a build candidate.
 
     Runs the full gate first and refuses to package if any part of it fails,
     because a build that has not passed the gate is not a build worth keeping.
@@ -33,7 +33,7 @@ if (-not $SkipGate) {
     if ($LASTEXITCODE -ne 0) { throw "stylua found unformatted files" }
 
     Write-Output "--- tests"
-    foreach ($suite in @("compile", "wiring", "progression", "auranodes", "combat", "interface", "volcano", "volcano-integration", "volcano-world", "cascade-world", "cascade-node-visual")) {
+    foreach ($suite in @("compile", "wiring", "progression", "auranodes", "combat", "interface", "volcano", "volcano-integration", "volcano-world", "cascade-world", "cascade-node-visual", "treasures", "treasure-world", "beta-profile")) {
         lune run "tests/$suite.test"
         if ($LASTEXITCODE -ne 0) { throw "$suite suite failed" }
     }
@@ -61,12 +61,19 @@ $out = "dist/cultivation-pvp-$Version.rbxlx"
 rojo build default.project.json --output $out
 if ($LASTEXITCODE -ne 0) { throw "rojo build failed" }
 
-# The tuning profile is part of the artifact's identity. A development build
-# is a legitimate thing to package; one that ships to players by accident is
-# not, so the receipt says which it is and the console says so loudly.
+# The tuning profile is part of the artifact's identity. A beta build is a
+# restricted tester candidate, never public balance evidence; development is
+# local throughput only. The receipt makes that distinction visible.
 $profileLine = (Select-String -Path "src/shared/Config.luau" -Pattern '^Config\.Profile\s*=\s*"([a-z]+)"' | Select-Object -First 1)
 $profile = if ($profileLine) { $profileLine.Matches[0].Groups[1].Value } else { "unknown" }
-if ($profile -ne "release") {
+$profileNote = ""
+if ($profile -eq "beta") {
+    $profileNote = " -- restricted tester candidate; accelerated tuning and isolated beta saves"
+    Write-Output ""
+    Write-Output "  !! BETA CANDIDATE: publish only to the restricted tester experience."
+    Write-Output "  !! Do not treat beta results as public-balance measurements."
+} elseif ($profile -ne "release") {
+    $profileNote = " -- NOT FOR PLAYERS"
     Write-Output ""
     Write-Output "  !! PROFILE: $($profile.ToUpper()) -- tuning is deliberately wrong for balance."
     Write-Output "  !! This artifact is NOT FOR PLAYERS. Set Config.Profile = `"release`" to ship."
@@ -84,8 +91,8 @@ built:   $(Get-Date -Format "yyyy-MM-dd HH:mm:ss K")
 file:    $(Split-Path $out -Leaf)
 size:    $size KB
 sha256:  $hash
-profile: $profile$(if ($profile -ne "release") { "  -- NOT FOR PLAYERS" })
-gate:    $(if ($SkipGate) { "SKIPPED -- not a release build" } else { "passed" })
+profile: $profile$profileNote
+gate:    $(if ($SkipGate) { "SKIPPED BY REQUEST" } else { "passed" })
 "@ | Set-Content -Path "dist/$([System.IO.Path]::GetFileNameWithoutExtension($out)).txt" -Encoding utf8
 
 Write-Output ""
