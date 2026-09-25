@@ -80,6 +80,7 @@ to what was written.
 
 ```sh
 lune run tests/progression.test     # 58 assertions
+lune run tests/dice.test            # the die and scales
 lune run tests/auranodes.test       # 88 assertions
 lune run tests/combat.test          # 119 assertions
 lune run tests/interface.test       # 97 assertions -- HUD geometry, no Studio needed

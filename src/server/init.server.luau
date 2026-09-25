@@ -9,6 +9,7 @@ local AwarenessService = require(script.AwarenessService)
 local CombatService = require(script.CombatService)
 local Config = require(ReplicatedStorage.Shared.Config)
 local CultivationService = require(script.CultivationService)
+local DiceService = require(script.DiceService)
 local DummyService = require(script.DummyService)
 local NodeService = require(script.NodeService)
 local NpcService = require(script.NpcService)
@@ -83,6 +84,9 @@ startService("DummyService", DummyService.start)
 	with a start that init.server never requires. ]]
 startService("NpcService", NpcService.start)
 startService("AwarenessService", AwarenessService.start)
+--[[ The die. Pure input handling on its own remote; it writes cultivation
+	state only through CultivationService.updateState, so it has no tick. ]]
+startService("DiceService", DiceService.start)
 
 --[[ Joining yields on the data store, so everything downstream of cultivation
 	state has to tolerate a player who does not have one yet. CombatService and

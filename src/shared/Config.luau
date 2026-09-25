@@ -420,6 +420,36 @@ Config.Core = {
 	floorTrickleFraction = 0.002,
 }
 
+--[[ The die, and scales -- forged mana.
+
+	Every cultivator carries one basic die. A roll pays its face in scales
+	(face x scalesPerPip), and scales do two jobs: they are the currency any
+	later shop, trade or offering will price in, and they can be refined
+	straight into cultivation progress anywhere, off every node.
+
+	sides -- 6 today. Kept as data so a better die is an item that edits one
+		number, not a new mechanic.
+	cooldownSeconds -- the whole economy rests on this: the hotkey is free to
+		press, so the server clock is the only thing standing between a player
+		and infinite money. 6s pays ~0.58 scales/s on a fair d6.
+	refineBatch / progressPerScale -- refining spends scales in fixed batches,
+		the way purifying spends mana in batches. 1.5 progress per scale puts
+		a roll-every-cooldown player at ~0.9 progress/s, roughly the value of
+		bare open ground (BaseCycleRate 1.0). It is a trickle that works
+		anywhere, not a substitute for a node -- and it is progress, so it
+		stops at the stage ceiling like every other source; only a catalyst
+		breaks that.
+
+	None of these are balance rulings yet. They are first numbers, sized
+	against cycling so the die can neither be ignored nor replace the map. ]]
+Config.Dice = {
+	sides = 6,
+	scalesPerPip = 1,
+	cooldownSeconds = 6,
+	refineBatch = 10,
+	progressPerScale = 1.5,
+}
+
 --[[
 	Shared technique pool. Themed paths are deferred, so every player draws
 	from this same pool -- which is exactly the point: it isolates whether the
@@ -1341,6 +1371,11 @@ if Config.Profile == "development" then
 		you want when the job is "press all twelve of these and watch what
 		happens". This is the number the human asked for by name. ]]
 	Config.Combat.auraRegenFraction = 0.60 -- release 0.06
+
+	--[[ The die, faster, so the roll -> refine loop can be exercised in a few
+		minutes rather than waited on. Same throughput-not-balance rule as
+		everything else in this block. ]]
+	Config.Dice.cooldownSeconds = 1.5 -- release 6
 
 	--[[ Cross-bracket combat, per bracket-tone.md. The human's own words
 		called this temporary; it stays behind the profile rather than

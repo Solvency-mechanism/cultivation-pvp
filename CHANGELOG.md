@@ -5,6 +5,42 @@ All names in this project are placeholders, including the title.
 Versions are dated and describe what was **observed working**, not what was
 written. Anything unverified is listed as unverified.
 
+## dice-and-scales — 2026-09-25 (branch `feat/dice-scales`)
+
+**Written and gated, not yet played.** Nothing below has been observed on a
+live client; the first Studio session should amend this entry.
+
+### What was added
+
+- **A basic d6 on every cultivator.** `R` rolls; the server picks the face
+  (`Random`), enforces the cooldown on its own clock and pays
+  `face × scalesPerPip` scales. The client sends one word and can name no
+  face, amount or time. Rolling is allowed at the refinement ceiling —
+  scales are currency first, so a player waiting on a catalyst still banks.
+- **Scales (forged mana)**, a new persisted field on `Progression.State`:
+  in `newState`, `clone`, `toStore` and `sanitizeState`, so the closed-set
+  check in `tests/wiring.test` covers it. A pre-dice save loads with zero.
+  A death does not touch scales; `applyLoss` costs refinement, not the purse.
+- **`C` refines** one batch (10) into `10 × 1.5` progress through
+  `addProgress`, so rollover and the ceiling clamp are the same rule as
+  cycling. Refuses at the ceiling and when short, with a sentence either way.
+- **A HUD chip**, its own script (`DiceClient`) to keep `init.client` under
+  the 200-local cap: die face with a tumble that lands on the server's roll,
+  scale count, cooldown countdown. Bottom-left on desktop, upper-right on
+  touch (thumbstick and jump own the bottom corners); the die is the tap
+  target for rolling.
+- `tests/dice.test`: fairness over 60,000 rolls, payout, cooldown, refine
+  refusals, tier rollover, death, save round-trip and corrupt saves. Release
+  pacing (~0.9 progress/s, below a common node) is asserted only under the
+  release profile; development drops the cooldown to 1.5s for throughput.
+
+### Unverified
+
+- The chip's placement against the real HUD on desktop and phone.
+- Whether `R`/`C` collide with anything a player has bound.
+- Whether a 6s roll feels like a rhythm or a chore — the first pacing
+  question this system has, and the one only a person can answer.
+
 ## bracket-and-npc build — 2026-09-12, early (deploy HEAD: the commit carrying this entry, on `13b1e2a`)
 
 Built for two friends at different stages to be able to fight at all. Still

@@ -35,6 +35,8 @@ if it has them, so a Baseplate place will not end up with two floors.
 
 **Controls:** `1-4` fire the four loadout slots (striker, enforcer, forger,
 ruler). `B` attempts a breakthrough. Walk into a glowing sphere to cycle.
+`R` rolls the die for scales (forged mana); `C` refines 10 scales into
+cultivation progress. Both are server-validated; the chip sits bottom-left.
 
 ## The architectural rule that matters
 
@@ -221,6 +223,7 @@ label its keys.
 
 ```sh
 lune run tests/progression.test
+lune run tests/dice.test
 lune run tests/auranodes.test
 lune run tests/combat.test
 selene src tests

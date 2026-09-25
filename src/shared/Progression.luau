@@ -52,6 +52,7 @@ export type State = {
 	tier: number,
 	progress: number,
 	catalysts: number,
+	scales: number,
 	core: Core,
 	expedition: Expedition,
 }
@@ -111,6 +112,7 @@ local function clone(state: State): State
 		tier = state.tier,
 		progress = state.progress,
 		catalysts = state.catalysts,
+		scales = state.scales,
 		core = cloneCore(state.core),
 		expedition = cloneExpedition(state.expedition),
 	}
@@ -133,6 +135,7 @@ function Progression.newState(): State
 		tier = 1,
 		progress = 0,
 		catalysts = 0,
+		scales = 0,
 		core = emptyCore(),
 		expedition = emptyExpedition(),
 	}
@@ -170,6 +173,13 @@ function Progression.sanitizeState(config: any, raw: any): State
 	local catalysts = tonumber(raw.catalysts)
 	if catalysts and catalysts == catalysts and catalysts < math.huge and catalysts > 0 then
 		state.catalysts = math.floor(catalysts)
+	end
+
+	-- Scales are whole units of forged mana. A save written before the die
+	-- existed has no key at all and lands on the zero newState() gave it.
+	local scales = tonumber(raw.scales)
+	if scales and scales == scales and scales < math.huge and scales > 0 then
+		state.scales = math.floor(scales)
 	end
 
 	--[[ Absorbed key by key into the zeros newState() already gave state.core,
@@ -249,6 +259,7 @@ function Progression.toStore(state: State): { [string]: any }
 		tier = state.tier,
 		progress = state.progress,
 		catalysts = state.catalysts,
+		scales = state.scales,
 		expedition = cloneExpedition(state.expedition),
 		core = {
 			raw = {
@@ -523,6 +534,27 @@ function Progression.grantCatalysts(state: State, count: number): State
 	local new = clone(state)
 	new.catalysts += count
 	return new
+end
+
+--[[ Scales: forged mana, the currency a die roll pays out. Whole units only,
+	and never touched by applyLoss -- a death costs refinement, not the purse. ]]
+function Progression.grantScales(state: State, count: number): State
+	assert(count >= 0 and count == math.floor(count), "scale grants are whole and non-negative")
+	local new = clone(state)
+	new.scales += count
+	return new
+end
+
+--[[ Refuses outright (state unchanged, ok = false) rather than spending part
+	of a price the purse cannot cover -- the same contract spendAura keeps. ]]
+function Progression.spendScales(state: State, count: number): (State, boolean)
+	assert(count >= 0 and count == math.floor(count), "scale spends are whole and non-negative")
+	if count > state.scales then
+		return clone(state), false
+	end
+	local new = clone(state)
+	new.scales -= count
+	return new, true
 end
 
 --[[ Players only fight inside their own stage. Three live brackets keeps a

@@ -44,6 +44,12 @@
         },
         "VolcanoFeedback": {
           "$className": "RemoteEvent"
+        },
+        "DiceAction": {
+          "$className": "RemoteEvent"
+        },
+        "DieRolled": {
+          "$className": "RemoteEvent"
         }
       },
       "Packages": {

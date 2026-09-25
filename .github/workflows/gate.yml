@@ -30,6 +30,7 @@ jobs:
           lune run tests/compile.test
           lune run tests/wiring.test
           lune run tests/progression.test
+          lune run tests/dice.test
           lune run tests/auranodes.test
           lune run tests/combat.test
           lune run tests/interface.test
